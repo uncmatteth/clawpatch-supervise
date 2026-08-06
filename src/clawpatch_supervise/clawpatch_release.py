@@ -3195,6 +3195,7 @@ def _resume_stopped_attempt(
                 "checkpoint-owned paths."
             )
         valid_bases = {current_head, temporary_commit}
+        temporary_tree = _git_text(repo, ["git", "rev-parse", f"{temporary_commit}^{{tree}}"])
         for attempt in inspected["patchAttempts"]:
             if not isinstance(attempt, dict) or attempt.get("status") not in {
                 "applied",
@@ -3214,8 +3215,32 @@ def _resume_stopped_attempt(
                 and all(isinstance(path, str) and path for path in files_changed)
                 and set(files_changed).issubset(owned_paths)
                 and isinstance(git_record, dict)
-                and git_record.get("baseSha") in valid_bases
             ):
+                attempt_base = git_record.get("baseSha")
+                if not isinstance(attempt_base, str):
+                    continue
+                if attempt_base not in valid_bases:
+                    if not re.fullmatch(r"[0-9a-f]{40}", attempt_base):
+                        continue
+                    try:
+                        attempt_iteration_paths = _verify_iteration_commit(
+                            repo,
+                            finding_id=finding_id,
+                            original_head=current_head,
+                            temporary_commit=attempt_base,
+                            require_current=False,
+                        )
+                        attempt_tree = _git_text(
+                            repo, ["git", "rev-parse", f"{attempt_base}^{{tree}}"]
+                        )
+                    except SafetyError:
+                        continue
+                    if (
+                        not attempt_iteration_paths
+                        or not set(attempt_iteration_paths).issubset(owned_paths)
+                        or attempt_tree != temporary_tree
+                    ):
+                        continue
                 _validate_attempt_paths_syntax(list(files_changed))
                 candidates.append(attempt)
         if not candidates:

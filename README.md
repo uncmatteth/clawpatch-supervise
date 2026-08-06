@@ -191,6 +191,10 @@ When a checkpoint moves from an older Manageroo installation, the supervisor upg
 source fingerprint only after the legacy algorithm still proves the exact current files. A
 mismatch remains a safety stop; migrated state never grants ownership to changed source.
 
+Repeated local iterations can create different temporary commit IDs for the same repair. Resume
+accepts an older attempt boundary only when its finding, parent, owned paths, and complete Git tree
+independently match the checkpoint; a merely similar or different repair remains a safety stop.
+
 ## Manageroo and the standalone supervisor
 
 This is part of the [Uncle Matt's Project Manageroo](https://github.com/uncmatteth/Uncle-Matts-Project-Manageroo) system. It was separated into its own repository and process so it can run outside the repository it repairs—including when the repository being repaired is Manageroo itself.

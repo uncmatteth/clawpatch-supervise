@@ -2024,6 +2024,139 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    def test_stopped_chain_accepts_verified_tree_identical_prior_iteration_boundary(
+        self,
+        show_finding,
+        _gates,
+        push_and_verify,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            source.write_text("checkpoint-owned repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "manageroo clawpatch iteration: fnd_one"],
+                cwd=repo,
+                check=True,
+            )
+            prior_temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(
+                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
+            )
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "clawpatch-supervise iteration: fnd_one",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            checkpoint_temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            self.assertNotEqual(prior_temporary_commit, checkpoint_temporary_commit)
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "rev-parse", f"{prior_temporary_commit}^{{tree}}"],
+                    cwd=repo,
+                    text=True,
+                ).strip(),
+                subprocess.check_output(
+                    ["git", "rev-parse", f"{checkpoint_temporary_commit}^{{tree}}"],
+                    cwd=repo,
+                    text=True,
+                ).strip(),
+            )
+            subprocess.run(
+                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
+            )
+            source.write_text("different repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "clawpatch fix: fnd_one"],
+                cwd=repo,
+                check=True,
+            )
+            mismatched_temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(
+                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
+            )
+            source.write_text("checkpoint-owned repair\n", encoding="utf-8")
+            checkpoint = _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=original_head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                temporary_commit=checkpoint_temporary_commit,
+            )
+            show_finding.return_value = {
+                "finding": {"id": "fnd_one", "status": "open"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_no_edit",
+                        "status": "failed",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": [],
+                        "git": {"baseSha": prior_temporary_commit},
+                    },
+                    {
+                        "patchAttemptId": "pat_different_tree",
+                        "status": "failed",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": [],
+                        "git": {"baseSha": mismatched_temporary_commit},
+                    },
+                    {
+                        "patchAttemptId": "pat_malformed_boundary",
+                        "status": "failed",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": [],
+                        "git": {"baseSha": ["not", "a", "sha"]},
+                    },
+                ],
+            }
+
+            record, pushed = _resume_stopped_attempt(
+                repo,
+                checkpoint,
+                env={},
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                require_project_gates=False,
+            )
+
+        self.assertTrue(record["resumed"])
+        self.assertEqual(record["patch_attempt"], "pat_no_edit")
+        self.assertFalse(pushed)
+        push_and_verify.assert_not_called()
+
+    @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
     def test_stopped_revalidation_progress_can_extend_temporary_commit_paths(
         self,
         show_finding,
