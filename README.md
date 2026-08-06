@@ -180,6 +180,10 @@ Default state homes are:
 
 `--resume-stopped` accepts only an exact matching checkpoint. It does not mean “ignore the last error.”
 
+When a checkpoint moves from an older Manageroo installation, the supervisor upgrades its
+source fingerprint only after the legacy algorithm still proves the exact current files. A
+mismatch remains a safety stop; migrated state never grants ownership to changed source.
+
 ## Manageroo and the standalone supervisor
 
 This is part of the [Uncle Matt's Project Manageroo](https://github.com/uncmatteth/Uncle-Matts-Project-Manageroo) system. It was separated into its own repository and process so it can run outside the repository it repairs—including when the repository being repaired is Manageroo itself.

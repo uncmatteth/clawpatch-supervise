@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import multiprocessing
 import os
@@ -384,6 +385,132 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 _load_release_progress(repo, state_root=current_root), expected
             )
             self.assertFalse((legacy_root / "clawpatch-release-progress.json").exists())
+
+    def test_external_progress_upgrades_a_verified_legacy_source_fingerprint(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("interrupted repair\n", encoding="utf-8")
+
+            legacy_home = root / "manageroo-state"
+            legacy_root = _repository_state_root(legacy_home, repo)
+            current_root = root / "canonical" / "repositories" / "current"
+            checkpoint = _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                state_root=legacy_root,
+            )
+            modern_fingerprint = checkpoint["owned_source_fingerprint"]
+            legacy_state = _source_state_fingerprint(repo)
+            legacy_state.pop("gitlinks")
+            legacy_fingerprint = hashlib.sha256(
+                json.dumps(
+                    legacy_state,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            self.assertNotEqual(legacy_fingerprint, modern_fingerprint)
+
+            progress_path = legacy_root / "clawpatch-release-progress.json"
+            checkpoint["version"] = 4
+            checkpoint["owned_source_fingerprint"] = legacy_fingerprint
+            progress_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+            with patch(
+                "clawpatch_supervise.clawpatch_release._legacy_external_state_homes",
+                return_value=(legacy_home,),
+            ):
+                _migrate_legacy_external_progress(repo, state_root=current_root)
+
+            migrated = _load_release_progress(repo, state_root=current_root)
+            self.assertEqual(migrated["owned_source_fingerprint"], modern_fingerprint)
+            self.assertFalse(progress_path.exists())
+
+    def test_external_progress_upgrades_canonical_legacy_fingerprint_only_after_verification(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("interrupted repair\n", encoding="utf-8")
+
+            current_root = root / "canonical" / "repositories" / "current"
+            checkpoint = _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                state_root=current_root,
+            )
+            modern_fingerprint = checkpoint["owned_source_fingerprint"]
+            legacy_state = _source_state_fingerprint(repo)
+            legacy_state.pop("gitlinks")
+            checkpoint["version"] = 4
+            legacy_fingerprint = hashlib.sha256(
+                json.dumps(
+                    legacy_state,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            ).hexdigest()
+            checkpoint["owned_source_fingerprint"] = legacy_fingerprint
+            progress_path = current_root / "clawpatch-release-progress.json"
+            progress_path.write_text(json.dumps(checkpoint), encoding="utf-8")
+
+            source.write_text("later unrelated change\n", encoding="utf-8")
+            with patch(
+                "clawpatch_supervise.clawpatch_release._legacy_external_state_homes",
+                return_value=(),
+            ):
+                _migrate_legacy_external_progress(repo, state_root=current_root)
+
+            preserved = _load_release_progress(repo, state_root=current_root)
+            self.assertEqual(preserved["version"], 4)
+            self.assertEqual(preserved["owned_source_fingerprint"], legacy_fingerprint)
+
+            source.write_text("interrupted repair\n", encoding="utf-8")
+            with patch(
+                "clawpatch_supervise.clawpatch_release._legacy_external_state_homes",
+                return_value=(),
+            ):
+                _migrate_legacy_external_progress(repo, state_root=current_root)
+
+            migrated = _load_release_progress(repo, state_root=current_root)
+            self.assertEqual(migrated["version"], 6)
+            self.assertEqual(migrated["owned_source_fingerprint"], modern_fingerprint)
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._next_finding")

@@ -1055,6 +1055,24 @@ def _owned_source_fingerprint(repo: Path, paths: list[str]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _legacy_owned_source_fingerprint(repo: Path, paths: list[str]) -> str:
+    exact_paths = sorted(set(paths))
+    if not exact_paths or _source_paths(repo) != exact_paths:
+        return ""
+    state = _source_state_fingerprint(repo)
+    # Legacy proofs did not safely bind nested Git content or untracked symlinks.
+    if state["gitlinks"] or any((repo / path).is_symlink() for path in state["untracked"]):
+        return ""
+    state.pop("gitlinks")
+    payload = json.dumps(
+        state,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
 def _revalidation_payload(
     repo: Path,
     finding_id: str,
@@ -1374,6 +1392,22 @@ def _migrate_legacy_external_progress(repo: Path, *, state_root: Path) -> None:
     legacy_roots.extend(
         _repository_state_root(home, repo) for home in _legacy_external_state_homes()
     )
+
+    def upgrade_fingerprint(progress: dict[str, Any]) -> dict[str, Any]:
+        if progress.get("version") not in {4, 5}:
+            return progress
+        owned_paths = list(progress["owned_paths"])
+        recorded = str(progress.get("owned_source_fingerprint", ""))
+        current = _owned_source_fingerprint(repo, owned_paths)
+        if not recorded or not current or recorded == current:
+            return progress
+        if recorded != _legacy_owned_source_fingerprint(repo, owned_paths):
+            return progress
+        upgraded = dict(progress)
+        upgraded["version"] = RELEASE_PROGRESS_VERSION
+        upgraded["owned_source_fingerprint"] = current
+        return upgraded
+
     legacy_records: list[tuple[Path, dict[str, Any]]] = []
     for legacy_root in dict.fromkeys(legacy_roots):
         legacy_path = _release_progress_path(repo, state_root=legacy_root)
@@ -1381,7 +1415,16 @@ def _migrate_legacy_external_progress(repo: Path, *, state_root: Path) -> None:
             continue
         legacy = _load_release_progress(repo, state_root=legacy_root)
         if legacy is not None:
-            legacy_records.append((legacy_root, legacy))
+            legacy_records.append((legacy_root, upgrade_fingerprint(legacy)))
+    current_path = _release_progress_path(repo, state_root=state_root)
+    current = (
+        _load_release_progress(repo, state_root=state_root) if current_path.is_file() else None
+    )
+    upgraded_current = upgrade_fingerprint(current) if current is not None else None
+    if current is not None and upgraded_current != current:
+        atomic_write_json(current_path, upgraded_current)
+        if _load_release_progress(repo, state_root=state_root) != upgraded_current:
+            raise SafetyError("External Clawpatch fingerprint migration could not be verified.")
     if not legacy_records:
         return
     legacy = legacy_records[0][1]
@@ -1390,7 +1433,6 @@ def _migrate_legacy_external_progress(repo: Path, *, state_root: Path) -> None:
             "External Clawpatch progress exists in multiple legacy state locations "
             "with different ownership records."
         )
-    current_path = _release_progress_path(repo, state_root=state_root)
     if current_path.is_file():
         current = _load_release_progress(repo, state_root=state_root)
         if current != legacy:
