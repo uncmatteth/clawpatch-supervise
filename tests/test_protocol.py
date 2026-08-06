@@ -67,12 +67,14 @@ class ClawpatchProtocolTests(unittest.TestCase):
             decide_repair_transition(revalidation_outcome="open").action,
             RepairAction.PRESERVE_AND_CONTINUE,
         )
-        for outcome in ("uncertain", "false-positive"):
-            with self.subTest(outcome=outcome):
-                self.assertEqual(
-                    decide_repair_transition(revalidation_outcome=outcome).action,
-                    RepairAction.STOP_TERMINAL,
-                )
+        self.assertEqual(
+            decide_repair_transition(revalidation_outcome="uncertain").action,
+            RepairAction.STOP_TERMINAL,
+        )
+        self.assertEqual(
+            decide_repair_transition(revalidation_outcome="false-positive").action,
+            RepairAction.DISCARD_AND_CONTINUE,
+        )
 
     def test_policy_rejects_ambiguous_or_unknown_events(self):
         with self.assertRaises(ValueError):

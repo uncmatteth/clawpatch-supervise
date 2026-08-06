@@ -2096,6 +2096,189 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         review_all.assert_not_called()
         self.assertIsNone(_load_release_progress(repo))
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_resume_consumes_false_positive_checkpoint_that_returned_to_original_tree(
+        self,
+        _version,
+        _processes,
+        show_finding,
+        resume_stopped,
+        json_clawpatch,
+        review_all,
+        next_finding,
+        execute_fix,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("correct original\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("incorrect attempted repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "clawpatch-supervise iteration: fnd_false",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(
+                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
+            )
+            source.write_text("correct original\n", encoding="utf-8")
+            _write_release_progress(
+                repo,
+                finding_id="fnd_false",
+                branch=branch,
+                head_before=original_head,
+                phase="stopped",
+                owned_paths=[],
+                temporary_commit=temporary_commit,
+                last_action=RepairAction.STOP_TERMINAL,
+            )
+            show_finding.return_value = {
+                "finding": {"id": "fnd_false", "status": "false-positive"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_false",
+                        "status": "applied",
+                        "findingIds": ["fnd_false"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": original_head},
+                    }
+                ],
+            }
+            json_clawpatch.return_value = {
+                "activeLocks": 0,
+                "lockFiles": 0,
+                "openFindings": 0,
+            }
+            next_finding.return_value = (None, {"finding": None})
+            final_closure.return_value = {"pushed": False}
+
+            report = release_sweep(repo, apply=True, branch="current")
+            final_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=repo, text=True
+            )
+
+        self.assertEqual(final_head, original_head)
+        self.assertEqual(status, "")
+        self.assertEqual(report["finding_count"], 0)
+        self.assertEqual(report["false_positive_count"], 1)
+        self.assertEqual(report["false_positives"][0]["finding_id"], "fnd_false")
+        self.assertEqual(report["false_positives"][0]["temporary_commit"], temporary_commit)
+        self.assertEqual(next_finding.call_count, 1)
+        execute_fix.assert_not_called()
+        resume_stopped.assert_not_called()
+        review_all.assert_not_called()
+        self.assertIsNone(_load_release_progress(repo))
+
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_resume_discards_exact_owned_false_positive_source_and_advances(
+        self,
+        _version,
+        _processes,
+        show_finding,
+        _gates,
+        json_clawpatch,
+        review_all,
+        next_finding,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("correct original\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("incorrect attempted repair\n", encoding="utf-8")
+            _write_release_progress(
+                repo,
+                finding_id="fnd_false",
+                branch=branch,
+                head_before=head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                last_action=RepairAction.DISCARD_AND_CONTINUE,
+            )
+            show_finding.return_value = {
+                "finding": {"id": "fnd_false", "status": "false-positive"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_false",
+                        "status": "applied",
+                        "findingIds": ["fnd_false"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": head},
+                    }
+                ],
+            }
+            json_clawpatch.return_value = {
+                "activeLocks": 0,
+                "lockFiles": 0,
+                "openFindings": 0,
+            }
+            next_finding.return_value = (None, {"finding": None})
+            final_closure.return_value = {"pushed": False}
+
+            report = release_sweep(repo, apply=True, branch="current")
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=repo, text=True
+            )
+            restored = source.read_text(encoding="utf-8")
+
+        self.assertEqual(restored, "correct original\n")
+        self.assertEqual(status, "")
+        self.assertEqual(report["false_positive_count"], 1)
+        self.assertEqual(report["false_positives"][0]["finding_id"], "fnd_false")
+        self.assertEqual(report["false_positives"][0]["discarded_paths"], ["app.py"])
+        self.assertEqual(next_finding.call_count, 1)
+        review_all.assert_not_called()
+        self.assertIsNone(_load_release_progress(repo))
+
     @patch("clawpatch_supervise.clawpatch_release._show_finding")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
@@ -2769,6 +2952,177 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             raised.exception.outcome,
             "revalidation-command-failed-with-source-progress",
         )
+
+    @patch("clawpatch_supervise.clawpatch_release._revalidation_payload")
+    def test_false_positive_revalidation_returns_clawpatch_terminal_payload(
+        self, revalidation_payload
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            source.write_text("candidate repair\n", encoding="utf-8")
+            payload = {
+                "finding": "fnd_one",
+                "outcome": "false-positive",
+                "reasoning": "the pinned dependency proves the original code is correct",
+            }
+            revalidation_payload.return_value = (
+                ["clawpatch", "revalidate", "--finding", "fnd_one", "--json"],
+                payload,
+                "false-positive",
+            )
+
+            result = _revalidate(
+                repo,
+                "fnd_one",
+                env={},
+                expected_paths=["app.py"],
+            )
+
+        self.assertEqual(result, payload)
+
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    def test_false_positive_discards_exact_multi_iteration_repair_and_advances(
+        self, execute_fix
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            state_root = root / "state"
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            def fix_side_effect(*_args, **_kwargs):
+                if execute_fix.call_count == 1:
+                    source.write_text("incorrect repair\n", encoding="utf-8")
+                    outcome = "open"
+                else:
+                    source.write_text("different incorrect repair\n", encoding="utf-8")
+                    outcome = "false-positive"
+                return (
+                    {
+                        "finding_id": "fnd_one",
+                        "files_changed": ["app.py"],
+                        "revalidation": {
+                            "finding": "fnd_one",
+                            "outcome": outcome,
+                        },
+                        "commit": "",
+                    },
+                    False,
+                )
+
+            execute_fix.side_effect = fix_side_effect
+            record, pushed, continuations = _process_finding_until_fixed(
+                repo,
+                "fnd_one",
+                inspected={"finding": {"id": "fnd_one", "status": "open"}},
+                env={},
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                state_root=state_root,
+                require_project_gates=False,
+            )
+            final_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=repo, text=True
+            )
+            checkpoint = _load_release_progress(repo, state_root=state_root)
+
+        self.assertEqual(execute_fix.call_count, 2)
+        self.assertEqual(record["revalidation"]["outcome"], "false-positive")
+        self.assertTrue(record["false_positive"])
+        self.assertEqual(record["discarded_paths"], ["app.py"])
+        self.assertEqual(record["files_changed"], [])
+        self.assertEqual(record["commit"], "")
+        self.assertEqual(continuations, 1)
+        self.assertFalse(pushed)
+        self.assertEqual(final_head, original_head)
+        self.assertEqual(status, "")
+        self.assertIsNone(checkpoint)
+
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    def test_false_positive_discards_exact_first_attempt_repair_and_advances(
+        self, execute_fix
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            state_root = root / "state"
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            def false_positive(*_args, **_kwargs):
+                source.write_text("incorrect repair\n", encoding="utf-8")
+                return (
+                    {
+                        "finding_id": "fnd_one",
+                        "files_changed": ["app.py"],
+                        "revalidation": {
+                            "finding": "fnd_one",
+                            "outcome": "false-positive",
+                        },
+                        "commit": "",
+                    },
+                    False,
+                )
+
+            execute_fix.side_effect = false_positive
+            record, pushed, continuations = _process_finding_until_fixed(
+                repo,
+                "fnd_one",
+                inspected={"finding": {"id": "fnd_one", "status": "open"}},
+                env={},
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                state_root=state_root,
+                require_project_gates=False,
+            )
+            final_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=repo, text=True
+            )
+
+        self.assertEqual(execute_fix.call_count, 1)
+        self.assertEqual(record["revalidation"]["outcome"], "false-positive")
+        self.assertTrue(record["false_positive"])
+        self.assertEqual(record["discarded_paths"], ["app.py"])
+        self.assertEqual(record["files_changed"], [])
+        self.assertEqual(record["commit"], "")
+        self.assertEqual(continuations, 0)
+        self.assertFalse(pushed)
+        self.assertEqual(final_head, original_head)
+        self.assertEqual(status, "")
 
     @patch("clawpatch_supervise.clawpatch_release._run_clawpatch")
     def test_codex_revalidation_refusal_is_same_finding_provider_failure(

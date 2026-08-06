@@ -44,7 +44,9 @@ LIFECYCLE = (
     "(with bounded read-only, workspace-write, and external trusted-host validation transitions) -> "
     "one combined exact-path final commit/push when authorized -> an open revalidation amends the "
     "local iteration and reenters the same finding without a cap; no-progress, unsupported, failed, "
-    "uncertain, or false-positive transitions stop with source changes intact -> "
+    "uncertain transitions stop with source changes intact; a ClawPatch-owned false-positive "
+    "restores only its exact supervisor-owned repair paths to the finding start tree, retires "
+    "the checkpoint, and advances; any ownership mismatch stops unchanged -> "
     "final open/uncertain closure -> rebuild generated ClawPatch state and repeat map plus complete "
     "review at the new HEAD after every nonempty generation -> COMPLETE only after a fresh full "
     "review generation finds zero findings; a repeated non-clean source tree stops as nonconvergent"
@@ -1150,10 +1152,11 @@ def _revalidate(
             outcome="revalidation-mutated-source",
             failure=classify_clawpatch_failure("revalidation", 23),
         )
-    if outcome not in {"fixed", "open"}:
+    if outcome not in {"fixed", "open", "false-positive"}:
         raise _UnresolvedFinding(
             f"phase: revalidation\ncommand: {shlex.join(argv)}\nfinding ID: {finding_id}\n"
-            f"exit code: 0\nfailed requirement: exact lowercase outcome fixed; received {outcome}\n"
+            "exit code: 0\nfailed requirement: exact lowercase outcome fixed, open, or "
+            f"false-positive; received {outcome}\n"
             f"changed source paths: {_source_paths(repo)}\n"
             f"output:\n{json.dumps(payload, sort_keys=True)}",
             finding_id=finding_id,
@@ -1586,6 +1589,87 @@ def _checkpoint_fixed_without_source(
         "patch_attempts": applied_attempts,
         "inspection": inspected,
         "head_before": current_head,
+    }
+
+
+def _checkpoint_false_positive_without_source(
+    repo: Path,
+    progress_record: dict[str, Any],
+    *,
+    env: dict[str, str],
+    progress: Callable[[dict[str, Any]], None] | None = None,
+    inspected: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if (
+        progress_record.get("phase") != "stopped"
+        or progress_record.get("owned_paths") != []
+        or progress_record.get("last_action")
+        not in {
+            RepairAction.STOP_TERMINAL.value,
+            RepairAction.DISCARD_AND_CONTINUE.value,
+        }
+        or _source_paths(repo)
+    ):
+        return None
+    finding_id = str(progress_record["finding_id"])
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    temporary_commit = str(progress_record.get("temporary_commit", ""))
+    if progress_record.get("head_before") != current_head or not temporary_commit:
+        return None
+    if inspected is None:
+        inspected = _show_finding(
+            repo,
+            finding_id,
+            env=env,
+            required_status=None,
+            progress=progress,
+            current=1,
+            total="?",
+        )
+    if inspected["finding"].get("status") != "false-positive":
+        return None
+    temporary_paths = _verify_iteration_commit(
+        repo,
+        finding_id=finding_id,
+        original_head=current_head,
+        temporary_commit=temporary_commit,
+        require_current=False,
+    )
+    if not temporary_paths:
+        raise SafetyError(
+            "A false-positive source-clean checkpoint requires a nonempty exact temporary "
+            "iteration commit."
+        )
+    matching_attempts = []
+    for attempt in inspected["patchAttempts"]:
+        if not isinstance(attempt, dict) or attempt.get("status") != "applied":
+            continue
+        git_record = attempt.get("git")
+        finding_ids = attempt.get("findingIds")
+        files_changed = attempt.get("filesChanged")
+        if (
+            isinstance(finding_ids, list)
+            and finding_id in finding_ids
+            and isinstance(files_changed, list)
+            and sorted(files_changed) == temporary_paths
+            and isinstance(git_record, dict)
+            and git_record.get("baseSha") in {current_head, temporary_commit}
+            and isinstance(attempt.get("patchAttemptId"), str)
+            and attempt["patchAttemptId"]
+        ):
+            matching_attempts.append(str(attempt["patchAttemptId"]))
+    if not matching_attempts:
+        raise SafetyError(
+            "A false-positive source-clean checkpoint requires an applied patch attempt bound "
+            "to the same finding, exact temporary paths, and Git boundary."
+        )
+    return {
+        "finding_id": finding_id,
+        "patch_attempts": matching_attempts,
+        "inspection": inspected,
+        "head_before": current_head,
+        "temporary_commit": temporary_commit,
+        "discarded_paths": temporary_paths,
     }
 
 
@@ -2560,6 +2644,51 @@ def _process_finding_until_fixed(
                 )
             attempt += 1
             continue
+        if revalidation_decision.action is RepairAction.DISCARD_AND_CONTINUE:
+            exact_repair_paths = {
+                str(path) for path in record.get("files_changed", []) if isinstance(path, str)
+            }
+            if temporary_commit:
+                exact_repair_paths.update(
+                    _paths_between(repo, original_head, temporary_commit)
+                )
+            stopped_paths = _stop_finding_iteration(
+                repo,
+                finding_id=finding_id,
+                branch=branch,
+                original_head=original_head,
+                temporary_commit=temporary_commit,
+                seen_states=seen_states,
+                state_root=state_root,
+                repair_action=RepairAction.DISCARD_AND_CONTINUE,
+            )
+            if not set(stopped_paths).issubset(exact_repair_paths):
+                raise SafetyError(
+                    "ClawPatch false-positive cleanup found source paths outside the exact "
+                    "supervisor-owned repair."
+                )
+            if stopped_paths:
+                _discard_checkpoint_owned_source(repo, stopped_paths)
+            _clear_release_progress(repo, state_root=state_root)
+            record["discarded_paths"] = sorted(exact_repair_paths)
+            record["files_changed"] = []
+            record["commit"] = ""
+            record["false_positive"] = True
+            if progress is not None:
+                progress(
+                    {
+                        "phase": "false-positive",
+                        "current": current,
+                        "total": total,
+                        "finding_id": finding_id,
+                        "commit": "",
+                        "detail": (
+                            "ClawPatch classified the finding false-positive; restored only "
+                            "the exact supervisor-owned repair paths and continued the queue"
+                        ),
+                    }
+                )
+            return record, pushed, continuations
         if revalidation_decision.action is not RepairAction.FINALIZE:
             _stop_finding_iteration(
                 repo,
@@ -2569,6 +2698,7 @@ def _process_finding_until_fixed(
                 temporary_commit=temporary_commit,
                 seen_states=seen_states,
                 state_root=state_root,
+                repair_action=revalidation_decision.action,
             )
             raise SafetyError("Clawpatch returned an unsupported revalidation outcome.")
         no_commit_required = not temporary_commit and not _source_paths(repo)
@@ -2828,7 +2958,7 @@ def _resume_stopped_attempt(
     )
     finding = inspected["finding"]
     finding_status = str(finding.get("status"))
-    if finding_status not in {"uncertain", "open", "fixed"}:
+    if finding_status not in {"uncertain", "open", "fixed", "false-positive"}:
         raise SafetyError(
             f"Stopped Clawpatch finding {finding_id} has unsupported status {finding_status!r}."
         )
@@ -3758,14 +3888,62 @@ def _release_sweep_locked(
                 current=1,
                 total="?",
             )
-            fixed_without_source = _checkpoint_fixed_without_source(
+            false_positive_without_source = _checkpoint_false_positive_without_source(
                 root,
                 durable_progress,
                 env=env,
                 progress=progress,
                 inspected=checkpoint_inspection,
             )
-            if fixed_without_source is not None:
+            if false_positive_without_source is not None:
+                finding_id = str(false_positive_without_source["finding_id"])
+                report["false_positives"].append(
+                    {
+                        "finding_id": finding_id,
+                        "inspection": false_positive_without_source["inspection"],
+                        "head_before": false_positive_without_source["head_before"],
+                        "temporary_commit": false_positive_without_source[
+                            "temporary_commit"
+                        ],
+                        "discarded_paths": list(
+                            false_positive_without_source["discarded_paths"]
+                        ),
+                        "patch_attempts": list(
+                            false_positive_without_source["patch_attempts"]
+                        ),
+                        "resumed": True,
+                    }
+                )
+                _clear_release_progress(root, state_root=state_root)
+                durable_progress = None
+                resumed_checkpoint = True
+                resumed_checkpoint_kind = "false-positive reverted iteration"
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "false-positive",
+                            "current": 1,
+                            "total": "?",
+                            "finding_id": finding_id,
+                            "commit": "",
+                            "detail": (
+                                "resumed false-positive checkpoint already returned exactly "
+                                "to its original source tree"
+                            ),
+                            "resumed": True,
+                        }
+                    )
+            else:
+                fixed_without_source = _checkpoint_fixed_without_source(
+                    root,
+                    durable_progress,
+                    env=env,
+                    progress=progress,
+                    inspected=checkpoint_inspection,
+                )
+            if false_positive_without_source is not None:
+                pass
+            elif fixed_without_source is not None:
                 finding_id = str(fixed_without_source["finding_id"])
                 record = {
                     "finding_id": finding_id,
@@ -3945,6 +4123,36 @@ def _release_sweep_locked(
                 resumed_phase = "fixed"
                 resumed_detail = (
                     "stopped attempt revalidated open, continued locally, then fixed"
+                )
+            elif resumed_outcome == "false-positive":
+                finding_id = str(resumed["finding_id"])
+                discarded_paths = sorted(str(path) for path in resumed["files_changed"])
+                if discarded_paths != _source_paths(root):
+                    raise SafetyError(
+                        "Resumed false-positive source no longer matches its exact "
+                        "checkpoint-owned paths."
+                    )
+                _discard_checkpoint_owned_source(root, discarded_paths)
+                _clear_release_progress(root, state_root=state_root)
+                report["false_positives"].append(
+                    {
+                        "finding_id": finding_id,
+                        "inspection": resumed["inspection"],
+                        "head_before": resumed["head_before"],
+                        "temporary_commit": str(
+                            durable_progress.get("temporary_commit", "")
+                        ),
+                        "discarded_paths": discarded_paths,
+                        "patch_attempts": [resumed["patch_attempt"]],
+                        "resumed": True,
+                    }
+                )
+                resumed["files_changed"] = []
+                resumed["false_positive"] = True
+                resumed_phase = "false-positive"
+                resumed_detail = (
+                    "stopped attempt is false-positive; restored exact owned source and "
+                    "continued queue"
                 )
             elif resumed_outcome == "fixed":
                 _clear_release_progress(root, state_root=state_root)

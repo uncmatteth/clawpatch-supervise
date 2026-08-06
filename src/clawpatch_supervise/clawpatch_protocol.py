@@ -18,6 +18,7 @@ class ClawpatchFailureKind(str, Enum):
 class RepairAction(str, Enum):
     FINALIZE = "finalize"
     PRESERVE_AND_CONTINUE = "preserve-and-continue"
+    DISCARD_AND_CONTINUE = "discard-and-continue"
     STOP_TRANSIENT = "stop-transient"
     STOP_TERMINAL = "stop-terminal"
 
@@ -114,6 +115,8 @@ def decide_repair_transition(
         return RepairDecision(RepairAction.FINALIZE, "fixed")
     if revalidation_outcome == "open":
         return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "open")
-    if revalidation_outcome in {"uncertain", "false-positive"}:
-        return RepairDecision(RepairAction.STOP_TERMINAL, str(revalidation_outcome))
+    if revalidation_outcome == "false-positive":
+        return RepairDecision(RepairAction.DISCARD_AND_CONTINUE, "false-positive")
+    if revalidation_outcome == "uncertain":
+        return RepairDecision(RepairAction.STOP_TERMINAL, "uncertain")
     raise ValueError(f"Unsupported ClawPatch revalidation outcome: {revalidation_outcome!r}")
