@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clawpatch-supervise"
-version = "0.1.4"
+version = "0.1.5"
 description = "The external queue runtime behind Manageroo's ClawPatch workflow: exact checkpoints, bounded retries, verified repairs, and completion proof."
 readme = "README.md"
 requires-python = ">=3.11"

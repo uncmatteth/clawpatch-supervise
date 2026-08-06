@@ -2036,12 +2036,18 @@ def _recover_checkpoint_temporary_commit(
         temporary_commit=temporary_commit,
         require_current=False,
     )
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    source_changes = _source_paths(repo)
+    if current_head == original_head and not source_changes:
+        # The stopped iteration was already returned to its recorded base and no
+        # repair remains in the worktree. A fresh run may safely retire the
+        # verified dangling commit even when an older checkpoint recorded stale
+        # or empty owned paths.
+        return
     if owned_paths != sorted(checkpoint["owned_paths"]):
         raise SafetyError(
             "Interrupted Clawpatch temporary commit paths do not match its checkpoint."
         )
-    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
-    source_changes = _source_paths(repo)
     if current_head == temporary_commit:
         if source_changes:
             raise SafetyError(

@@ -22,7 +22,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.4")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.5")
 
     def test_print_state_path_is_read_only_and_skips_preflight(self):
         repo = Path("/tmp/example-repository")

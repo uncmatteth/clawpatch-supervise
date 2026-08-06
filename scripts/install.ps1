@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.4",
+    [string]$Version = "0.1.5",
     [string]$Source = "",
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise"),
     [string]$BinDir = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise\bin"),
@@ -32,6 +32,39 @@ $wrapperText = "@echo off`r`n`"$supervisor`" %*`r`n"
 Set-Content -Path $wrapper -Value $wrapperText -Encoding Ascii -NoNewline
 $env:Path = "$BinDir;$env:Path"
 
+$clawHubCommand = Get-Command clawhub.cmd, clawhub.exe, clawhub -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1
+if ($null -eq $clawHubCommand) {
+    $npmCommand = Get-Command npm.cmd, npm.exe, npm -CommandType Application -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($null -eq $npmCommand) {
+        $knownNpm = Join-Path $env:ProgramFiles "nodejs\npm.cmd"
+        if (Test-Path -LiteralPath $knownNpm -PathType Leaf) {
+            $npmPath = $knownNpm
+        } else {
+            throw "ClawHub is missing and npm is unavailable. Install Node.js 22 or newer, then rerun this installer."
+        }
+    } else {
+        $npmPath = $npmCommand.Source
+    }
+    $clawHubRoot = Join-Path $InstallRoot "clawhub"
+    Write-Host "ClawHub is missing; installing clawhub@latest into $clawHubRoot"
+    & $npmPath install --prefix $clawHubRoot --no-fund --no-audit clawhub@latest
+    if ($LASTEXITCODE -ne 0) {
+        throw "npm could not install clawhub@latest (exit $LASTEXITCODE)."
+    }
+    $installedClawHub = Join-Path $clawHubRoot "node_modules\.bin\clawhub.cmd"
+    if (-not (Test-Path -LiteralPath $installedClawHub -PathType Leaf)) {
+        throw "ClawHub installation did not create clawhub.cmd."
+    }
+    $clawHubWrapper = Join-Path $BinDir "clawhub.cmd"
+    $clawHubWrapperText = "@echo off`r`ncall `"$installedClawHub`" %*`r`nexit /b %ERRORLEVEL%`r`n"
+    Set-Content -Path $clawHubWrapper -Value $clawHubWrapperText -Encoding Ascii -NoNewline
+    $clawHubPath = $clawHubWrapper
+} else {
+    $clawHubPath = $clawHubCommand.Source
+}
+
 if ($AddToPath) {
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
     $parts = @($userPath -split ";" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
@@ -42,7 +75,10 @@ if ($AddToPath) {
 }
 
 & $supervisor --version
+& $clawHubPath --cli-version
+if ($LASTEXITCODE -ne 0) { throw "The ClawHub command failed its startup check." }
 Write-Host "Installed command: $wrapper"
+Write-Host "ClawHub command: $clawHubPath"
 if ($null -eq (Get-Command clawpatch -ErrorAction SilentlyContinue)) {
     Write-Warning "ClawPatch is not on PATH yet. Install ClawPatch before running a queue."
 }

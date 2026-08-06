@@ -30,7 +30,7 @@ cd clawpatch-supervise
 clawpatch-supervise --version
 ```
 
-The installer creates an isolated virtual environment under `~/.local/share/clawpatch-supervise` and puts the command in `~/.local/bin`. If that directory is not already on `PATH`, reopen your terminal or run:
+The installer creates an isolated virtual environment under `~/.local/share/clawpatch-supervise` and puts the command in `~/.local/bin`. If ClawHub is missing, it also installs the latest ClawHub CLI into that isolated root and exposes `clawhub` from the same bin directory. An existing ClawHub installation is preserved. If that directory is not already on `PATH`, reopen your terminal or run:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -46,7 +46,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 clawpatch-supervise --version
 ```
 
-The Windows installer creates an isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` path immediately.
+The Windows installer creates an isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. If ClawHub is missing, it also installs the latest ClawHub CLI into that isolated root and creates `clawhub.cmd`; an existing installation is preserved. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` paths immediately.
 
 ### Run a queue
 
@@ -153,6 +153,12 @@ Earlier releases correctly refused to create an incomplete commit, but they disc
 - checkpoint fingerprints recursively hash actual tracked and untracked content inside any dirty nested repository.
 
 The result is simple: ClawPatch reviews the code the target repository actually owns. The supervisor does not publish detached commits into someone else's dependency or pretend an unstaged nested repair is complete.
+
+## The interrupted-checkpoint failure fixed in version 0.1.5
+
+Older supervisors could leave a verified temporary repair commit after already returning HEAD and the worktree to the finding's original clean state. Some legacy checkpoints recorded an empty owned-path list for that now-dangling commit. A later `--fresh` run would stop with `Interrupted Clawpatch temporary commit paths do not match its checkpoint` even though there was no source left to protect.
+
+Version 0.1.5 recognizes only the provably safe form of that state: the commit must still be a valid supervisor iteration for the same finding and branch, HEAD must equal its recorded parent, and the worktree must contain zero source changes. The fresh run then retires the stale checkpoint and remaps normally. Any dirty, moved, or ambiguous source still stops.
 
 ## How checkpoints work
 
@@ -313,7 +319,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.4 alpha**.
+Current release: **0.1.5 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 
