@@ -25,7 +25,7 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
    - `--fresh` for a new map and complete review generation.
    - `--resume-stopped` only for the exact stopped checkpoint already on disk.
 5. Run one repository at a time with an explicit absolute path, branch policy, push policy, and watchdog.
-6. If it stops, preserve the printed finding, paths, checkpoint, and source exactly. Diagnose the ownership or command failure before relaunching.
+6. If it stops, preserve the printed finding, paths, checkpoint, and source exactly. Relaunch with `--resume-stopped`; the supervisor can adopt a later applied ClawPatch repair only when its finding, base SHA, and complete source-path set match the stopped checkpoint boundary.
 7. On completion, verify the proof file, clean Git state, local HEAD, and remote SHA when pushes were enabled.
 
 Linux or macOS:
@@ -69,7 +69,7 @@ Return:
 
 - Do not replace the command-owned queue with a report-derived loop.
 - Do not run `clawpatch next` to get around a stopped finding.
-- Do not rerun the same fix against an unchanged source tree.
+- Do not blindly rerun the same fix against an unchanged source tree. The supervisor may make up to two additional same-finding attempts only after an open revalidation supplies new evidence.
 - Do not commit unrelated or pre-existing changes.
 - Do not run ClawPatch against Git submodule contents owned by third parties; fresh supervisor runs exclude Gitlinks automatically.
 - Do not claim Windows or Linux support from source inspection alone; use the repository's cross-platform test results.
