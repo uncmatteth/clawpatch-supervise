@@ -41,6 +41,8 @@ clawpatch-supervise --version
 
 The Windows installer creates an isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. If ClawHub is missing, it also installs the latest ClawHub CLI into that isolated root and creates `clawhub.cmd`; an existing installation is preserved. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` paths immediately.
 
+Configured Windows `.cmd` and `.bat` validation gates are launched with exact `cmd.exe` quoting, including when the executable is installed under a path containing spaces. Gate arguments containing `cmd.exe` metacharacters remain rejected.
+
 ### Run a queue
 
 Linux:
