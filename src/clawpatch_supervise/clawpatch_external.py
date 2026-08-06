@@ -147,6 +147,13 @@ def _render_event(event: dict[str, Any]) -> str:
             f"$ {event.get('command', '')}"
         )
     if phase == "resume":
+        owned = event.get("owned_paths")
+        if isinstance(owned, list) and owned:
+            return (
+                f"\n{_counter(event)} RESUME APPLIED REPAIR\n"
+                f"finding: {event.get('finding_id', '')}\n"
+                f"source changes: {', '.join(str(path) for path in owned)}"
+            )
         return (
             f"\n{_counter(event)} RESUME INTERRUPTED PLANNED ATTEMPT\n"
             f"finding: {event.get('finding_id', '')}\n"

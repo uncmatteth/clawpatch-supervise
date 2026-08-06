@@ -32,6 +32,7 @@ from .util import atomic_write_json, utc_now
 PROJECT_DIR = ".manageroo"
 MINIMUM_CLAWPATCH_VERSION = (0, 7, 2)
 CLAWPATCH_CHILD_WATCHDOG_SECONDS = 900
+CLAWPATCH_ZERO_SOURCE_RETRY_LIMIT = 2
 RELEASE_PROGRESS_VERSION = 6
 LIFECYCLE = (
     "repository/process/Git preflight -> exact-owned disposable validation-service setup when the "
@@ -42,8 +43,10 @@ LIFECYCLE = (
     "source tree -> local-only exact-path temporary commit for partial progress -> configured project "
     "gates when present -> exact fixed revalidation "
     "(with bounded read-only, workspace-write, and external trusted-host validation transitions) -> "
-    "one combined exact-path final commit/push when authorized -> an open revalidation amends the "
-    "local iteration and reenters the same finding without a cap; no-progress, unsupported, failed, "
+    "one combined exact-path final commit/push when authorized -> an open revalidation with source "
+    "progress amends the local iteration and reenters the same finding without a cap; an open "
+    "revalidation without source progress informs up to two additional fix attempts; no-progress, "
+    "unsupported, failed, "
     "uncertain transitions stop with source changes intact; a ClawPatch-owned false-positive "
     "restores only its exact supervisor-owned repair paths to the finding start tree, retires "
     "the checkpoint, and advances; any ownership mismatch stops unchanged -> "
@@ -1608,6 +1611,62 @@ def _checkpoint_unapplied_attempt(
     }
 
 
+def _checkpoint_later_applied_attempt(
+    repo: Path,
+    progress_record: dict[str, Any],
+    *,
+    inspected: dict[str, Any],
+) -> dict[str, Any] | None:
+    """Recognize a repair ClawPatch applied after a source-clean stopped checkpoint."""
+    if (
+        progress_record.get("phase") != "stopped"
+        or progress_record.get("owned_paths") != []
+    ):
+        return None
+    finding_id = str(progress_record["finding_id"])
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    source_paths = _source_paths(repo)
+    if not source_paths or progress_record.get("head_before") != current_head:
+        return None
+    if inspected["finding"].get("status") not in {
+        "open",
+        "uncertain",
+        "fixed",
+        "false-positive",
+    }:
+        return None
+    matching_attempts = []
+    for attempt in inspected["patchAttempts"]:
+        if not isinstance(attempt, dict) or attempt.get("status") != "applied":
+            continue
+        finding_ids = attempt.get("findingIds")
+        files_changed = attempt.get("filesChanged")
+        git_record = attempt.get("git")
+        patch_attempt_id = attempt.get("patchAttemptId")
+        if (
+            isinstance(finding_ids, list)
+            and finding_id in finding_ids
+            and isinstance(files_changed, list)
+            and sorted(files_changed) == source_paths
+            and isinstance(git_record, dict)
+            and git_record.get("baseSha") == current_head
+            and isinstance(patch_attempt_id, str)
+            and patch_attempt_id
+        ):
+            _validate_attempt_paths_syntax(files_changed)
+            matching_attempts.append(attempt)
+    if not matching_attempts:
+        return None
+    _validate_attempt_paths(repo, source_paths)
+    return {
+        "finding_id": finding_id,
+        "patch_attempt": matching_attempts[-1],
+        "patch_attempts": matching_attempts,
+        "inspection": inspected,
+        "owned_paths": source_paths,
+    }
+
+
 def _checkpoint_fixed_without_source(
     repo: Path,
     progress_record: dict[str, Any],
@@ -2554,6 +2613,7 @@ def _process_finding_until_fixed(
     )
     attempt = resume_attempt
     continuations = resume_continuations
+    zero_source_retries = 0
     if attempt < 1 or continuations < 0:
         raise SafetyError("Invalid resumed Clawpatch iteration counters.")
     if temporary_commit:
@@ -2729,6 +2789,30 @@ def _process_finding_until_fixed(
             )
             raise SafetyError("Clawpatch returned an unsupported revalidation outcome.") from exc
         if revalidation_decision.action is RepairAction.PRESERVE_AND_CONTINUE:
+            if (
+                not temporary_commit
+                and not _source_paths(repo)
+                and zero_source_retries < CLAWPATCH_ZERO_SOURCE_RETRY_LIMIT
+            ):
+                zero_source_retries += 1
+                attempt += 1
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "continuing",
+                            "current": current,
+                            "total": total,
+                            "finding_id": finding_id,
+                            "commit": "",
+                            "detail": (
+                                "open revalidation supplied new evidence; retrying the same "
+                                "finding without advancing the queue"
+                            ),
+                            "evidence_retry": zero_source_retries,
+                            "max_evidence_retries": CLAWPATCH_ZERO_SOURCE_RETRY_LIMIT,
+                        }
+                    )
+                continue
             try:
                 temporary_commit, _owned_paths, _state = _save_partial_iteration(
                     repo,
@@ -4008,6 +4092,45 @@ def _release_sweep_locked(
                 current=1,
                 total="?",
             )
+            later_applied = _checkpoint_later_applied_attempt(
+                root,
+                durable_progress,
+                inspected=checkpoint_inspection,
+            )
+            if later_applied is not None:
+                recovered_paths = list(later_applied["owned_paths"])
+                durable_progress = _write_release_progress(
+                    root,
+                    finding_id=str(durable_progress["finding_id"]),
+                    branch=str(durable_progress["branch"]),
+                    head_before=str(durable_progress["head_before"]),
+                    phase="stopped",
+                    owned_paths=recovered_paths,
+                    last_action=str(durable_progress.get("last_action", "")),
+                    state_root=state_root,
+                )
+                report["recovered_later_applied_attempt"] = {
+                    "finding_id": str(later_applied["finding_id"]),
+                    "patch_attempt": str(
+                        later_applied["patch_attempt"]["patchAttemptId"]
+                    ),
+                    "owned_paths": recovered_paths,
+                }
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "resume",
+                            "current": 1,
+                            "total": "?",
+                            "finding_id": str(later_applied["finding_id"]),
+                            "detail": (
+                                "recognized the later applied repair at the stopped checkpoint "
+                                "HEAD; resuming its exact source paths"
+                            ),
+                            "owned_paths": recovered_paths,
+                        }
+                    )
+        if durable_progress["owned_paths"] == []:
             false_positive_without_source = _checkpoint_false_positive_without_source(
                 root,
                 durable_progress,

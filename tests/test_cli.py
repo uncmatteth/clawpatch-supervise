@@ -22,7 +22,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.5")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.6")
 
     def test_print_state_path_is_read_only_and_skips_preflight(self):
         repo = Path("/tmp/example-repository")
@@ -142,6 +142,22 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             "\n[1/?] RESUME INTERRUPTED PLANNED ATTEMPT\n"
             "finding: fnd_one\n"
             "source changes: none; returning through ClawPatch next",
+        )
+
+    def test_resume_phase_displays_recovered_applied_repair_paths(self):
+        self.assertEqual(
+            _render_event(
+                {
+                    "phase": "resume",
+                    "current": 1,
+                    "total": "?",
+                    "finding_id": "fnd_one",
+                    "owned_paths": ["app.py", "test_app.py"],
+                }
+            ),
+            "\n[1/?] RESUME APPLIED REPAIR\n"
+            "finding: fnd_one\n"
+            "source changes: app.py, test_app.py",
         )
 
     def test_init_phase_displays_the_exact_command(self):

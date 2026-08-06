@@ -153,6 +153,14 @@ Older supervisors could leave a verified temporary repair commit after already r
 
 Version 0.1.5 recognizes only the provably safe form of that state: the commit must still be a valid supervisor iteration for the same finding and branch, HEAD must equal its recorded parent, and the worktree must contain zero source changes. The fresh run then retires the stale checkpoint and remaps normally. Any dirty, moved, or ambiguous source still stops.
 
+## The evidence-informed recovery added in version 0.1.6
+
+A source-clean stopped checkpoint can be followed by a later manual or restarted `clawpatch fix` attempt at the same HEAD. Earlier supervisors kept reading the checkpoint's old empty owned-path list even when ClawPatch had since recorded a real applied repair. That produced `Stopped Clawpatch progress has no source changes and no matching planned attempt at the current HEAD` while the correct repair was visibly present.
+
+Version 0.1.6 recognizes that later repair only when the finding ID, applied status, base SHA, and complete current source-path set all match. It fingerprints those exact paths into the durable checkpoint, revalidates, commits, pushes when authorized, and continues the queue. The terminal names this transition `RESUME APPLIED REPAIR` and lists every owned path.
+
+The same release also uses an open no-source revalidation as new evidence for up to two additional same-finding fix attempts. This handles the real case where the first agent incorrectly claims no edit is needed, revalidation disproves that claim, and the next fix succeeds. It never advances to another finding, and source-producing iterations remain governed by exact tree and fingerprint checks.
+
 ## How checkpoints work
 
 The checkpoint is not a vague “last item” marker. It binds:
@@ -312,7 +320,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.5 alpha**.
+Current release: **0.1.6 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 
