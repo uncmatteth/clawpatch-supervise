@@ -101,7 +101,7 @@ def _terminate_process_group(
     return stdout, stderr
 
 
-def _platform_argv(argv: Sequence[str], env: Mapping[str, str]) -> list[str]:
+def _platform_argv(argv: Sequence[str], env: Mapping[str, str]) -> list[str] | str:
     resolved = list(argv)
     if os.name != "nt":
         return resolved
@@ -119,7 +119,10 @@ def _platform_argv(argv: Sequence[str], env: Mapping[str, str]) -> list[str]:
                 "Windows batch command arguments cannot contain cmd.exe metacharacters."
             )
         command_line = subprocess.list2cmdline(resolved)
-        return [env.get("COMSPEC") or "cmd.exe", "/d", "/s", "/c", command_line]
+        launcher = subprocess.list2cmdline(
+            [env.get("COMSPEC") or "cmd.exe", "/d", "/s", "/c"]
+        )
+        return f'{launcher} "{command_line}"'
     return resolved
 
 
@@ -222,7 +225,7 @@ class CommandRunner:
 
     @staticmethod
     def _run_process_group(
-        argv: list[str],
+        argv: list[str] | str,
         *,
         cwd: Path,
         env: Mapping[str, str],
