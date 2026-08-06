@@ -179,6 +179,12 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             repo.mkdir()
             self.init_plain_repo(repo)
             dependency = self.add_submodule(repo, root)
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=dependency, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.invalid"],
+                cwd=dependency,
+                check=True,
+            )
             leaf_source = root / "leaf"
             leaf_source.mkdir()
             self.init_plain_repo(leaf_source)
@@ -327,11 +333,21 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         "clawpatch_supervise.clawpatch_release.sys.prefix",
         "/home/test/.local/share/clawpatch-supervise/venv",
     )
+    @unittest.skipIf(os.name == "nt", "POSIX state home only")
     def test_external_state_home_is_stable_across_python_environments(self):
         with patch.dict(os.environ, {"XDG_STATE_HOME": "/home/test/.local/state"}):
             self.assertEqual(
                 _external_state_home(),
                 Path("/home/test/.local/state/clawpatch-supervise"),
+            )
+
+    @unittest.skipUnless(os.name == "nt", "Windows state home only")
+    def test_windows_external_state_home_uses_local_app_data(self):
+        local_app_data = r"C:\Users\Test\AppData\Local"
+        with patch.dict(os.environ, {"LOCALAPPDATA": local_app_data}):
+            self.assertEqual(
+                _external_state_home(),
+                Path(local_app_data) / "ClawPatchSupervise" / "state",
             )
 
     def test_external_progress_migrates_from_the_old_venv_state_root(self):
@@ -871,8 +887,8 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
         )
 
+    @unittest.skipIf(os.name == "nt", "POSIX process inventory only")
     @patch("clawpatch_supervise.clawpatch_release.Path.is_dir", return_value=False)
-    @patch("clawpatch_supervise.clawpatch_release.os.name", "posix")
     @patch("clawpatch_supervise.clawpatch_release.os.getpid", return_value=101)
     @patch("clawpatch_supervise.clawpatch_release.shutil.which", return_value="/usr/bin/lsof")
     @patch("clawpatch_supervise.clawpatch_release._run")
