@@ -114,6 +114,38 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
 
+    @staticmethod
+    def add_submodule(repo: Path, root: Path, path: str = "lib/dependency") -> Path:
+        dependency = root / "dependency"
+        dependency.mkdir()
+        subprocess.run(["git", "init", "-q", "-b", "main"], cwd=dependency, check=True)
+        subprocess.run(["git", "config", "user.name", "Test"], cwd=dependency, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.invalid"],
+            cwd=dependency,
+            check=True,
+        )
+        source = dependency / "source.py"
+        source.write_text("before\n", encoding="utf-8")
+        subprocess.run(["git", "add", "source.py"], cwd=dependency, check=True)
+        subprocess.run(["git", "commit", "-q", "-m", "dependency"], cwd=dependency, check=True)
+        subprocess.run(
+            [
+                "git",
+                "-c",
+                "protocol.file.allow=always",
+                "submodule",
+                "add",
+                "-q",
+                str(dependency),
+                path,
+            ],
+            cwd=repo,
+            check=True,
+        )
+        subprocess.run(["git", "commit", "-q", "-am", "add dependency"], cwd=repo, check=True)
+        return repo / path
+
     def test_source_fingerprint_hashes_untracked_symlink_without_following_directory(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -139,6 +171,61 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             self.assertEqual(set(first["untracked"]), {"dist"})
             self.assertTrue(first["untracked"]["dist"].startswith("symlink:"))
             self.assertNotEqual(first["untracked"]["dist"], second["untracked"]["dist"])
+
+    def test_source_fingerprint_hashes_actual_dirty_submodule_content(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_plain_repo(repo)
+            dependency = self.add_submodule(repo, root)
+            leaf_source = root / "leaf"
+            leaf_source.mkdir()
+            self.init_plain_repo(leaf_source)
+            (leaf_source / "source.py").write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "source.py"], cwd=leaf_source, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "leaf"], cwd=leaf_source, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    "-q",
+                    str(leaf_source),
+                    "lib/leaf",
+                ],
+                cwd=dependency,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-q", "-am", "add nested dependency"],
+                cwd=dependency,
+                check=True,
+            )
+            subprocess.run(["git", "add", "lib/dependency"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "update dependency"], cwd=repo, check=True)
+
+            leaf = dependency / "lib" / "leaf"
+            source = leaf / "source.py"
+            source.write_text("first repair\n", encoding="utf-8")
+            (leaf / "new_test.py").write_text("first test\n", encoding="utf-8")
+            first = _source_state_fingerprint(repo)
+
+            source.write_text("different repair\n", encoding="utf-8")
+            (leaf / "new_test.py").write_text("different test\n", encoding="utf-8")
+            second = _source_state_fingerprint(repo)
+
+            self.assertEqual(first["paths"], ["lib/dependency"])
+            self.assertEqual(set(first["gitlinks"]), {"lib/dependency"})
+            dependency_state = first["gitlinks"]["lib/dependency"]
+            self.assertEqual(dependency_state["paths"], ["lib/leaf"])
+            self.assertEqual(
+                set(dependency_state["gitlinks"]["lib/leaf"]["untracked"]),
+                {"new_test.py"},
+            )
+            self.assertNotEqual(first["gitlinks"], second["gitlinks"])
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
@@ -522,6 +609,53 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             self.assertEqual(
                 json_clawpatch.call_args.args[1],
                 ["clawpatch", "init", "--json"],
+            )
+
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_fresh_run_excludes_git_submodules_from_clawpatch_mapping(
+        self, json_clawpatch, _processes
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_plain_repo(repo)
+            self.add_submodule(repo, root)
+            state = repo / ".clawpatch"
+            state.mkdir()
+            (state / "config.json").write_text(
+                json.dumps(
+                    {
+                        "schemaVersion": 1,
+                        "include": ["**/*"],
+                        "exclude": ["node_modules/**"],
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def initialize(*_args, **_kwargs):
+                state.mkdir()
+                (state / "config.json").write_text(
+                    json.dumps(
+                        {
+                            "schemaVersion": 1,
+                            "include": ["**/*"],
+                            "exclude": ["node_modules/**"],
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                return {"created": True}
+
+            json_clawpatch.side_effect = initialize
+            _prepare_fresh_release(repo, env={"PATH": "test"})
+
+            config = json.loads((state / "config.json").read_text(encoding="utf-8"))
+            self.assertEqual(
+                config["exclude"],
+                ["node_modules/**", "lib/dependency", "lib/dependency/**"],
             )
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])

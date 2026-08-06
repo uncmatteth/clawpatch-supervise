@@ -32,7 +32,7 @@ from .util import atomic_write_json, utc_now
 PROJECT_DIR = ".manageroo"
 MINIMUM_CLAWPATCH_VERSION = (0, 7, 2)
 CLAWPATCH_CHILD_WATCHDOG_SECONDS = 900
-RELEASE_PROGRESS_VERSION = 5
+RELEASE_PROGRESS_VERSION = 6
 LIFECYCLE = (
     "repository/process/Git preflight -> exact-owned disposable validation-service setup when the "
     "repository declares a supported contract -> clawpatch status --json -> stale-lock cleanup when proven -> "
@@ -340,6 +340,25 @@ def _status_paths(repo: Path) -> list[str]:
 
 def _source_paths(repo: Path) -> list[str]:
     return [path for path in _status_paths(repo) if path != ".clawpatch" and not path.startswith(".clawpatch/")]
+
+
+def _gitlink_paths(repo: Path) -> list[str]:
+    output = _must_run(
+        ["git", "ls-files", "--stage", "-z"],
+        cwd=repo,
+        timeout=120,
+    )
+    paths: list[str] = []
+    for record in output.split("\0"):
+        if not record:
+            continue
+        metadata, separator, path = record.partition("\t")
+        fields = metadata.split()
+        if not separator or len(fields) != 3:
+            raise SafetyError("Git returned malformed staged-file metadata.")
+        if fields[0] == "160000":
+            paths.append(path)
+    return sorted(set(paths))
 
 
 def _command_name(value: str) -> str:
@@ -996,7 +1015,22 @@ def _source_state_fingerprint(repo: Path) -> dict[str, Any]:
         if path
     ) if paths else []
     untracked_hashes = {path: _untracked_path_fingerprint(repo, path) for path in untracked}
-    return {"paths": paths, "diff": diff, "untracked": untracked_hashes}
+    dirty_gitlinks = sorted(set(paths).intersection(_gitlink_paths(repo)))
+    gitlinks: dict[str, Any] = {}
+    for path in dirty_gitlinks:
+        nested = repo / path
+        if not nested.is_dir():
+            raise SafetyError(f"Dirty Git submodule path is unavailable: {path}")
+        gitlinks[path] = {
+            "head": _git_text(nested, ["git", "rev-parse", "HEAD"]),
+            **_source_state_fingerprint(nested),
+        }
+    return {
+        "paths": paths,
+        "diff": diff,
+        "untracked": untracked_hashes,
+        "gitlinks": gitlinks,
+    }
 
 
 def _untracked_path_fingerprint(repo: Path, path: str) -> str:
@@ -1292,7 +1326,7 @@ def _load_release_progress(
     required_strings = ("repo", "finding_id", "branch", "head_before", "phase", "updated_at")
     stored_version = progress.get("version")
     if (
-        stored_version not in {2, 3, 4, RELEASE_PROGRESS_VERSION}
+        stored_version not in {2, 3, 4, 5, RELEASE_PROGRESS_VERSION}
         or any(not isinstance(progress.get(field), str) or not progress[field] for field in required_strings)
         or not _FINDING_ID.fullmatch(str(progress.get("finding_id", "")))
         or not isinstance(progress.get("owned_paths"), list)
@@ -1834,6 +1868,33 @@ def _committed_clawpatch_config(repo: Path) -> str | None:
     return result.stdout if result.returncode == 0 and result.stdout.strip() else None
 
 
+def _exclude_gitlinks_from_clawpatch_config(repo: Path) -> list[str]:
+    """Keep ClawPatch inside the source tree owned by the target repository."""
+    gitlinks = _gitlink_paths(repo)
+    if not gitlinks:
+        return []
+    config_path = repo / ".clawpatch" / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SafetyError("Clawpatch config is unreadable after initialization.") from exc
+    if not isinstance(config, dict) or not isinstance(config.get("exclude"), list) or any(
+        not isinstance(pattern, str) for pattern in config.get("exclude", [])
+    ):
+        raise SafetyError("Clawpatch config has a malformed exclude list.")
+    excludes = list(config["exclude"])
+    additions: list[str] = []
+    for path in gitlinks:
+        for pattern in (path, f"{path}/**"):
+            if pattern not in excludes:
+                excludes.append(pattern)
+                additions.append(pattern)
+    if additions:
+        config["exclude"] = excludes
+        atomic_write_json(config_path, config)
+    return additions
+
+
 def _fresh_checkpoint_owned_paths(
     repo: Path,
     source_changes: list[str],
@@ -2112,6 +2173,17 @@ def _prepare_fresh_release(
     if config_text is not None:
         config_path = clawpatch_state_root / "config.json"
         config_path.write_text(config_text, encoding="utf-8")
+    excluded_gitlinks = _exclude_gitlinks_from_clawpatch_config(repo)
+    if excluded_gitlinks and progress is not None:
+        progress(
+            {
+                "phase": "submodule-exclusion",
+                "current": "?",
+                "total": "?",
+                "command": "exclude unowned Git submodules from ClawPatch mapping",
+                "detail": ", ".join(excluded_gitlinks),
+            }
+        )
 
 
 def _commit_attempt(
