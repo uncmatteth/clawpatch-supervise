@@ -81,7 +81,7 @@ I ran into those failures while using ClawPatch on Manageroo and other actual pr
 4. If the process stops, can the next process prove exactly what it is resuming?
 5. Did the entire queue really finish, including a fresh final review, or did the terminal merely stop printing?
 
-That is what this program does. It is deliberately more stubborn than a shell loop and less creative than an AI agent. It follows the command-owned lifecycle, records durable evidence, and stops only when continuing would mean guessing, losing work, or lying about completion.
+That is what this program does. It is deliberately more stubborn than a shell loop and less creative than an AI agent. It follows the command-owned lifecycle, records durable evidence, and stops only when continuing would mean guessing, losing work, or overstating completion.
 
 ## What it actually supervises
 
@@ -131,35 +131,24 @@ The supervisor provides:
 | `open` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding. |
 | Validation/provider failure after new source progress | Preserve the exact progress and continue the same finding. |
 | `false-positive` | Restore only the exact supervisor-owned repair paths to the finding's starting tree, retire the checkpoint, continue. |
-| Same finding returns the same tree or no source changes | Stop the loop; another identical fix call cannot make progress. |
+| Open revalidation with no source changes | Feed the new evidence into up to two more same-finding attempts; never advance the queue. |
+| Same finding still returns the same tree after bounded recovery | Preserve the checkpoint and stop without losing source. |
 | Transient provider, refusal, quota, or timeout with no source progress | Exit `75` so a service may restart later. |
 | Ownership, branch, checkpoint, or Git provenance mismatch | Exit `2` and leave the source for inspection. |
 | Fresh final review proves zero remaining work | Write `status: COMPLETE` proof and exit `0`. |
 
-## The Git submodule failure that forced version 0.1.4
+## Built for real repositories
 
-Git stores a submodule in its parent repository as one pointer. A file can change two repositories deep while the top-level pointer stays exactly the same. Ordinary `git add lib/dependency` cannot put that inner edit into the parent commit.
+Real repair queues run into restarts, provider failures, overlapping findings, nested repositories, and long validation jobs. ClawPatch Supervise keeps those cases inside one visible, verifiable workflow:
 
-Earlier releases correctly refused to create an incomplete commit, but they discovered the ownership problem only after ClawPatch had already reviewed and repaired third-party dependency source. Version 0.1.4 fixes both sides of that problem:
+- **Repository ownership stays clear.** Fresh runs exclude Git submodules and their descendants from ClawPatch review, so the queue repairs code owned by the target repository instead of editing a dependency checkout.
+- **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
+- **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
+- **New evidence gets another chance.** An open revalidation can inform up to two additional attempts on the same finding without skipping ahead.
+- **False positives clean themselves up.** Only the exact supervisor-owned repair paths are restored; unrelated work is left alone.
+- **Completion means completion.** The command exits successfully only after the queue is empty and a fresh review generation finds nothing else to repair.
 
-- fresh runs automatically add every top-level Gitlink and its descendants to ClawPatch's exclude list;
-- checkpoint fingerprints recursively hash actual tracked and untracked content inside any dirty nested repository.
-
-The result is simple: ClawPatch reviews the code the target repository actually owns. The supervisor does not publish detached commits into someone else's dependency or pretend an unstaged nested repair is complete.
-
-## The interrupted-checkpoint failure fixed in version 0.1.5
-
-Older supervisors could leave a verified temporary repair commit after already returning HEAD and the worktree to the finding's original clean state. Some legacy checkpoints recorded an empty owned-path list for that now-dangling commit. A later `--fresh` run would stop with `Interrupted Clawpatch temporary commit paths do not match its checkpoint` even though there was no source left to protect.
-
-Version 0.1.5 recognizes only the provably safe form of that state: the commit must still be a valid supervisor iteration for the same finding and branch, HEAD must equal its recorded parent, and the worktree must contain zero source changes. The fresh run then retires the stale checkpoint and remaps normally. Any dirty, moved, or ambiguous source still stops.
-
-## The evidence-informed recovery added in version 0.1.6
-
-A source-clean stopped checkpoint can be followed by a later manual or restarted `clawpatch fix` attempt at the same HEAD. Earlier supervisors kept reading the checkpoint's old empty owned-path list even when ClawPatch had since recorded a real applied repair. That produced `Stopped Clawpatch progress has no source changes and no matching planned attempt at the current HEAD` while the correct repair was visibly present.
-
-Version 0.1.6 recognizes that later repair only when the finding ID, applied status, base SHA, and complete current source-path set all match. It fingerprints those exact paths into the durable checkpoint, revalidates, commits, pushes when authorized, and continues the queue. The terminal names this transition `RESUME APPLIED REPAIR` and lists every owned path.
-
-The same release also uses an open no-source revalidation as new evidence for up to two additional same-finding fix attempts. This handles the real case where the first agent incorrectly claims no edit is needed, revalidation disproves that claim, and the next fix succeeds. It never advances to another finding, and source-producing iterations remain governed by exact tree and fingerprint checks.
+The terminal shows these transitions directly, including `RESUME APPLIED REPAIR`, the current finding, the owned files, watchdog time, commit, push, and final proof.
 
 ## How checkpoints work
 
@@ -335,7 +324,7 @@ The state and safety contracts are intentionally strict. If the supervisor canno
 - [ClawPatch Supervise on ClawHub](https://clawhub.ai/uncmatteth/skills/clawpatch-supervise)
 - [BTT Labs](https://bttlabs.fun)
 
-Built by Uncle Matt at BTT Labs after too many repair queues proved that “the command stopped” and “the work is finished” are not the same sentence.
+Built by Uncle Matt at BTT Labs to make long repair queues verifiable from the first finding through final completion proof.
 
 ## License
 
