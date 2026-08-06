@@ -1,9 +1,11 @@
 ---
 name: clawpatch-supervise
-description: Install, run, recover, or explain the standalone ClawPatch queue supervisor. Use when someone asks to run a whole ClawPatch repair queue, resume a stopped finding, keep ClawPatch running outside the repo it repairs, or prove the queue actually finished.
+description: New and fucking improved with more cursing. Install, run, recover, or explain the standalone ClawPatch queue supervisor when someone needs a whole repair queue, exact stopped-finding recovery, or real completion proof.
 ---
 
 # ClawPatch Supervise
+
+> **🤬🦶💥 NEW AND FUCKING IMPROVED — NOW WITH MORE CURSING 🔨🗑️🔥**
 
 Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 
@@ -55,6 +57,9 @@ clawpatch-supervise --repo <absolute-path> --print-state-path
 ```
 
 ## Output
+
+Human-facing phase banners are intentionally blunt, profane, and emoji-heavy. Exact commands,
+finding IDs, paths, commits, errors, JSON, exit classes, and completion proof stay unchanged.
 
 Return:
 

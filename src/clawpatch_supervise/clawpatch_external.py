@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 import threading
 import time
 from contextlib import AbstractContextManager
@@ -34,7 +35,7 @@ def _render_inspection(event: dict[str, Any]) -> str:
         return f"{_counter(event)} SHOW {event.get('finding_id', '')}"
     lines = [
         "",
-        f"{_counter(event)} SHOW",
+        f"{_counter(event)} SHOW — 🔎🐛🗑️ LOOK AT THIS FUCKING THING",
         f"$ {event.get('command', '')}",
         f"title: {finding.get('title', '')}",
         f"id: {finding.get('id', '')}",
@@ -92,6 +93,7 @@ def _render_event(event: dict[str, Any]) -> str:
         "revalidate": "REVALIDATE",
         "revalidate-escalated": "REVALIDATE ESCALATED",
         "revalidate-host": "REVALIDATE TRUSTED HOST",
+        "uncertain-revalidation": "UNCERTAIN REVALIDATION",
         "commit": "COMMIT",
         "push": "PUSH",
         "report": "REPORT",
@@ -101,12 +103,48 @@ def _render_event(event: dict[str, Any]) -> str:
         attempt = event.get("attempt")
         maximum = event.get("max_attempts")
         suffix = f" (attempt {attempt}/{maximum})" if attempt and maximum else ""
+        personality = {
+            "preflight": " — 🥾🔍 CHECK THE DAMN TOOLS",
+            "fresh": " — 🌱🤬 START THIS SHIT CLEAN",
+            "fresh-discard": " — 🧹💥 REMOVE ONLY OUR OLD SHIT",
+            "baseline-validation": " — 🧪🧱 PROVE THE REPO ISN'T ALREADY FUCKED",
+            "map": " — 🗺️🔍 FIND ALL THE SHIT",
+            "review": " — 🧐🗑️ HUNTING GARBAGE",
+            "queue": " — 📋🤬 LINE UP THE BUGS",
+            "revalidate": " — 🧪👀 DID THAT SHIT ACTUALLY WORK?",
+            "revalidate-escalated": " — 🧪😤 CHECK IT AGAIN, DAMMIT",
+            "revalidate-host": " — 🧪💻 CHECK IT OUTSIDE THE SANDBOX BULLSHIT",
+            "uncertain-revalidation": " — 🤨🤔 THIS SHIT NEEDS ANOTHER LOOK",
+            "commit": " — 📦🔒 LOCKING IN THE FIX",
+            "push": " — 🚀🔥 SHIP THE FIXED SHIT",
+            "state-cleanup": " — 🧹🗑️ CLEAN UP THE RUNTIME CRAP",
+        }.get(str(phase), "")
         return (
-            f"\n{_counter(event)} {command_phases[str(phase)]}{suffix}\n"
+            f"\n{_counter(event)} {command_phases[str(phase)]}{suffix}{personality}\n"
             f"$ {event.get('command', '')}"
         )
     if phase == "finding":
         return _render_inspection(event)
+    if phase == "false-positive":
+        return (
+            f"\n{_counter(event)} FALSE-POSITIVE — 🙄🗑️ BOGUS BUG. "
+            "THROW OUT ONLY OUR SHIT AND KEEP MOVING\n"
+            f"finding: {event.get('finding_id', '')}\n"
+            f"detail: {event.get('detail', '')}"
+        )
+    if phase == "reset-recovery":
+        return (
+            f"\n{_counter(event)} CHECKPOINT RECOVERY — "
+            "🧹🔧 CLEANING UP INTERRUPTED SHIT SAFELY\n"
+            f"finding: {event.get('finding_id', '')}\n"
+            f"$ {event.get('command', '')}"
+        )
+    if phase == "submodule-exclusion":
+        return (
+            f"\n{_counter(event)} SUBMODULE EXCLUSION — "
+            "🚧🙅 NOT TOUCHING SOMEBODY ELSE'S SHIT\n"
+            f"excluded: {event.get('detail', '')}"
+        )
     if phase == "validation-service-ready":
         return f"\n{_counter(event)} VALIDATION SERVICE READY\n$ {event.get('detail', '')}"
     if phase == "validation-service-cleanup":
@@ -122,40 +160,51 @@ def _render_event(event: dict[str, Any]) -> str:
             suffix = f" (attempt {attempt}/{maximum})"
         else:
             suffix = f" (attempt {attempt})" if attempt > 1 else ""
-        return f"\n{_counter(event)} FIX{suffix}\n$ {event.get('command', '')}"
+        return (
+            f"\n{_counter(event)} FIX{suffix} — 🔨🤬🦶 KICK THIS BUG'S ASS\n"
+            f"$ {event.get('command', '')}"
+        )
     if phase == "stopped":
         owned = event.get("owned_paths")
         paths = ", ".join(str(path) for path in owned) if isinstance(owned, list) else ""
         return (
-            f"\n{_counter(event)} STOPPED - {event.get('outcome', 'not fixed')}\n"
+            f"\n{_counter(event)} STOPPED - {event.get('outcome', 'not fixed')} — "
+            "🛑💥🤬 FUCK. THIS SHIT ISN'T SAFE TO ADVANCE\n"
             f"finding: {event.get('finding_id', '')}\n"
             f"source left in place: {paths or 'none'}"
         )
     if phase == "fixed":
         commit = event.get("commit") or "no source commit required"
-        return f"\n{_counter(event)} FIXED\ncommit: {commit}"
+        return (
+            f"\n{_counter(event)} FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED\n"
+            f"commit: {commit}"
+        )
     if phase == "continuing":
         commit = event.get("commit") or "no source commit required"
         return (
-            f"\n{_counter(event)} OPEN - CONTINUING SAME FINDING\n"
+            f"\n{_counter(event)} MOTHERFUCKER, SHIT'S STILL FUCKED. "
+            "CONTINUING THE SAME FUCKING FINDING. 🤬🦶💥\n"
             f"commit: {commit}"
         )
     if phase == "fixed-point-rescan":
         generation = event.get("attempt", "?")
         return (
-            f"\n{_counter(event)} FRESH FIXED-POINT REVIEW (generation {generation})\n"
+            f"\n{_counter(event)} FRESH FIXED-POINT REVIEW (generation {generation}) — "
+            "🕵️🗑️ CHECKING FOR MORE GARBAGE\n"
             f"$ {event.get('command', '')}"
         )
     if phase == "resume":
         owned = event.get("owned_paths")
         if isinstance(owned, list) and owned:
             return (
-                f"\n{_counter(event)} RESUME APPLIED REPAIR\n"
+                f"\n{_counter(event)} RESUME APPLIED REPAIR — "
+                "😤🔧 FOUND THE SAVED FIX\n"
                 f"finding: {event.get('finding_id', '')}\n"
                 f"source changes: {', '.join(str(path) for path in owned)}"
             )
         return (
-            f"\n{_counter(event)} RESUME INTERRUPTED PLANNED ATTEMPT\n"
+            f"\n{_counter(event)} RESUME INTERRUPTED PLANNED ATTEMPT — "
+            "🧟🔧 PICKING THIS SHIT BACK UP\n"
             f"finding: {event.get('finding_id', '')}\n"
             "source changes: none; returning through ClawPatch next"
         )
@@ -173,6 +222,9 @@ def main(
     ensure_repository_idle: Callable[[Path], None] = require_external_clawpatch_preflight,
     heartbeat_seconds: float = 30,
 ) -> int:
+    reconfigure = getattr(sys.stdout, "reconfigure", None)
+    if callable(reconfigure):
+        reconfigure(errors="replace")
     parser = argparse.ArgumentParser(
         prog="clawpatch-supervise",
         description="Visibly process ClawPatch's live queue one current finding at a time.",
@@ -263,6 +315,7 @@ def main(
         thread = threading.Thread(target=heartbeat, name="clawpatch-supervise-heartbeat", daemon=True)
         thread.start()
 
+    print("🤬🦶💥 NEW AND FUCKING IMPROVED — NOW WITH MORE CURSING", flush=True)
     print(
         f"ClawPatch external supervisor: repo={Path(args.repo).resolve()} "
         f"branch={args.branch} push={args.push} fresh={args.fresh} "
@@ -297,6 +350,7 @@ def main(
                 child_env_overrides=child_env_overrides,
             )
     except ClawpatchStop as exc:
+        print("\n🛑💥🤬 FUCK. SUPERVISOR STOPPED SAFELY.", flush=True)
         print(f"\nSTOPPED: {exc}", flush=True)
         if exc.repair_action is RepairAction.STOP_TRANSIENT:
             print(
@@ -307,6 +361,7 @@ def main(
             return 75
         return 2
     except ClawpatchCommandFailure as exc:
+        print("\n💣😤🔧 COMMAND BLEW UP. SOURCE PROOF STILL WINS.", flush=True)
         print(f"\nSTOPPED: {exc}", flush=True)
         if exc.failure.transient:
             print(
@@ -316,10 +371,15 @@ def main(
             return 75
         return 2
     except SafetyError as exc:
+        print("\n🛑🧱🤬 SAFETY CHECK CAUGHT SOME SKETCHY SHIT.", flush=True)
         print(f"\nSTOPPED: {exc}", flush=True)
         return 2
     except KeyboardInterrupt:
-        print("\nINTERRUPTED: stopped safely; run the command again for a fresh start.", flush=True)
+        print(
+            "\n✋💥 INTERRUPTED: stopped safely; no source got yeeted. "
+            "Run the command again for a fresh start.",
+            flush=True,
+        )
         return 130
     finally:
         stopped.set()
@@ -331,7 +391,8 @@ def main(
         f"fixed={report.get('finding_count', 0)} "
         f"open={report.get('open_findings', '?')} "
         f"fresh_review_generations={len(report.get('review_generations', []))} "
-        f"head={report.get('git_head', '')}",
+        f"head={report.get('git_head', '')} "
+        "— 🏁🔥🤘 FUCK YES. QUEUE'S CLEAN.",
         flush=True,
     )
     return 0 if report.get("ok") else 2

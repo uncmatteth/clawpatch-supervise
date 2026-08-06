@@ -22,7 +22,54 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.6")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.7")
+
+    def test_same_finding_continuation_says_the_repair_is_still_broken(self):
+        self.assertEqual(
+            _render_event(
+                {
+                    "phase": "continuing",
+                    "current": 10,
+                    "total": 12,
+                    "commit": "7058b5964e2ef6d51472dbf6c4346342dcfef52a",
+                }
+            ),
+            "\n[10/12] MOTHERFUCKER, SHIT'S STILL FUCKED. "
+            "CONTINUING THE SAME FUCKING FINDING. 🤬🦶💥\n"
+            "commit: 7058b5964e2ef6d51472dbf6c4346342dcfef52a",
+        )
+
+    def test_false_positive_cleanup_is_blunt_and_exact(self):
+        self.assertEqual(
+            _render_event(
+                {
+                    "phase": "false-positive",
+                    "current": 3,
+                    "total": 9,
+                    "finding_id": "fnd_bogus",
+                    "detail": "restored exact supervisor-owned paths",
+                }
+            ),
+            "\n[3/9] FALSE-POSITIVE — 🙄🗑️ BOGUS BUG. "
+            "THROW OUT ONLY OUR SHIT AND KEEP MOVING\n"
+            "finding: fnd_bogus\n"
+            "detail: restored exact supervisor-owned paths",
+        )
+
+    def test_submodule_exclusion_names_the_exact_excluded_path(self):
+        self.assertEqual(
+            _render_event(
+                {
+                    "phase": "submodule-exclusion",
+                    "current": "?",
+                    "total": "?",
+                    "detail": "lib/openzeppelin-contracts",
+                }
+            ),
+            "\n[?/?] SUBMODULE EXCLUSION — "
+            "🚧🙅 NOT TOUCHING SOMEBODY ELSE'S SHIT\n"
+            "excluded: lib/openzeppelin-contracts",
+        )
 
     def test_print_state_path_is_read_only_and_skips_preflight(self):
         repo = Path("/tmp/example-repository")
@@ -139,7 +186,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                     "finding_id": "fnd_one",
                 }
             ),
-            "\n[1/?] RESUME INTERRUPTED PLANNED ATTEMPT\n"
+            "\n[1/?] RESUME INTERRUPTED PLANNED ATTEMPT — "
+            "🧟🔧 PICKING THIS SHIT BACK UP\n"
             "finding: fnd_one\n"
             "source changes: none; returning through ClawPatch next",
         )
@@ -155,7 +203,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                     "owned_paths": ["app.py", "test_app.py"],
                 }
             ),
-            "\n[1/?] RESUME APPLIED REPAIR\n"
+            "\n[1/?] RESUME APPLIED REPAIR — 😤🔧 FOUND THE SAVED FIX\n"
             "finding: fnd_one\n"
             "source changes: app.py, test_app.py",
         )
@@ -187,7 +235,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                     "max_attempts": 1,
                 }
             ),
-            "\n[4/119] REVALIDATE TRUSTED HOST (attempt 1/1)\n"
+            "\n[4/119] REVALIDATE TRUSTED HOST (attempt 1/1) — "
+            "🧪💻 CHECK IT OUTSIDE THE SANDBOX BULLSHIT\n"
             "$ clawpatch revalidate --finding fnd_one --json",
         )
 
@@ -202,7 +251,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                     "attempt": 2,
                 }
             ),
-            "\n[14/14] FRESH FIXED-POINT REVIEW (generation 2)\n"
+            "\n[14/14] FRESH FIXED-POINT REVIEW (generation 2) — "
+            "🕵️🗑️ CHECKING FOR MORE GARBAGE\n"
             "$ start fresh ClawPatch map and complete review",
         )
 
@@ -312,7 +362,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertIn("clawpatch fix --finding fnd_one", rendered)
         self.assertNotIn("RETRY", rendered)
         self.assertNotIn("attempt 2", rendered)
-        self.assertIn("[1/88] FIXED", rendered)
+        self.assertIn("[1/88] FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED", rendered)
+        self.assertIn("🤬🦶💥 NEW AND FUCKING IMPROVED", rendered)
         self.assertIn("fresh_review_generations=2", rendered)
         self.assertEqual(calls[0][1]["branch"], "current")
         self.assertEqual(calls[0][1]["push_mode"], "each")
@@ -344,7 +395,11 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         rendered = output.getvalue()
         self.assertEqual(code, 2)
-        self.assertIn("[1/24] STOPPED - fix-validation-failed", rendered)
+        self.assertIn(
+            "[1/24] STOPPED - fix-validation-failed — "
+            "🛑💥🤬 FUCK. THIS SHIT ISN'T SAFE TO ADVANCE",
+            rendered,
+        )
         self.assertIn("source left in place: app.py", rendered)
         self.assertNotIn("RETRY", rendered)
 

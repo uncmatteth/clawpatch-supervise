@@ -1,5 +1,9 @@
 # ClawPatch Supervise
 
+> **🤬🦶💥 NEW AND FUCKING IMPROVED — NOW WITH MORE CURSING 🔨🗑️🔥**
+>
+> Same exact checkpoints, verified repairs, and completion proof. Funnier terminal. Angrier bugs.
+
 > The outside-the-repo supervisor that keeps a ClawPatch repair queue honest, resumable, and moving without skipping the finding that caused trouble.
 
 [![Cross-platform tests](https://github.com/uncmatteth/clawpatch-supervise/actions/workflows/test.yml/badge.svg)](https://github.com/uncmatteth/clawpatch-supervise/actions/workflows/test.yml)
@@ -71,7 +75,9 @@ Use `--push none` if you want verified local commits without publishing them. Us
 
 ## Why I made this
 
-I built this because a ClawPatch queue is not the same thing as one ClawPatch command.
+I made this because ClawPatch is fucking awesome at finding garbage bugs that AI agents leave behind, but operating a long repair queue by hand sucks. I do not want to decode every internal step or copy and paste `next`, `show`, `fix`, and `revalidate` commands over and over just to make sure the same broken finding does not get skipped. Nobody else should have to babysit that shit either.
+
+You point `clawpatch-supervise` at a repository. It runs the queue, shows what it is doing in plain language, remembers the exact finding and source changes, keeps working when ClawPatch produces real progress, and stops safely when the evidence does not justify another move. The cursing is personality; the commands, paths, finding IDs, commits, errors, and proof stay exact.
 
 On a real repository, a repair can take several attempts. A provider can time out after changing source. Validation can fail after the first useful edit. Revalidation can reopen the same finding. A process can die with a good partial repair still sitting in the worktree. If you blindly run the same command again, you can loop forever. If you call `clawpatch next`, you can abandon the exact finding that still needs to be resolved. If you let a chat session remember the queue, context compaction or a closed terminal can erase the only copy of what happened.
 
@@ -315,7 +321,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.6 alpha**.
+Current release: **0.1.7 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 
@@ -326,7 +332,7 @@ The state and safety contracts are intentionally strict. If the supervisor canno
 - [ClawPatch Supervise on ClawHub](https://clawhub.ai/uncmatteth/skills/clawpatch-supervise)
 - [BTT Labs](https://bttlabs.fun)
 
-Built by Uncle Matt at BTT Labs to make long repair queues verifiable from the first finding through final completion proof.
+Built by Uncle Matt at BTT Labs because ClawPatch is fucking awesome, AI agents leave garbage behind, and copying repair commands all night is bullshit.
 
 ## License
 
