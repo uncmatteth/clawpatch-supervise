@@ -1,4 +1,5 @@
 from pathlib import Path
+import tomllib
 import unittest
 
 
@@ -6,6 +7,17 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstallerContractTests(unittest.TestCase):
+    def test_installer_defaults_match_the_packaged_release(self) -> None:
+        project = tomllib.loads(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
+        version = project["version"]
+        linux = (REPOSITORY_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
+        windows = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
+
+        self.assertIn(f'CLAWPATCH_SUPERVISE_VERSION:-{version}', linux)
+        self.assertIn(f'[string]$Version = "{version}"', windows)
+
     def test_linux_installer_bootstraps_latest_clawpatch_only_when_missing(self) -> None:
         script = (REPOSITORY_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
 
