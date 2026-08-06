@@ -16,6 +16,20 @@ command -v git >/dev/null 2>&1 || {
   exit 2
 }
 
+if ! command -v clawpatch >/dev/null 2>&1; then
+  command -v npm >/dev/null 2>&1 || {
+    echo "npm is required to install ClawPatch." >&2
+    exit 2
+  }
+  npm install --global clawpatch@latest
+  npm_global_prefix="$(npm prefix --global)"
+  export PATH="$npm_global_prefix/bin:$PATH"
+  command -v clawpatch >/dev/null 2>&1 || {
+    echo "ClawPatch was installed but its command is not on PATH." >&2
+    exit 2
+  }
+fi
+
 "$python_command" -m venv "$install_root/venv"
 "$install_root/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$source_package"
 mkdir -p "$bin_dir"
@@ -42,8 +56,6 @@ fi
 
 "$bin_dir/clawpatch-supervise" --version
 "$clawhub_command" --cli-version
+clawpatch --version
 echo "Installed command: $bin_dir/clawpatch-supervise"
 echo "ClawHub command: $clawhub_command"
-if ! command -v clawpatch >/dev/null 2>&1; then
-  echo "ClawPatch is not on PATH yet. Install ClawPatch before running a queue." >&2
-fi

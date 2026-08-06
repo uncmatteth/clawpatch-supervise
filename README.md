@@ -12,14 +12,7 @@ It is a standalone Python package, a command-line program, and a public [ClawHub
 
 ## Quick start
 
-You need Python 3.11 or newer, Git, Node/npm, ClawPatch 0.7.2 or newer, and a provider already authenticated for ClawPatch.
-
-Install ClawPatch first:
-
-```bash
-npm install --global clawpatch
-clawpatch --version
-```
+You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, either installer below installs `clawpatch@latest` globally with npm and verifies the command. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 or newer is required.
 
 ### Linux
 

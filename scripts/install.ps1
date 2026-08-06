@@ -12,6 +12,33 @@ if ([string]::IsNullOrWhiteSpace($Source)) {
     $Source = "https://github.com/uncmatteth/clawpatch-supervise/releases/download/v$Version/clawpatch_supervise-$Version-py3-none-any.whl"
 }
 
+$clawpatch = Get-Command clawpatch -ErrorAction SilentlyContinue
+if ($null -eq $clawpatch) {
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if ($null -eq $npm) {
+        throw "npm is required to install ClawPatch."
+    }
+
+    & $npm.Source install --global clawpatch@latest
+    if ($LASTEXITCODE -ne 0) {
+        throw "npm could not install ClawPatch."
+    }
+
+    $npmPrefixOutput = & $npm.Source prefix --global
+    if ($LASTEXITCODE -ne 0) {
+        throw "npm could not report its global installation directory."
+    }
+    $npmPrefix = ($npmPrefixOutput | Select-Object -Last 1).Trim()
+    if (-not [string]::IsNullOrWhiteSpace($npmPrefix)) {
+        $env:Path = "$npmPrefix;$env:Path"
+    }
+
+    $clawpatch = Get-Command clawpatch -ErrorAction SilentlyContinue
+    if ($null -eq $clawpatch) {
+        throw "ClawPatch was installed but its command is not on PATH."
+    }
+}
+
 $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
 $python = Get-Command python -ErrorAction SilentlyContinue
 if ($null -ne $pyLauncher) {
@@ -77,8 +104,7 @@ if ($AddToPath) {
 & $supervisor --version
 & $clawHubPath --cli-version
 if ($LASTEXITCODE -ne 0) { throw "The ClawHub command failed its startup check." }
+& $clawpatch.Source --version
+if ($LASTEXITCODE -ne 0) { throw "The ClawPatch command failed its startup check." }
 Write-Host "Installed command: $wrapper"
 Write-Host "ClawHub command: $clawHubPath"
-if ($null -eq (Get-Command clawpatch -ErrorAction SilentlyContinue)) {
-    Write-Warning "ClawPatch is not on PATH yet. Install ClawPatch before running a queue."
-}
