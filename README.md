@@ -57,6 +57,11 @@ platform path rules:
 clawpatch-supervise --repo /absolute/path/to/repository --print-state-path
 ```
 
+The path is stable across source, virtual-environment, and packaged launches.
+On first apply, version 0.1.2 migrates an exact matching per-repository progress
+checkpoint from the legacy Manageroo or install-adjacent state location before
+continuing; conflicting records stop unchanged.
+
 `--resume-stopped` does not mean "ignore failure." It accepts only an exact
 durable checkpoint that still owns the same repository, branch, HEAD, finding,
 source paths, and source fingerprint.

@@ -26,6 +26,7 @@ from clawpatch_supervise.clawpatch_release import (
     _is_clawpatch_argv,
     _json_clawpatch,
     _load_release_progress,
+    _migrate_legacy_external_progress,
     _must_clawpatch,
     _next_finding,
     _patch_attempt_from_show,
@@ -36,6 +37,7 @@ from clawpatch_supervise.clawpatch_release import (
     _publish_final_state,
     _push_and_verify,
     _release_clawpatch_env,
+    _repository_state_root,
     _rebuilt_generation_owns_checkpoint_source,
     _require_synchronized_remote_branch,
     _resume_stopped_attempt,
@@ -238,11 +240,47 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         "clawpatch_supervise.clawpatch_release.sys.prefix",
         "/home/test/.local/share/clawpatch-supervise/venv",
     )
-    def test_dedicated_external_venv_owns_its_state_beside_the_install(self):
-        self.assertEqual(
-            _external_state_home(),
-            Path("/home/test/.local/share/clawpatch-supervise/state").resolve(),
-        )
+    def test_external_state_home_is_stable_across_python_environments(self):
+        with patch.dict(os.environ, {"XDG_STATE_HOME": "/home/test/.local/state"}):
+            self.assertEqual(
+                _external_state_home(),
+                Path("/home/test/.local/state/clawpatch-supervise"),
+            )
+
+    def test_external_progress_migrates_from_the_old_venv_state_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_repo(repo)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            legacy_home = root / "old-venv-state"
+            legacy_root = _repository_state_root(legacy_home, repo)
+            current_root = root / "canonical" / "repositories" / "current"
+            expected = _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=head,
+                phase="stopped",
+                state_root=legacy_root,
+            )
+
+            with patch(
+                "clawpatch_supervise.clawpatch_release._legacy_external_state_homes",
+                return_value=(legacy_home,),
+            ):
+                _migrate_legacy_external_progress(repo, state_root=current_root)
+
+            self.assertEqual(
+                _load_release_progress(repo, state_root=current_root), expected
+            )
+            self.assertFalse((legacy_root / "clawpatch-release-progress.json").exists())
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._next_finding")

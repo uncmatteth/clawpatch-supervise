@@ -1163,17 +1163,37 @@ def _revalidate(
 
 
 def _external_state_home() -> Path:
-    prefix = Path(sys.prefix).resolve()
-    base_prefix = Path(sys.base_prefix).resolve()
-    if prefix != base_prefix and prefix.name.casefold() in {"venv", ".venv"}:
-        return prefix.parent / "state"
     if os.name == "nt":
         local_app_data = os.environ.get("LOCALAPPDATA")
         base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
-        return base / "Manageroo" / "clawpatch-supervise" / "state"
+        return base / "ClawPatchSupervise" / "state"
     xdg_state_home = os.environ.get("XDG_STATE_HOME")
     base = Path(xdg_state_home) if xdg_state_home else Path.home() / ".local" / "state"
-    return base / "manageroo" / "clawpatch-supervise"
+    return base / "clawpatch-supervise"
+
+
+def _legacy_external_state_homes() -> tuple[Path, ...]:
+    homes: list[Path] = []
+    prefix = Path(sys.prefix).resolve()
+    base_prefix = Path(sys.base_prefix).resolve()
+    if prefix != base_prefix and prefix.name.casefold() in {"venv", ".venv"}:
+        homes.append(prefix.parent / "state")
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA")
+        base = Path(local_app_data) if local_app_data else Path.home() / "AppData" / "Local"
+        homes.append(base / "Manageroo" / "clawpatch-supervise" / "state")
+    else:
+        xdg_state_home = os.environ.get("XDG_STATE_HOME")
+        base = Path(xdg_state_home) if xdg_state_home else Path.home() / ".local" / "state"
+        homes.append(base / "manageroo" / "clawpatch-supervise")
+        homes.append(Path.home() / ".local" / "share" / "clawpatch-supervise" / "state")
+    canonical = _external_state_home().resolve()
+    return tuple(dict.fromkeys(home.resolve() for home in homes if home.resolve() != canonical))
+
+
+def _repository_state_root(home: Path, repo: Path) -> Path:
+    identity = hashlib.sha256(os.fsencode(str(repo.resolve()))).hexdigest()
+    return home / "repositories" / identity
 
 
 def _release_state_root(repo: Path, *, integration_mode: str) -> Path:
@@ -1182,8 +1202,7 @@ def _release_state_root(repo: Path, *, integration_mode: str) -> Path:
     if integration_mode == "external":
         home = _external_state_home().resolve()
         repositories = home / "repositories"
-        identity = hashlib.sha256(os.fsencode(str(repo.resolve()))).hexdigest()
-        path = repositories / identity
+        path = _repository_state_root(home, repo)
         for candidate in (home, repositories, path):
             if candidate.is_symlink():
                 raise SafetyError(
@@ -1314,13 +1333,26 @@ def _load_release_progress(
 
 
 def _migrate_legacy_external_progress(repo: Path, *, state_root: Path) -> None:
-    legacy_root = repo / PROJECT_DIR / "cache"
-    legacy_path = _release_progress_path(repo, state_root=legacy_root)
-    if not legacy_path.is_file():
+    legacy_roots = [repo / PROJECT_DIR / "cache"]
+    legacy_roots.extend(
+        _repository_state_root(home, repo) for home in _legacy_external_state_homes()
+    )
+    legacy_records: list[tuple[Path, dict[str, Any]]] = []
+    for legacy_root in dict.fromkeys(legacy_roots):
+        legacy_path = _release_progress_path(repo, state_root=legacy_root)
+        if not legacy_path.is_file():
+            continue
+        legacy = _load_release_progress(repo, state_root=legacy_root)
+        if legacy is not None:
+            legacy_records.append((legacy_root, legacy))
+    if not legacy_records:
         return
-    legacy = _load_release_progress(repo, state_root=legacy_root)
-    if legacy is None:
-        return
+    legacy = legacy_records[0][1]
+    if any(record != legacy for _root, record in legacy_records[1:]):
+        raise SafetyError(
+            "External Clawpatch progress exists in multiple legacy state locations "
+            "with different ownership records."
+        )
     current_path = _release_progress_path(repo, state_root=state_root)
     if current_path.is_file():
         current = _load_release_progress(repo, state_root=state_root)
@@ -1333,12 +1365,13 @@ def _migrate_legacy_external_progress(repo: Path, *, state_root: Path) -> None:
         atomic_write_json(current_path, legacy)
         if _load_release_progress(repo, state_root=state_root) != legacy:
             raise SafetyError("External Clawpatch progress migration could not be verified.")
-    legacy_path.unlink()
-    for directory in (legacy_root, repo / PROJECT_DIR):
-        try:
-            directory.rmdir()
-        except OSError:
-            pass
+    for legacy_root, _record in legacy_records:
+        _release_progress_path(repo, state_root=legacy_root).unlink()
+        for directory in (legacy_root, repo / PROJECT_DIR):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
 
 
 def _checkpoint_can_follow_supervisor_upgrade(
