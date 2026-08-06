@@ -1193,6 +1193,11 @@ def _release_state_root(repo: Path, *, integration_mode: str) -> Path:
     raise SafetyError("integration_mode must be one of: manageroo, external.")
 
 
+def external_state_root(repo: Path) -> Path:
+    """Return the durable standalone state directory for a repository."""
+    return _release_state_root(repo.resolve(), integration_mode="external")
+
+
 def _release_progress_path(repo: Path, *, state_root: Path | None = None) -> Path:
     root = state_root if state_root is not None else repo / PROJECT_DIR / "cache"
     return root / "clawpatch-release-progress.json"

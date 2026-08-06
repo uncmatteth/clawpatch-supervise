@@ -6,6 +6,7 @@ from io import StringIO
 from pathlib import Path
 import tomllib
 import unittest
+from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_external import _render_event, main
 from clawpatch_supervise.clawpatch_protocol import RepairAction
@@ -15,6 +16,28 @@ from clawpatch_supervise.errors import SafetyError
 
 
 class ExternalClawpatchSupervisorTests(unittest.TestCase):
+    def test_version_is_available_without_running_clawpatch(self):
+        output = StringIO()
+        with self.assertRaises(SystemExit) as raised, redirect_stdout(output):
+            main(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.1")
+
+    def test_print_state_path_is_read_only_and_skips_preflight(self):
+        repo = Path("/tmp/example-repository")
+        expected = Path("/tmp/example-state")
+        output = StringIO()
+        with patch(
+            "clawpatch_supervise.clawpatch_external.external_state_root",
+            return_value=expected,
+        ) as state_root, redirect_stdout(output):
+            result = main(["--repo", str(repo), "--print-state-path"])
+
+        self.assertEqual(result, 0)
+        state_root.assert_called_once_with(repo)
+        self.assertEqual(output.getvalue().strip(), str(expected))
+
     def test_python_validation_environment_lifecycle_is_visible(self):
         self.assertEqual(
             _render_event(

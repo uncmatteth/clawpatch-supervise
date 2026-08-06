@@ -50,6 +50,13 @@ clawpatch-supervise \
   --resume-stopped
 ```
 
+For integrations that need the proof/checkpoint location without duplicating
+platform path rules:
+
+```bash
+clawpatch-supervise --repo /absolute/path/to/repository --print-state-path
+```
+
 `--resume-stopped` does not mean "ignore failure." It accepts only an exact
 durable checkpoint that still owns the same repository, branch, HEAD, finding,
 source paths, and source fingerprint.

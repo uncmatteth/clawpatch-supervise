@@ -7,10 +7,12 @@ from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Callable
 
+from . import __version__
 from .clawpatch_release import (
     CLAWPATCH_CHILD_WATCHDOG_SECONDS,
     ClawpatchCommandFailure,
     ClawpatchStop,
+    external_state_root,
     release_sweep,
     require_external_clawpatch_preflight,
 )
@@ -169,6 +171,12 @@ def main(
         description="Visibly process ClawPatch's live queue one current finding at a time.",
     )
     parser.add_argument("--repo", default=".")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "--print-state-path",
+        action="store_true",
+        help="print this repository's durable standalone state directory and exit",
+    )
     parser.add_argument("--branch", default="current")
     parser.add_argument("--push", choices=("none", "each", "final"), default="each")
     parser.add_argument("--publish-clawpatch-state", action="store_true")
@@ -195,6 +203,9 @@ def main(
     args = parser.parse_args(argv)
     if args.timeout_minutes < 1:
         parser.error("--timeout-minutes must be at least 1")
+    if args.print_state_path:
+        print(external_state_root(Path(args.repo)))
+        return 0
     watchdog_seconds = args.timeout_minutes * 60
 
     state: dict[str, Any] = {
