@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -29,6 +30,8 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
             cwd=repo,
             check=True,
         )
+        subprocess.run(["git", "config", "commit.gpgSign", "false"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "core.hooksPath", "/dev/null"], cwd=repo, check=True)
         (repo / ".gitignore").write_text(".clawpatch/\n", encoding="utf-8")
         (repo / "app.py").write_text("before\n", encoding="utf-8")
         subprocess.run(["git", "add", ".gitignore", "app.py"], cwd=repo, check=True)
@@ -38,6 +41,53 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
         ).strip()
         head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
         return branch, head
+
+    def test_init_repo_ignores_host_signing_and_hooks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            hooks = root / "hooks"
+            hooks.mkdir()
+            failing_hook = hooks / "pre-commit"
+            failing_hook.write_text("#!/bin/sh\nexit 97\n", encoding="utf-8")
+            failing_hook.chmod(0o755)
+            failing_signer = root / "failing-signer"
+            failing_signer.write_text("#!/bin/sh\nexit 98\n", encoding="utf-8")
+            failing_signer.chmod(0o755)
+            global_config = root / "host-gitconfig"
+            for key, value in (
+                ("commit.gpgSign", "true"),
+                ("core.hooksPath", str(hooks)),
+                ("gpg.program", str(failing_signer)),
+            ):
+                subprocess.run(
+                    ["git", "config", "--file", str(global_config), key, value],
+                    check=True,
+                )
+
+            repo = root / "repo"
+            repo.mkdir()
+            with patch.dict(os.environ, {"GIT_CONFIG_GLOBAL": str(global_config)}):
+                self.init_repo(repo)
+                (repo / "app.py").write_text("after\n", encoding="utf-8")
+                subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+                subprocess.run(["git", "commit", "-q", "-m", "after"], cwd=repo, check=True)
+
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "config", "--local", "--get", "commit.gpgSign"],
+                    cwd=repo,
+                    text=True,
+                ).strip(),
+                "false",
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "config", "--local", "--get", "core.hooksPath"],
+                    cwd=repo,
+                    text=True,
+                ).strip(),
+                "/dev/null",
+            )
 
     def test_final_state_cleanup_restores_committed_config_and_removes_runtime_state(self):
         with tempfile.TemporaryDirectory() as temp:

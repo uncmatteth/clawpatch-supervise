@@ -93,6 +93,8 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         subprocess.run(
             ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
         )
+        subprocess.run(["git", "config", "commit.gpgSign", "false"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "core.hooksPath", "/dev/null"], cwd=repo, check=True)
         (repo / ".gitignore").write_text(".clawpatch/\n.manageroo/\n", encoding="utf-8")
         manageroo = repo / ".manageroo"
         manageroo.mkdir()
@@ -143,6 +145,8 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         subprocess.run(
             ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
         )
+        subprocess.run(["git", "config", "commit.gpgSign", "false"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "core.hooksPath", "/dev/null"], cwd=repo, check=True)
         (repo / ".gitignore").write_text(".clawpatch/\n", encoding="utf-8")
         subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
@@ -157,6 +161,12 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             ["git", "config", "user.email", "test@example.invalid"],
             cwd=dependency,
             check=True,
+        )
+        subprocess.run(
+            ["git", "config", "commit.gpgSign", "false"], cwd=dependency, check=True
+        )
+        subprocess.run(
+            ["git", "config", "core.hooksPath", "/dev/null"], cwd=dependency, check=True
         )
         source = dependency / "source.py"
         source.write_text("before\n", encoding="utf-8")
@@ -176,8 +186,15 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             cwd=repo,
             check=True,
         )
+        cloned_dependency = repo / path
+        subprocess.run(
+            ["git", "config", "commit.gpgSign", "false"], cwd=cloned_dependency, check=True
+        )
+        subprocess.run(
+            ["git", "config", "core.hooksPath", "/dev/null"], cwd=cloned_dependency, check=True
+        )
         subprocess.run(["git", "commit", "-q", "-am", "add dependency"], cwd=repo, check=True)
-        return repo / path
+        return cloned_dependency
 
     def test_source_fingerprint_hashes_untracked_symlink_without_following_directory(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -212,6 +229,22 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             repo.mkdir()
             self.init_plain_repo(repo)
             dependency = self.add_submodule(repo, root)
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "config", "--local", "--get", "commit.gpgSign"],
+                    cwd=dependency,
+                    text=True,
+                ).strip(),
+                "false",
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "config", "--local", "--get", "core.hooksPath"],
+                    cwd=dependency,
+                    text=True,
+                ).strip(),
+                "/dev/null",
+            )
             subprocess.run(["git", "config", "user.name", "Test"], cwd=dependency, check=True)
             subprocess.run(
                 ["git", "config", "user.email", "test@example.invalid"],
