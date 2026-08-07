@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterator
 
 from .clawpatch_protocol import (
     ClawpatchFailure,
+    ClawpatchFailureKind,
     RepairAction,
     classify_clawpatch_failure,
     decide_repair_transition,
@@ -2853,6 +2854,103 @@ def _stop_finding_iteration(
     return owned_paths
 
 
+def _complete_fixed_finding(
+    repo: Path,
+    finding_id: str,
+    *,
+    record: dict[str, Any],
+    branch: str,
+    original_head: str,
+    temporary_commit: str,
+    seen_states: set[str],
+    state_root: Path,
+    push_mode: str,
+    pushed: bool,
+    continuations: int,
+    progress: Callable[[dict[str, Any]], None] | None,
+    current: int | str,
+    total: int | str,
+) -> tuple[dict[str, Any], bool, int]:
+    no_commit_required = not temporary_commit and not _source_paths(repo)
+    if no_commit_required and _git_text(repo, ["git", "rev-parse", "HEAD"]) != original_head:
+        raise SafetyError(
+            "Git history changed while Clawpatch fixed a finding without source changes."
+        )
+    if progress is not None and not no_commit_required:
+        commit_command = (
+            f"git commit --amend -m 'clawpatch fix: {finding_id}'"
+            if temporary_commit
+            else f"git commit -m 'clawpatch fix: {finding_id}'"
+        )
+        progress(
+            {
+                "phase": "commit",
+                "current": current,
+                "total": total,
+                "finding_id": finding_id,
+                "command": commit_command,
+                "attempt": 1,
+                "max_attempts": 1,
+            }
+        )
+    if no_commit_required:
+        commit = ""
+    else:
+        try:
+            commit = _finalize_finding_commit(
+                repo,
+                finding_id=finding_id,
+                branch=branch,
+                original_head=original_head,
+                temporary_commit=temporary_commit,
+                seen_states=seen_states,
+            )
+        except BaseException:
+            _stop_finding_iteration(
+                repo,
+                finding_id=finding_id,
+                branch=branch,
+                original_head=original_head,
+                temporary_commit=temporary_commit,
+                seen_states=seen_states,
+                state_root=state_root,
+            )
+            raise
+    record["head_before"] = original_head
+    record["files_changed"] = _paths_between(repo, original_head, commit) if commit else []
+    record["commit"] = commit
+    _write_release_progress(
+        repo,
+        finding_id=finding_id,
+        branch=branch,
+        head_before=original_head,
+        phase="finalized",
+        owned_paths=list(record["files_changed"]),
+        source_states=sorted(seen_states),
+        state_root=state_root,
+    )
+    if push_mode == "each" and commit:
+        if progress is not None:
+            push_argv = (
+                f"git push -u origin {branch}" if not pushed else f"git push origin {branch}"
+            )
+            progress(
+                {
+                    "phase": "push",
+                    "current": current,
+                    "total": total,
+                    "finding_id": finding_id,
+                    "command": push_argv,
+                    "attempt": 1,
+                    "max_attempts": 1,
+                }
+            )
+        _push_and_verify(repo, branch, first=not pushed)
+        pushed = True
+    _clear_release_progress(repo, state_root=state_root)
+    return record, pushed, continuations
+
+
 def _process_finding_until_fixed(
     repo: Path,
     finding_id: str,
@@ -2939,6 +3037,69 @@ def _process_finding_until_fixed(
         except _UnresolvedFinding as exc:
             failure = exc.failure or failure_from_legacy_outcome(exc.outcome)
             has_source_progress = bool(_source_paths(repo))
+            if (
+                failure is not None
+                and failure.phase == "fix"
+                and failure.kind is ClawpatchFailureKind.VALIDATION_FAILED
+                and not has_source_progress
+            ):
+                try:
+                    gate_runs = _run_project_gates(
+                        repo,
+                        finding_id=finding_id,
+                        required=require_project_gates,
+                    )
+                    validation = _revalidate(
+                        repo,
+                        finding_id,
+                        env=env,
+                        expected_paths=[],
+                        progress=progress,
+                        current=current,
+                        total=total,
+                    )
+                except BaseException:
+                    _stop_finding_iteration(
+                        repo,
+                        finding_id=finding_id,
+                        branch=branch,
+                        original_head=original_head,
+                        temporary_commit=temporary_commit,
+                        seen_states=seen_states,
+                        state_root=state_root,
+                    )
+                    raise
+                if validation.get("outcome") == "fixed":
+                    record = {
+                        "finding_id": finding_id,
+                        "inspection": inspected,
+                        "head_before": original_head,
+                        "patch_attempt": "existing-repair-revalidation",
+                        "files_changed": (
+                            _paths_between(repo, original_head, temporary_commit)
+                            if temporary_commit
+                            else []
+                        ),
+                        "gate_runs": gate_runs,
+                        "revalidation": validation,
+                        "commit": "",
+                    }
+                    return _complete_fixed_finding(
+                        repo,
+                        finding_id,
+                        record=record,
+                        branch=branch,
+                        original_head=original_head,
+                        temporary_commit=temporary_commit,
+                        seen_states=seen_states,
+                        state_root=state_root,
+                        push_mode=push_mode,
+                        pushed=pushed,
+                        continuations=continuations,
+                        progress=progress,
+                        current=current,
+                        total=total,
+                    )
             if failure is None:
                 action = RepairAction.STOP_TERMINAL
             else:
@@ -3233,84 +3394,22 @@ def _process_finding_until_fixed(
                 repair_action=revalidation_decision.action,
             )
             raise SafetyError("Clawpatch returned an unsupported revalidation outcome.")
-        no_commit_required = not temporary_commit and not _source_paths(repo)
-        if no_commit_required and _git_text(repo, ["git", "rev-parse", "HEAD"]) != original_head:
-            raise SafetyError(
-                "Git history changed while Clawpatch fixed a finding without source changes."
-            )
-        if progress is not None and not no_commit_required:
-            commit_command = (
-                f"git commit --amend -m 'clawpatch fix: {finding_id}'"
-                if temporary_commit
-                else f"git commit -m 'clawpatch fix: {finding_id}'"
-            )
-            progress(
-                {
-                    "phase": "commit",
-                    "current": current,
-                    "total": total,
-                    "finding_id": finding_id,
-                    "command": commit_command,
-                    "attempt": 1,
-                    "max_attempts": 1,
-                }
-            )
-        if no_commit_required:
-            commit = ""
-        else:
-            try:
-                commit = _finalize_finding_commit(
-                    repo,
-                    finding_id=finding_id,
-                    branch=branch,
-                    original_head=original_head,
-                    temporary_commit=temporary_commit,
-                    seen_states=seen_states,
-                )
-            except BaseException:
-                _stop_finding_iteration(
-                    repo,
-                    finding_id=finding_id,
-                    branch=branch,
-                    original_head=original_head,
-                    temporary_commit=temporary_commit,
-                    seen_states=seen_states,
-                    state_root=state_root,
-                )
-                raise
-        record["head_before"] = original_head
-        record["files_changed"] = _paths_between(repo, original_head, commit) if commit else []
-        record["commit"] = commit
-        _write_release_progress(
+        return _complete_fixed_finding(
             repo,
-            finding_id=finding_id,
+            finding_id,
+            record=record,
             branch=branch,
-            head_before=original_head,
-            phase="finalized",
-            owned_paths=list(record["files_changed"]),
-            source_states=sorted(seen_states),
+            original_head=original_head,
+            temporary_commit=temporary_commit,
+            seen_states=seen_states,
             state_root=state_root,
+            push_mode=push_mode,
+            pushed=pushed,
+            continuations=continuations,
+            progress=progress,
+            current=current,
+            total=total,
         )
-        if push_mode == "each" and commit:
-            if progress is not None:
-                push_argv = (
-                    f"git push -u origin {branch}" if not pushed else f"git push origin {branch}"
-                )
-                progress(
-                    {
-                        "phase": "push",
-                        "current": current,
-                        "total": total,
-                        "finding_id": finding_id,
-                        "command": push_argv,
-                        "attempt": 1,
-                        "max_attempts": 1,
-                    }
-                )
-            _push_and_verify(repo, branch, first=not pushed)
-            pushed = True
-        _clear_release_progress(repo, state_root=state_root)
-        return record, pushed, continuations
 
 
 def _push_and_verify(repo: Path, branch: str, *, first: bool) -> None:
