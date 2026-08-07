@@ -398,7 +398,13 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             }
 
         output = StringIO()
-        with redirect_stdout(output):
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(output),
+        ):
             code = main(
                 ["--fresh"],
                 run_sweep=fake_sweep,
@@ -476,7 +482,13 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             }
 
         output = StringIO()
-        with redirect_stdout(output):
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(output),
+        ):
             code = main(
                 ["--repo", ".", "--fresh"],
                 run_sweep=fake_sweep,
@@ -536,7 +548,13 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             calls.append((repo, kwargs))
             return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc123"}
 
-        with redirect_stdout(StringIO()):
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(StringIO()),
+        ):
             code = main(
                 ["--repo", ".", "--fresh"],
                 run_sweep=fake_sweep,
@@ -547,6 +565,94 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(calls[0][1]["fresh"])
         self.assertEqual(calls[0][1]["child_timeout_seconds"], 900)
+
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_explicit_fresh_refuses_to_discard_an_unsafe_queue(self, _state_exists):
+        cases = (
+            ("open findings", {"openFindings": 1, "activeLocks": 0, "lockFiles": 0}, None),
+            ("active locks", {"openFindings": 0, "activeLocks": 1, "lockFiles": 0}, None),
+            ("lock files", {"openFindings": 0, "activeLocks": 0, "lockFiles": 1}, None),
+            (
+                "uncertain findings",
+                {"openFindings": 0, "activeLocks": 0, "lockFiles": 0},
+                {"total": 1},
+            ),
+        )
+
+        for label, status, uncertain in cases:
+            with self.subTest(label=label):
+                calls = []
+                state_results = [status]
+                if uncertain is not None:
+                    state_results.append(uncertain)
+
+                def fake_sweep(repo: Path, **kwargs):
+                    calls.append((repo, kwargs))
+                    return {
+                        "ok": True,
+                        "finding_count": 0,
+                        "open_findings": 0,
+                        "git_head": "abc123",
+                    }
+
+                with (
+                    patch(
+                        "clawpatch_supervise.clawpatch_external._run_state_query",
+                        side_effect=state_results,
+                    ),
+                    redirect_stdout(StringIO()),
+                ):
+                    code = main(
+                        ["--repo", ".", "--fresh"],
+                        run_sweep=fake_sweep,
+                        ensure_repository_idle=lambda _repo: None,
+                        heartbeat_seconds=0,
+                    )
+
+                self.assertEqual(code, 2)
+                self.assertEqual(calls, [])
+
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
+    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_explicit_fresh_refuses_to_discard_retained_source(
+        self, _state_exists, _queue_is_clean, _source_paths
+    ):
+        calls = []
+
+        with redirect_stdout(StringIO()):
+            code = main(
+                ["--repo", ".", "--fresh"],
+                run_sweep=lambda repo, **kwargs: calls.append((repo, kwargs)),
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])
+
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_explicit_fresh_resets_a_proven_clean_queue(
+        self, _state_exists, _queue_is_clean, _source_paths
+    ):
+        calls = []
+
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc123"}
+
+        with redirect_stdout(StringIO()):
+            code = main(
+                ["--repo", ".", "--fresh"],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(calls[0][1]["fresh"])
 
     def test_resume_stopped_disables_only_the_default_fresh_start(self):
         calls = []

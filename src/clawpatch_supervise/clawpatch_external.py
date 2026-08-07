@@ -68,14 +68,20 @@ def _existing_queue_is_clean(repo: Path) -> bool:
 
 
 def _resolve_fresh_mode(repo: Path, requested: bool | None) -> bool:
-    if requested is not None:
-        return requested
+    if requested is False:
+        return False
     if not _clawpatch_state_exists(repo):
         return True
     if not _existing_queue_is_clean(repo):
+        if requested is True:
+            raise SafetyError("Explicit --fresh requires an existing ClawPatch queue to be clean.")
         return False
     if _source_paths(repo):
+        if requested is True:
+            raise SafetyError("Explicit --fresh refuses to discard retained project source changes.")
         return False
+    if requested is True:
+        return True
     if not sys.stdin.isatty():
         print(
             "Existing clean .clawpatch state retained; use --fresh to explicitly start over.",
