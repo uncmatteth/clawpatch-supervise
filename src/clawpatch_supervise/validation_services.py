@@ -494,6 +494,23 @@ def _remove_container(
         )
 
 
+def _start_postgres_container(
+    repo: Path,
+    container_name: str,
+    argv: list[str],
+    *,
+    run: RunCommand,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        return _checked(run, argv, repo=repo, timeout=180, action="startup")
+    except BaseException as startup_error:
+        try:
+            _remove_container(repo, container_name, run=run)
+        except SafetyError as cleanup_error:
+            startup_error.add_note(f"Disposable PostgreSQL cleanup also failed: {cleanup_error}")
+        raise
+
+
 @contextmanager
 def _provision_postgres_test_environment(
     repo: Path,
@@ -542,8 +559,9 @@ def _provision_postgres_test_environment(
             if os.name != "nt":
                 os.fchmod(handle.fileno(), 0o600)
             handle.write(f"POSTGRES_PASSWORD={password}\n")
-        result = _checked(
-            run,
+        result = _start_postgres_container(
+            root,
+            container_name,
             [
                 "docker",
                 "run",
@@ -570,9 +588,7 @@ def _provision_postgres_test_environment(
                 "--pull=missing",
                 image,
             ],
-            repo=root,
-            timeout=180,
-            action="startup",
+            run=run,
         )
     container_id = result.stdout.strip()
     body_error: BaseException | None = None
