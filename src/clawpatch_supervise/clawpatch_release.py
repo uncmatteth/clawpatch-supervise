@@ -1181,7 +1181,11 @@ def _revalidate(
                 failure=classify_clawpatch_failure("revalidation", 23),
             ) from exc
         raise
-    if outcome == "uncertain" and env.get("CLAWPATCH_CODEX_SANDBOX") in {None, "read-only"}:
+    if outcome in {"open", "uncertain"} and env.get("CLAWPATCH_CODEX_SANDBOX") in {
+        None,
+        "read-only",
+    }:
+        initial_outcome = outcome
         escalated_env = dict(env)
         escalated_env["CLAWPATCH_CODEX_SANDBOX"] = "workspace-write"
         _argv, escalated, escalated_outcome = _revalidation_payload(
@@ -1195,9 +1199,13 @@ def _revalidate(
         )
         payload = dict(escalated)
         payload["managerooSandboxEscalated"] = True
-        payload["managerooInitialOutcome"] = outcome
+        payload["managerooInitialOutcome"] = initial_outcome
         outcome = escalated_outcome
-        if outcome == "uncertain" and env.get("MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK") == "1":
+        if (
+            outcome in {"open", "uncertain"}
+            and env.get("MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK") == "1"
+        ):
+            workspace_write_outcome = outcome
             host_env = dict(env)
             host_env["CLAWPATCH_CODEX_SANDBOX"] = "bypass"
             _argv, host_payload, host_outcome = _revalidation_payload(
@@ -1212,8 +1220,8 @@ def _revalidate(
             payload = dict(host_payload)
             payload["managerooSandboxEscalated"] = True
             payload["managerooHostSandboxBypassed"] = True
-            payload["managerooInitialOutcome"] = "uncertain"
-            payload["managerooWorkspaceWriteOutcome"] = outcome
+            payload["managerooInitialOutcome"] = initial_outcome
+            payload["managerooWorkspaceWriteOutcome"] = workspace_write_outcome
             outcome = host_outcome
     after = _source_state_fingerprint(repo)
     if after != before:

@@ -153,8 +153,8 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Repository ownership stays clear.** Fresh runs exclude Git submodules and their descendants from ClawPatch review, so the queue repairs code owned by the target repository instead of editing a dependency checkout.
 - **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
-- **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and inherited database credentials and reset guards are removed from ClawPatch child processes.
-- **New evidence gets another chance.** An open revalidation can inform up to two additional attempts on the same finding without skipping ahead.
+- **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and inherited database credentials and reset guards are removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
+- **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder before another same-finding fix attempt. A genuinely open result can inform up to two additional attempts without skipping ahead.
 - **Existing queues do not get erased.** The default command resumes the current `.clawpatch` queue. A reset is offered only for a proven-clean queue with clean project source, and dirty source blocks reset.
 - **Zero heuristic features are not completion.** The supervisor asks ClawPatch's own agent mapper to inspect the repository before accepting an empty map, which keeps Solidity and other unsupported heuristic languages in the real review flow.
 - **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary.
@@ -326,7 +326,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.10 alpha**.
+Current release: **0.1.11 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

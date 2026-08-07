@@ -18,14 +18,11 @@ from urllib.parse import quote
 
 from .errors import SafetyError
 
-
 _COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
 _IGNORED_DIRECTORIES = frozenset(
     {".git", ".clawpatch", ".manageroo", "node_modules", "dist", "build", "target", ".venv", "venv"}
 )
-_TEST_SUFFIXES = frozenset(
-    {".cjs", ".js", ".jsx", ".mjs", ".py", ".rb", ".ts", ".tsx"}
-)
+_TEST_SUFFIXES = frozenset({".cjs", ".js", ".jsx", ".mjs", ".py", ".rb", ".ts", ".tsx"})
 _OFFICIAL_POSTGRES_IMAGE = re.compile(
     r"^(?:(?:docker\.io/)?library/)?postgres:"
     r"(?:[1-9][0-9]*(?:\.[0-9]+)?(?:-[A-Za-z0-9_.-]+)?|sha256:[0-9a-f]{64})$"
@@ -61,9 +58,7 @@ RunCommand = Callable[..., subprocess.CompletedProcess[str]]
 Progress = Callable[[dict[str, object]], None]
 
 
-def _run_command(
-    argv: list[str], *, cwd: Path, timeout: int
-) -> subprocess.CompletedProcess[str]:
+def _run_command(argv: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         cwd=cwd,
@@ -85,9 +80,7 @@ def _test_contract_envs(repo: Path) -> tuple[str, tuple[str, ...]] | None:
     found_url = False
     for root, directories, files in os.walk(repo):
         directories[:] = sorted(
-            directory
-            for directory in directories
-            if directory not in _IGNORED_DIRECTORIES
+            directory for directory in directories if directory not in _IGNORED_DIRECTORIES
         )
         root_path = Path(root)
         for name in sorted(files):
@@ -155,8 +148,7 @@ def _test_contract_envs(repo: Path) -> tuple[str, tuple[str, ...]] | None:
     unexpected = sorted(reset_envs - {reset_env})
     if unexpected:
         raise SafetyError(
-            "Test sources contain an unconfigured database reset guard: "
-            + ", ".join(unexpected)
+            "Test sources contain an unconfigured database reset guard: " + ", ".join(unexpected)
         )
     if reset_env not in reset_envs:
         return None
@@ -204,9 +196,9 @@ def _python_test_contract(repo: Path) -> PythonTestContract | None:
             "ClawPatch Supervise could not read this repository's Python validation manifest."
         ) from exc
     tool = payload.get("tool")
-    pytest_configured = (
-        isinstance(tool, dict) and isinstance(tool.get("pytest"), dict)
-    ) or (repo / "pytest.ini").is_file()
+    pytest_configured = (isinstance(tool, dict) and isinstance(tool.get("pytest"), dict)) or (
+        repo / "pytest.ini"
+    ).is_file()
     if not pytest_configured:
         return None
     project = payload.get("project")
@@ -273,9 +265,7 @@ def _checked_python_environment_command(
             f"Disposable Python validation environment {action} could not start."
         ) from exc
     except subprocess.TimeoutExpired as exc:
-        raise SafetyError(
-            f"Disposable Python validation environment {action} timed out."
-        ) from exc
+        raise SafetyError(f"Disposable Python validation environment {action} timed out.") from exc
     if result.returncode != 0:
         output = "\n".join(value for value in (result.stdout, result.stderr) if value)
         raise SafetyError(
@@ -534,8 +524,7 @@ def _provision_postgres_test_environment(
     repository_identity = _repository_identity(root)
     validation_run_identity = secrets.token_hex(16)
     container_name = (
-        f"manageroo-validation-postgres-{repository_identity[:16]}-"
-        f"{validation_run_identity}"
+        f"manageroo-validation-postgres-{repository_identity[:16]}-{validation_run_identity}"
     )
     result = _checked(
         run,
@@ -570,10 +559,9 @@ def _provision_postgres_test_environment(
         action="startup",
     )
     container_id = result.stdout.strip()
-    valid_container_id = _CONTAINER_ID.fullmatch(container_id) is not None
     body_error: BaseException | None = None
     try:
-        if not valid_container_id:
+        if _CONTAINER_ID.fullmatch(container_id) is None:
             raise SafetyError("Docker returned an invalid disposable PostgreSQL container ID.")
         port = _published_port(root, container_id, run=run)
         deadline = monotonic() + _DEFAULT_READY_SECONDS
@@ -598,9 +586,7 @@ def _provision_postgres_test_environment(
             if ready.returncode == 0:
                 break
             if monotonic() >= deadline:
-                raise SafetyError(
-                    "Disposable PostgreSQL did not become healthy within 90 seconds."
-                )
+                raise SafetyError("Disposable PostgreSQL did not become healthy within 90 seconds.")
             sleep(1)
         child_env = {
             contract.url_env: (
@@ -624,25 +610,22 @@ def _provision_postgres_test_environment(
         body_error = exc
         raise
     finally:
-        if valid_container_id:
-            try:
-                _remove_container(root, container_id, run=run)
-            except SafetyError as cleanup_error:
-                if body_error is None:
-                    raise
-                body_error.add_note(
-                    f"Disposable PostgreSQL cleanup also failed: {cleanup_error}"
+        try:
+            _remove_container(root, container_name, run=run)
+        except SafetyError as cleanup_error:
+            if body_error is None:
+                raise
+            body_error.add_note(f"Disposable PostgreSQL cleanup also failed: {cleanup_error}")
+        else:
+            if progress is not None:
+                progress(
+                    {
+                        "phase": "validation-service-cleanup",
+                        "current": "?",
+                        "total": "?",
+                        "detail": "owned disposable PostgreSQL validation database removed",
+                    }
                 )
-            else:
-                if progress is not None:
-                    progress(
-                        {
-                            "phase": "validation-service-cleanup",
-                            "current": "?",
-                            "total": "?",
-                            "detail": "owned disposable PostgreSQL validation database removed",
-                        }
-                    )
 
 
 @contextmanager

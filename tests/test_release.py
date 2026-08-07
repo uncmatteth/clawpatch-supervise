@@ -1664,6 +1664,52 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         )
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_external_open_revalidation_uses_trusted_host_after_sandbox_block(self, json_clawpatch):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("repair already committed\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "repair"], cwd=repo, check=True)
+            json_clawpatch.side_effect = [
+                {
+                    "finding": "fnd_one",
+                    "outcome": "open",
+                    "reasoning": "validator could not bind 127.0.0.1 in the read-only sandbox",
+                },
+                {
+                    "finding": "fnd_one",
+                    "outcome": "open",
+                    "reasoning": "validator could not bind 127.0.0.1 in workspace-write",
+                },
+                {"finding": "fnd_one", "outcome": "fixed"},
+            ]
+            env = {"MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK": "1"}
+
+            result = _revalidate(
+                repo,
+                "fnd_one",
+                env=env,
+                expected_paths=[],
+            )
+
+        self.assertEqual(result["outcome"], "fixed")
+        self.assertTrue(result["managerooSandboxEscalated"])
+        self.assertTrue(result["managerooHostSandboxBypassed"])
+        self.assertEqual(result["managerooInitialOutcome"], "open")
+        self.assertEqual(result["managerooWorkspaceWriteOutcome"], "open")
+        self.assertEqual(json_clawpatch.call_count, 3)
+        self.assertEqual(
+            json_clawpatch.call_args_list[1].kwargs["env"]["CLAWPATCH_CODEX_SANDBOX"],
+            "workspace-write",
+        )
+        self.assertEqual(
+            json_clawpatch.call_args_list[2].kwargs["env"]["CLAWPATCH_CODEX_SANDBOX"],
+            "bypass",
+        )
+
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     def test_open_revalidation_returns_the_documented_same_finding_continuation(
         self, json_clawpatch
     ):
@@ -1689,7 +1735,13 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
 
         self.assertEqual(result["outcome"], "open")
-        self.assertEqual(json_clawpatch.call_count, 1)
+        self.assertTrue(result["managerooSandboxEscalated"])
+        self.assertEqual(result["managerooInitialOutcome"], "open")
+        self.assertEqual(json_clawpatch.call_count, 2)
+        self.assertEqual(
+            json_clawpatch.call_args_list[1].kwargs["env"]["CLAWPATCH_CODEX_SANDBOX"],
+            "workspace-write",
+        )
 
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._commit_attempt", return_value="partial123")

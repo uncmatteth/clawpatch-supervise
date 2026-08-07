@@ -17,6 +17,7 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 - Run the supervisor outside the target repository's implementation environment, even when the target is Manageroo itself.
 - Never skip, triage, hide, or manually repair an unresolved ClawPatch finding.
 - Never discard dirty source unless an exact supervisor checkpoint proves ownership.
+- Treat both open and uncertain sandbox-limited revalidation as candidates for the bounded workspace-write and authorized trusted-host retry ladder before another fix call.
 - Do not call an active queue complete. Require the final `COMPLETE` line and proof file.
 
 ## Workflow
@@ -77,7 +78,7 @@ Return:
 
 - Do not replace the command-owned queue with a report-derived loop.
 - Do not run `clawpatch next` to get around a stopped finding.
-- Do not blindly rerun the same fix against an unchanged source tree. The supervisor may make up to two additional same-finding attempts only after an open revalidation supplies new evidence.
+- Do not blindly rerun the same fix against an unchanged source tree. Open and uncertain revalidation first use the bounded writable/trusted-host ladder; a still-open result may inform up to two additional same-finding attempts.
 - Do not reset an existing open queue. Default invocation preserves it. If `fix` exits `6` after source progress, the supervisor must checkpoint and revalidate that repair before another fix.
 - Do not call completion unverifiable: successful completion retains `.clawpatch`, and `clawpatch status --json` must still work afterward.
 - Do not commit unrelated or pre-existing changes.
