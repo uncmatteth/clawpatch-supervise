@@ -180,8 +180,12 @@ class InstallerContractTests(unittest.TestCase):
             fake_bin / "py.cmd",
             "@echo off\n"
             'if not "%1"=="-3" exit /b 91\n'
-            'if "%2"=="-c" (\n'
-            '  if /I "%CLAWPATCH_TEST_PYTHON_VERSION_FAILS%"=="true" exit /b 1\n'
+            'if "%2"=="--version" (\n'
+            '  if /I "%CLAWPATCH_TEST_PYTHON_VERSION_FAILS%"=="true" (\n'
+            "    echo Python 3.10.0\n"
+            "  ) else (\n"
+            "    echo Python 3.12.0\n"
+            "  )\n"
             "  exit /b 0\n"
             ")\n"
             'if not "%2"=="-m" exit /b 92\n'

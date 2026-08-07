@@ -47,7 +47,14 @@ class OwnedRunDirectory:
 
     def child_environment(self) -> dict[str, str]:
         temporary = str(self.temporary_root)
-        return {"TMPDIR": temporary, "TMP": temporary, "TEMP": temporary}
+        return {
+            "TMPDIR": temporary,
+            "TMP": temporary,
+            "TEMP": temporary,
+            # A sandboxed Node child can create an owner-only compile cache that
+            # the parent Windows user cannot enumerate or remove afterward.
+            "NODE_DISABLE_COMPILE_CACHE": "1",
+        }
 
 
 def current_temporary_root() -> Path | None:
@@ -238,7 +245,14 @@ def cleanup_owned_runs(
             continue
         entries.append(CleanupEntry(candidate, "STALE", size))
         if apply:
-            _remove_exact_owned_run(candidate, cleanup_root)
+            try:
+                _remove_exact_owned_run(candidate, cleanup_root)
+            except OSError:
+                # Retain an owned stale run that Windows will not let this
+                # process traverse. One blocked cache must not prevent cleanup
+                # of other proven-owned runs or crash supervisor preflight.
+                entries[-1] = CleanupEntry(candidate, "BLOCKED", size)
+                continue
             removed += 1
             removed_bytes += size
     return CleanupReport(cleanup_root, tuple(entries), removed, removed_bytes)

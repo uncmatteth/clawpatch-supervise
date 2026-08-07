@@ -76,7 +76,7 @@ The supervisor resolves `--repo` to one canonical path before preflight and uses
 
 ### Clean up transient run data without deleting receipts
 
-Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. Release children inherit only a small cross-platform operational environment plus validated supervisor-owned overrides, so host provider, cloud, package-registry, and SSH credentials are not forwarded implicitly. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
+Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. The supervisor also sets `NODE_DISABLE_COMPILE_CACHE=1` because sandboxed Windows Node children can otherwise create an owner-only cache that the parent process cannot traverse or remove. Release children inherit only a small cross-platform operational environment plus validated supervisor-owned overrides, so host provider, cloud, package-registry, and SSH credentials are not forwarded implicitly. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
 
 An abrupt process kill or machine crash can prevent `finally` cleanup. The next launch automatically removes a marked run directory only after it is at least one hour old, its recorded process is gone, and no live process has a working directory or open file inside it. Linux uses `/proc`; other POSIX systems use a scoped `lsof` probe and retain the directory as `UNSAFE` when that inspection is unavailable or inconclusive. Inspect the same decision without changing anything:
 
@@ -90,7 +90,7 @@ Remove only entries reported as `STALE`:
 clawpatch-supervise cleanup --apply
 ```
 
-`ACTIVE`, `RECENT`, `UNOWNED`, and `UNSAFE` entries are retained. Cleanup never scans or deletes repository `.clawpatch` receipts, standalone checkpoints or completion proofs, dirty source repairs, Git worktrees, or npm/Cargo/Hardhat/uv/GitNexus caches it cannot prove this supervisor run owns. Older unmarked temporary data remains an explicit operator-cleanup decision instead of being guessed away.
+`ACTIVE`, `RECENT`, `UNOWNED`, `UNSAFE`, and `BLOCKED` entries are retained. `BLOCKED` means the directory is proven stale and supervisor-owned but the operating system denied removal; cleanup continues safely instead of crashing preflight. Cleanup never scans or deletes repository `.clawpatch` receipts, standalone checkpoints or completion proofs, dirty source repairs, Git worktrees, or npm/Cargo/Hardhat/uv/GitNexus caches it cannot prove this supervisor run owns. Older unmarked temporary data remains an explicit operator-cleanup decision instead of being guessed away.
 
 ## Why I made this
 

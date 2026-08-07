@@ -50,13 +50,24 @@ if ([string]::IsNullOrWhiteSpace($Source)) {
 $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
 $python = Get-Command python -ErrorAction SilentlyContinue
 if ($null -ne $pyLauncher) {
-    & $pyLauncher.Source -3 -c "import sys; raise SystemExit(sys.version_info < (3, 11))"
+    $pythonVersionOutput = & $pyLauncher.Source -3 --version 2>&1
+    $pythonVersionExitCode = $LASTEXITCODE
 } elseif ($null -ne $python) {
-    & $python.Source -c "import sys; raise SystemExit(sys.version_info < (3, 11))"
+    $pythonVersionOutput = & $python.Source --version 2>&1
+    $pythonVersionExitCode = $LASTEXITCODE
 } else {
     throw "Python 3.11 or newer is required."
 }
-if ($LASTEXITCODE -ne 0) {
+if ($pythonVersionExitCode -ne 0) {
+    throw "Python 3.11 or newer is required."
+}
+$pythonVersionText = [string]($pythonVersionOutput | Select-Object -Last 1)
+if ($pythonVersionText -notmatch '^Python\s+(\d+)\.(\d+)(?:\.|$)') {
+    throw "Python 3.11 or newer is required."
+}
+$pythonMajor = [int]$Matches[1]
+$pythonMinor = [int]$Matches[2]
+if ($pythonMajor -lt 3 -or ($pythonMajor -eq 3 -and $pythonMinor -lt 11)) {
     throw "Python 3.11 or newer is required."
 }
 
