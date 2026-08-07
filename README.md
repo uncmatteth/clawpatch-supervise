@@ -136,8 +136,8 @@ The supervisor provides:
 | ClawPatch result | Supervisor action |
 |---|---|
 | `fixed` with a verified repair | Create one exact-path repair commit, push if requested, continue. |
-| `open` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding. |
-| `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with the new evidence when it says `open`. |
+| `open` or `uncertain` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
+| `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with new `open` or `uncertain` evidence. |
 | Other validation/provider failure after new source progress | Preserve the exact progress and continue the same finding. |
 | `false-positive` | Restore only the exact supervisor-owned repair paths to the finding's starting tree, retire the checkpoint, continue. |
 | Open revalidation with no source changes | Feed the new evidence into up to two more same-finding attempts; never advance the queue. |
@@ -155,7 +155,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
 - **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a stopped checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor retires only the obsolete recovery wrapper. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and inherited database credentials and reset guards are removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
-- **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder before another same-finding fix attempt. A genuinely open result can inform up to two additional attempts without skipping ahead.
+- **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. When either result belongs to a genuinely changed repair tree, its concrete failures feed the next same-finding fix instead of stopping the queue. An unchanged uncertain result still stops rather than looping blindly.
 - **Existing queues do not get erased.** The default command resumes the current `.clawpatch` queue. A reset is offered only for a proven-clean queue with clean project source, and dirty source blocks reset.
 - **Zero heuristic features are not completion.** The supervisor asks ClawPatch's own agent mapper to inspect the repository before accepting an empty map, which keeps Solidity and other unsupported heuristic languages in the real review flow.
 - **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary.
@@ -333,7 +333,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.11 alpha**.
+Current release: **0.1.12 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

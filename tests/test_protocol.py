@@ -72,6 +72,13 @@ class ClawpatchProtocolTests(unittest.TestCase):
             RepairAction.STOP_TERMINAL,
         )
         self.assertEqual(
+            decide_repair_transition(
+                revalidation_outcome="uncertain",
+                has_source_progress=True,
+            ).action,
+            RepairAction.PRESERVE_AND_CONTINUE,
+        )
+        self.assertEqual(
             decide_repair_transition(revalidation_outcome="false-positive").action,
             RepairAction.DISCARD_AND_CONTINUE,
         )

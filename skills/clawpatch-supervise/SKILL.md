@@ -18,6 +18,7 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 - Never skip, triage, hide, or manually repair an unresolved ClawPatch finding.
 - Never discard dirty source unless an exact supervisor checkpoint proves ownership.
 - Treat both open and uncertain sandbox-limited revalidation as candidates for the bounded workspace-write and authorized trusted-host retry ladder before another fix call.
+- Continue an open or uncertain result only when the exact repair tree is genuinely new; preserve that tree and let the next same-finding fix use the validator's concrete evidence.
 - Do not call an active queue complete. Require the final `COMPLETE` line and proof file.
 
 ## Workflow
@@ -78,7 +79,7 @@ Return:
 
 - Do not replace the command-owned queue with a report-derived loop.
 - Do not run `clawpatch next` to get around a stopped finding.
-- Do not blindly rerun the same fix against an unchanged source tree. Open and uncertain revalidation first use the bounded writable/trusted-host ladder; a still-open result may inform up to two additional same-finding attempts.
+- Do not blindly rerun the same fix against an unchanged source tree. Open and uncertain revalidation first use the bounded writable/trusted-host ladder; either outcome may continue the same finding only with a genuinely changed exact repair tree.
 - Do not reset an existing open queue. Default invocation preserves it. If `fix` exits `6` after source progress, the supervisor must checkpoint and revalidate that repair before another fix.
 - Do not call completion unverifiable: successful completion retains `.clawpatch`, and `clawpatch status --json` must still work afterward.
 - Do not commit unrelated or pre-existing changes.

@@ -2516,6 +2516,103 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._next_finding")
     @patch("clawpatch_supervise.clawpatch_release._review_all_features")
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._revalidate")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_relaunch_uses_uncertain_validation_evidence_for_same_finding_fix(
+        self,
+        _version,
+        _processes,
+        show_finding,
+        _gates,
+        revalidate,
+        json_clawpatch,
+        review_all,
+        next_finding,
+        execute_fix,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("checkpointed partial repair\n", encoding="utf-8")
+            _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                last_action=RepairAction.STOP_TERMINAL,
+            )
+            inspection = {
+                "finding": {"id": "fnd_one", "status": "uncertain"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_one",
+                        "status": "applied",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": head},
+                    }
+                ],
+            }
+            show_finding.side_effect = [inspection, inspection]
+            revalidate.return_value = {
+                "finding": "fnd_one",
+                "outcome": "uncertain",
+                "reasoning": "the repair works but stale assertions still need correction",
+            }
+            json_clawpatch.return_value = {
+                "activeLocks": 0,
+                "lockFiles": 0,
+                "openFindings": 1,
+            }
+            next_finding.return_value = (None, {"finding": None})
+
+            def complete_fix(*_args, **_kwargs):
+                source.write_text("completed repair and corrected assertions\n", encoding="utf-8")
+                return (
+                    {
+                        "finding_id": "fnd_one",
+                        "files_changed": ["app.py"],
+                        "revalidation": {"finding": "fnd_one", "outcome": "fixed"},
+                        "commit": "",
+                    },
+                    False,
+                )
+
+            execute_fix.side_effect = complete_fix
+            final_closure.return_value = {"pushed": False}
+
+            report = release_sweep(repo, apply=True, branch="current")
+
+        self.assertEqual(report["finding_count"], 1)
+        self.assertEqual(execute_fix.call_count, 1)
+        self.assertEqual(show_finding.call_args_list[1].kwargs["required_status"], None)
+        self.assertEqual(len(report["continuations"]), 1)
+        self.assertTrue(report["continuations"][0]["resumed"])
+        review_all.assert_not_called()
+        self.assertIsNone(_load_release_progress(repo))
+
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
     @patch("clawpatch_supervise.clawpatch_release._show_finding")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
@@ -4656,6 +4753,72 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ).strip(),
                 "clawpatch fix: fnd_one",
             )
+
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._revalidate")
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    def test_fix_validation_failure_uses_uncertain_evidence_for_next_same_finding_fix(
+        self,
+        execute_fix,
+        revalidate,
+        _gates,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            def repair_attempt(*_args, **_kwargs):
+                if execute_fix.call_count == 1:
+                    (repo / "repair.py").write_text("partial\n", encoding="utf-8")
+                    (repo / "test_repair.py").write_text("stale assertion\n", encoding="utf-8")
+                    raise _UnresolvedFinding(
+                        "error: validation failed after applying fix",
+                        finding_id="fnd_one",
+                        outcome="fix-validation-failed",
+                        failure=classify_clawpatch_failure("fix", 6),
+                    )
+                (repo / "test_repair.py").write_text("corrected assertion\n", encoding="utf-8")
+                return (
+                    {
+                        "finding_id": "fnd_one",
+                        "files_changed": ["test_repair.py"],
+                        "revalidation": {"finding": "fnd_one", "outcome": "fixed"},
+                        "commit": "",
+                    },
+                    False,
+                )
+
+            execute_fix.side_effect = repair_attempt
+            revalidate.return_value = {
+                "finding": "fnd_one",
+                "outcome": "uncertain",
+                "reasoning": "the repair is sound but four stale test assertions still fail",
+            }
+
+            record, pushed, continuations = _process_finding_until_fixed(
+                repo,
+                "fnd_one",
+                inspected={
+                    "finding": {"id": "fnd_one", "status": "open"},
+                    "validation": [],
+                    "patchAttempts": [],
+                },
+                env={},
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                state_root=repo / ".manageroo" / "cache",
+                require_project_gates=False,
+            )
+
+        self.assertFalse(pushed)
+        self.assertEqual(execute_fix.call_count, 2)
+        self.assertEqual(revalidate.call_count, 1)
+        self.assertEqual(continuations, 1)
+        self.assertEqual(record["revalidation"]["outcome"], "fixed")
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")

@@ -2830,7 +2830,8 @@ def _process_finding_until_fixed(
                     "revalidation": validation,
                     "commit": "",
                 }
-                if validation.get("outcome") == "open":
+                if validation.get("outcome") in {"open", "uncertain"}:
+                    validation_outcome = str(validation["outcome"])
                     if progress is not None:
                         progress(
                             {
@@ -2840,8 +2841,8 @@ def _process_finding_until_fixed(
                                 "finding_id": finding_id,
                                 "commit": temporary_commit,
                                 "detail": (
-                                    "fix validation failed, fresh revalidation kept the finding "
-                                    "open, and the next fix will use that evidence"
+                                    "fix validation failed, fresh revalidation returned "
+                                    f"{validation_outcome} evidence, and the next fix will use it"
                                 ),
                             }
                         )
@@ -2884,7 +2885,8 @@ def _process_finding_until_fixed(
         revalidation_outcome = str(record.get("revalidation", {}).get("outcome", ""))
         try:
             revalidation_decision = decide_repair_transition(
-                revalidation_outcome=revalidation_outcome
+                revalidation_outcome=revalidation_outcome,
+                has_source_progress=bool(temporary_commit or _source_paths(repo)),
             )
         except ValueError as exc:
             _stop_finding_iteration(
@@ -2952,7 +2954,10 @@ def _process_finding_until_fixed(
                         "total": total,
                         "finding_id": finding_id,
                         "commit": temporary_commit,
-                        "detail": "open repair preserved locally; continuing same finding",
+                        "detail": (
+                            f"{revalidation_outcome} repair preserved locally; "
+                            "continuing same finding"
+                        ),
                     }
                 )
             attempt += 1
@@ -4458,11 +4463,12 @@ def _release_sweep_locked(
                 ) from exc
             resumed_checkpoint = True
             resumed_outcome = resumed.get("revalidation", {}).get("outcome")
-            if resumed_outcome == "open":
+            if resumed_outcome in {"open", "uncertain"}:
                 finding_id = str(resumed["finding_id"])
                 provider_failure_continuation = bool(
                     resumed.get("revalidation", {}).get("managerooProviderFailureContinuation")
                 )
+                uncertain_evidence_continuation = resumed_outcome == "uncertain"
                 original_head = str(resumed["head_before"])
                 seen_states = {_git_text(root, ["git", "rev-parse", f"{original_head}^{{tree}}"])}
                 temporary_commit = ""
@@ -4480,18 +4486,21 @@ def _release_sweep_locked(
                         root,
                         finding_id,
                         env=env,
-                        required_status=(None if provider_failure_continuation else "open"),
+                        required_status=(
+                            None
+                            if provider_failure_continuation or uncertain_evidence_continuation
+                            else "open"
+                        ),
                         progress=progress,
                         current=1,
                         total="?",
                     )
-                    if provider_failure_continuation and inspected["finding"].get("status") not in {
-                        "open",
-                        "uncertain",
-                    }:
+                    if (
+                        provider_failure_continuation or uncertain_evidence_continuation
+                    ) and inspected["finding"].get("status") not in {"open", "uncertain"}:
                         raise SafetyError(
-                            "Codex revalidation provider failure can continue only the same "
-                            "open or uncertain finding."
+                            "ClawPatch revalidation evidence can continue only the same open "
+                            "or uncertain finding."
                         )
                     completed, pushed, additional_continuations = _process_finding_until_fixed(
                         root,
@@ -4540,7 +4549,9 @@ def _release_sweep_locked(
                 )
                 resumed = completed
                 resumed_phase = "fixed"
-                resumed_detail = "stopped attempt revalidated open, continued locally, then fixed"
+                resumed_detail = (
+                    f"stopped attempt revalidated {resumed_outcome}, continued locally, then fixed"
+                )
             elif resumed_outcome == "false-positive":
                 finding_id = str(resumed["finding_id"])
                 discarded_paths = sorted(str(path) for path in resumed["files_changed"])

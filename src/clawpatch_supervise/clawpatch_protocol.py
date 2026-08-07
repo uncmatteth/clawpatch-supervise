@@ -117,6 +117,8 @@ def decide_repair_transition(
         return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "open")
     if revalidation_outcome == "false-positive":
         return RepairDecision(RepairAction.DISCARD_AND_CONTINUE, "false-positive")
+    if revalidation_outcome == "uncertain" and has_source_progress:
+        return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "uncertain-with-source-progress")
     if revalidation_outcome == "uncertain":
         return RepairDecision(RepairAction.STOP_TERMINAL, "uncertain")
     raise ValueError(f"Unsupported ClawPatch revalidation outcome: {revalidation_outcome!r}")
