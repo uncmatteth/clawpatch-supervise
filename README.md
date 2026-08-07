@@ -23,7 +23,7 @@ You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticat
 ```bash
 git clone https://github.com/uncmatteth/clawpatch-supervise.git
 cd clawpatch-supervise
-./scripts/install.sh
+CLAWPATCH_SUPERVISE_SOURCE=. ./scripts/install.sh
 clawpatch-supervise --version
 ```
 
@@ -39,7 +39,7 @@ export PATH="$HOME/.local/bin:$PATH"
 git clone https://github.com/uncmatteth/clawpatch-supervise.git
 Set-Location clawpatch-supervise
 Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\install.ps1 -AddToPath
+.\scripts\install.ps1 -Source (Resolve-Path .).Path -AddToPath
 clawpatch-supervise --version
 ```
 
