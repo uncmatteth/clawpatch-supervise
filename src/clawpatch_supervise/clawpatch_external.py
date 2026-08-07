@@ -523,8 +523,8 @@ def main(
         return 2
     except KeyboardInterrupt:
         print(
-            "\n✋💥 INTERRUPTED: stopped safely; no source got yeeted. "
-            "Run the command again for a fresh start.",
+            "\n✋💥 INTERRUPTED: applied source or checkpoint changes may remain. "
+            "Inspect the repository and ClawPatch state before choosing how to resume.",
             flush=True,
         )
         return 130

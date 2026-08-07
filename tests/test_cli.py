@@ -681,6 +681,36 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         self.assertEqual(code, 75)
 
+    def test_keyboard_interrupt_warns_that_applied_changes_may_remain(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repository"
+            repo.mkdir()
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+
+            def fake_sweep(_repo: Path, **_kwargs):
+                source.write_text("after\n", encoding="utf-8")
+                raise KeyboardInterrupt
+
+            output = StringIO()
+            with redirect_stdout(output):
+                code = main(
+                    ["--repo", str(repo)],
+                    run_sweep=fake_sweep,
+                    ensure_repository_idle=lambda _repo: None,
+                    heartbeat_seconds=0,
+                    cleanup_root=Path(temp) / "cleanup",
+                )
+            final_source = source.read_text(encoding="utf-8")
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 130)
+        self.assertEqual(final_source, "after\n")
+        self.assertIn("applied source or checkpoint changes may remain", rendered)
+        self.assertIn("Inspect the repository and ClawPatch state", rendered)
+        self.assertNotIn("no source got yeeted", rendered)
+        self.assertNotIn("fresh start", rendered)
+
     def test_terminal_command_requests_a_fresh_run_and_fifteen_minute_shared_timeout(self):
         calls = []
 
