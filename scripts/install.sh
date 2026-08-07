@@ -13,6 +13,10 @@ command -v "$python_command" >/dev/null 2>&1 || {
   echo "Python 3.11 or newer is required." >&2
   exit 2
 }
+"$python_command" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' || {
+  echo "Python 3.11 or newer is required." >&2
+  exit 2
+}
 command -v git >/dev/null 2>&1 || {
   echo "Git is required." >&2
   exit 2

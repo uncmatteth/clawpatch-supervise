@@ -1,4 +1,7 @@
+import os
 from pathlib import Path
+import subprocess
+import tempfile
 import tomllib
 import unittest
 
@@ -9,6 +12,42 @@ CLAWHUB_VERSION = "0.19.1"
 
 
 class InstallerContractTests(unittest.TestCase):
+    def test_linux_installer_rejects_python_older_than_3_11_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            python = root / "python3.10"
+            invocation_log = root / "python-invocations.log"
+            python.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
+                'if [ "$1" = "-c" ]; then exit 1; fi\n'
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            python.chmod(0o755)
+            install_root = root / "install"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "CLAWPATCH_SUPERVISE_HOME": str(install_root),
+                    "CLAWPATCH_SUPERVISE_PYTHON": str(python),
+                    "CLAWPATCH_TEST_LOG": str(invocation_log),
+                }
+            )
+
+            result = subprocess.run(
+                [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("Python 3.11 or newer is required.", result.stderr)
+            self.assertFalse(install_root.exists())
+            self.assertNotIn("-m venv", invocation_log.read_text(encoding="utf-8"))
+
     def test_installer_defaults_match_the_packaged_release(self) -> None:
         project = tomllib.loads(
             (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
