@@ -4497,10 +4497,30 @@ def _release_sweep_locked(
                     inspected=checkpoint_inspection,
                 )
                 if unapplied is None:
-                    raise SafetyError(
-                        "Stopped Clawpatch progress has no source changes and no matching planned "
-                        "attempt at the current HEAD."
-                    )
+                    inspected_finding = checkpoint_inspection.get("finding")
+                    inspected_attempts = checkpoint_inspection.get("patchAttempts")
+                    checkpoint_finding_id = str(durable_progress["finding_id"])
+                    if (
+                        not isinstance(inspected_finding, dict)
+                        or inspected_finding.get("id") != checkpoint_finding_id
+                        or inspected_finding.get("status") != "open"
+                        or not isinstance(inspected_attempts, list)
+                    ):
+                        raise SafetyError(
+                            "Stopped Clawpatch progress has no source changes and no matching "
+                            "open finding at the current HEAD."
+                        )
+                    unapplied = {
+                        "finding_id": checkpoint_finding_id,
+                        "patch_attempts": [
+                            str(attempt["patchAttemptId"])
+                            for attempt in inspected_attempts
+                            if isinstance(attempt, dict)
+                            and isinstance(attempt.get("patchAttemptId"), str)
+                            and attempt["patchAttemptId"]
+                        ],
+                        "inspection": checkpoint_inspection,
+                    }
                 expected_unapplied_finding = str(unapplied["finding_id"])
                 report["interrupted_unapplied_attempt"] = {
                     "finding_id": expected_unapplied_finding,

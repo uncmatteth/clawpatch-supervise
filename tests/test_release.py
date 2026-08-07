@@ -3236,14 +3236,22 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         review_all.assert_not_called()
         self.assertIsNone(_load_release_progress(repo))
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._process_finding_until_fixed")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     @patch("clawpatch_supervise.clawpatch_release._show_finding")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    def test_empty_checkpoint_without_matching_planned_attempt_stays_stopped(
+    def test_empty_checkpoint_without_patch_attempt_retries_the_same_open_finding(
         self,
         _version,
         _processes,
         show_finding,
+        json_clawpatch,
+        next_finding,
+        process_finding,
+        final_closure,
     ):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
@@ -3267,23 +3275,31 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             show_finding.return_value = {
                 "finding": {"id": "fnd_one", "status": "open"},
                 "validation": [],
-                "patchAttempts": [
-                    {
-                        "patchAttemptId": "pat_other_head",
-                        "status": "planned",
-                        "findingIds": ["fnd_one"],
-                        "filesChanged": [],
-                        "git": {"baseSha": "not-current-head"},
-                    }
-                ],
+                "patchAttempts": [],
             }
+            json_clawpatch.return_value = {
+                "activeLocks": 0,
+                "lockFiles": 0,
+                "openFindings": 1,
+            }
+            next_finding.side_effect = [
+                ("fnd_one", {"finding": {"id": "fnd_one"}}),
+                (None, {"finding": None}),
+            ]
+            process_finding.return_value = (
+                {"finding_id": "fnd_one", "files_changed": [], "commit": "abc123"},
+                False,
+                0,
+            )
+            final_closure.return_value = {"pushed": False, "needs_fresh_review": False}
 
-            with self.assertRaisesRegex(SafetyError, "no matching planned attempt"):
-                release_sweep(repo, apply=True, branch="current")
+            report = release_sweep(repo, apply=True, branch="current")
             checkpoint = _load_release_progress(repo)
 
-        self.assertIsNotNone(checkpoint)
-        self.assertEqual(checkpoint["head_before"], head)
+        self.assertIsNone(checkpoint)
+        self.assertEqual(report["interrupted_unapplied_attempt"]["finding_id"], "fnd_one")
+        self.assertEqual(report["interrupted_unapplied_attempt"]["patch_attempts"], [])
+        process_finding.assert_called_once()
 
     def test_empty_checkpoint_recognizes_latest_applied_attempt_at_same_head(self):
         with tempfile.TemporaryDirectory() as temp:
