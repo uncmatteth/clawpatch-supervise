@@ -369,6 +369,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertIn("COMPLETE", rendered)
         self.assertIn("QUEUE'S CLEAN", rendered)
         self.assertNotIn("STOPPED", rendered)
+        self.assertNotIn("SWEEP FAILED", rendered)
+        self.assertNotIn("QUEUE ISN'T CLEAN", rendered)
         self.assertEqual(calls[0][1]["branch"], "current")
         self.assertEqual(calls[0][1]["push_mode"], "each")
         self.assertEqual(calls[0][1]["integration_mode"], "external")
