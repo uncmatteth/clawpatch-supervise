@@ -76,7 +76,7 @@ The supervisor resolves `--repo` to one canonical path before preflight and uses
 
 ### Clean up transient run data without deleting receipts
 
-Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
+Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. Release children inherit only a small cross-platform operational environment plus validated supervisor-owned overrides, so host provider, cloud, package-registry, and SSH credentials are not forwarded implicitly. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
 
 An abrupt process kill or machine crash can prevent `finally` cleanup. The next launch automatically removes a marked run directory only after it is at least one hour old, its recorded process is gone, and—on Linux—no live process has a working directory or open file inside it. Inspect the same decision without changing anything:
 

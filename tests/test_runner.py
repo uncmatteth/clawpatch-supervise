@@ -17,10 +17,22 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
         {
             "DATABASE_URL": "postgresql://production.invalid/live",
             "BTT_ALLOW_DATABASE_RESET": "true",
+            "GITHUB_TOKEN": "github-secret",
+            "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "NPM_TOKEN": "registry-secret",
+            "SSH_AUTH_SOCK": "/tmp/host-agent.sock",
         },
     )
     def test_process_group_uses_exact_sanitized_release_environment(self) -> None:
         child_env = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
+        credential_names = (
+            "DATABASE_URL",
+            "BTT_ALLOW_DATABASE_RESET",
+            "GITHUB_TOKEN",
+            "AWS_SECRET_ACCESS_KEY",
+            "NPM_TOKEN",
+            "SSH_AUTH_SOCK",
+        )
 
         result = CommandRunner().run(
             [
@@ -28,8 +40,8 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
                 "-c",
                 (
                     "import json, os; "
-                    "print(json.dumps({name: name in os.environ for name in "
-                    "('DATABASE_URL', 'BTT_ALLOW_DATABASE_RESET')}))"
+                    "names = json.loads(" + repr(json.dumps(credential_names)) + "); "
+                    "print(json.dumps(sorted(name for name in names if name in os.environ)))"
                 ),
             ],
             cwd=Path.cwd(),
@@ -39,10 +51,7 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
         )
 
         self.assertEqual(result.exit_code, 0, result.stderr)
-        self.assertEqual(
-            json.loads(result.stdout),
-            {"DATABASE_URL": False, "BTT_ALLOW_DATABASE_RESET": False},
-        )
+        self.assertEqual(json.loads(result.stdout), [])
 
 
 class CommandRunnerLoggingTests(unittest.TestCase):

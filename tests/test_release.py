@@ -1165,7 +1165,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             "MYSQL_PWD": "do-not-inherit",
             "MYSQL_ROOT_PASSWORD": "do-not-inherit",
             "PRODUCTION_ALLOW_DATABASE_RESET": "true",
-            "SAFE_VALUE": "keep",
+            "SAFE_VALUE": "do-not-inherit",
         },
         clear=True,
     )
@@ -1178,7 +1178,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             },
         )
 
-        self.assertEqual(child["SAFE_VALUE"], "keep")
+        self.assertNotIn("SAFE_VALUE", child)
         self.assertEqual(child["BTT_ALLOW_DATABASE_RESET"], "true")
         self.assertNotIn("PRODUCTION_DATABASE_URL", child)
         self.assertNotIn("SECONDARY_DB_PASSWORD", child)
@@ -1192,14 +1192,14 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         {
             "TEST_DATABASE_URL": "postgresql://external.invalid/live",
             "BTT_ALLOW_DATABASE_RESET": "true",
-            "SAFE_VALUE": "keep",
+            "SAFE_VALUE": "do-not-inherit",
         },
         clear=True,
     )
     def test_release_environment_removes_inherited_reset_capable_database(self):
         child = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
 
-        self.assertEqual(child["SAFE_VALUE"], "keep")
+        self.assertNotIn("SAFE_VALUE", child)
         self.assertNotIn("TEST_DATABASE_URL", child)
         self.assertNotIn("BTT_ALLOW_DATABASE_RESET", child)
 
