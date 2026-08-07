@@ -282,6 +282,7 @@ def _provision_python_test_environment(
     *,
     run: RunCommand,
     progress: Progress | None,
+    temporary_root: Path | None = None,
 ) -> Iterator[dict[str, str]]:
     if contract is None:
         yield {}
@@ -298,7 +299,10 @@ def _provision_python_test_environment(
             }
         )
     try:
-        with tempfile.TemporaryDirectory(prefix="manageroo-validation-python-") as temp:
+        with tempfile.TemporaryDirectory(
+            prefix="manageroo-validation-python-",
+            dir=str(temporary_root) if temporary_root is not None else None,
+        ) as temp:
             environment = Path(temp) / "venv"
             _checked_python_environment_command(
                 run,
@@ -499,6 +503,7 @@ def _provision_postgres_test_environment(
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
     password_factory: Callable[[], str] = lambda: secrets.token_urlsafe(24),
+    temporary_root: Path | None = None,
 ) -> Iterator[dict[str, str]]:
     root = repo.expanduser().resolve()
     contract = _compose_contract(root)
@@ -526,7 +531,10 @@ def _provision_postgres_test_environment(
     container_name = (
         f"manageroo-validation-postgres-{repository_identity[:16]}-{validation_run_identity}"
     )
-    with tempfile.TemporaryDirectory(prefix="manageroo-validation-postgres-") as temp:
+    with tempfile.TemporaryDirectory(
+        prefix="manageroo-validation-postgres-",
+        dir=str(temporary_root) if temporary_root is not None else None,
+    ) as temp:
         env_file = Path(temp) / "postgres.env"
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
         descriptor = os.open(env_file, flags, 0o600)
@@ -645,6 +653,7 @@ def provision_disposable_validation_environment(
     sleep: Callable[[float], None] = time.sleep,
     monotonic: Callable[[], float] = time.monotonic,
     password_factory: Callable[[], str] = lambda: secrets.token_urlsafe(24),
+    temporary_root: Path | None = None,
 ) -> Iterator[dict[str, str]]:
     root = repo.expanduser().resolve()
     python_contract = _python_test_contract(root)
@@ -653,6 +662,7 @@ def provision_disposable_validation_environment(
         python_contract,
         run=run,
         progress=progress,
+        temporary_root=temporary_root,
     ) as python_env:
         with _provision_postgres_test_environment(
             root,
@@ -661,5 +671,6 @@ def provision_disposable_validation_environment(
             sleep=sleep,
             monotonic=monotonic,
             password_factory=password_factory,
+            temporary_root=temporary_root,
         ) as postgres_env:
             yield {**python_env, **postgres_env}

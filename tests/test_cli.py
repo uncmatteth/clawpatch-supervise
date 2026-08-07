@@ -92,7 +92,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.18")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.19")
 
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
@@ -191,8 +191,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         lifecycle = []
 
         @contextmanager
-        def fake_provision(repo: Path, *, progress):
-            lifecycle.append(("start", repo))
+        def fake_provision(repo: Path, *, progress, temporary_root: Path):
+            lifecycle.append(("start", repo, temporary_root))
             progress(
                 {
                     "phase": "validation-service-start",
@@ -235,13 +235,11 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertEqual([item[0] for item in lifecycle], ["idle", "start", "cleanup"])
-        self.assertEqual(
-            calls[0][1]["child_env_overrides"],
-            {
-                "TEST_DATABASE_URL": "postgresql://127.0.0.1:49152/test",
-                "BTT_ALLOW_DATABASE_RESET": "true",
-            },
-        )
+        child_env = calls[0][1]["child_env_overrides"]
+        self.assertEqual(child_env["TEST_DATABASE_URL"], "postgresql://127.0.0.1:49152/test")
+        self.assertEqual(child_env["BTT_ALLOW_DATABASE_RESET"], "true")
+        for variable in ("TMPDIR", "TMP", "TEMP"):
+            self.assertEqual(child_env[variable], str(lifecycle[1][2]))
         self.assertIn("VALIDATION SERVICE START", output.getvalue())
         self.assertLess(
             output.getvalue().index("PROCESS PREFLIGHT"),

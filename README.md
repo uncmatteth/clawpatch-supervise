@@ -72,6 +72,24 @@ clawpatch-supervise `
 
 Use `--push none` if you want verified local commits without publishing them. The normal command preserves and processes an existing `.clawpatch` queue instead of deleting it. When an existing queue is proven clean and project source is clean, an interactive run asks whether to remove that state and start a new full review. `--fresh` is the explicit non-interactive reset choice, but it still requires proof that the existing queue has no open findings, locks, lock files, or uncertain findings and that no project source is retained. Use `--resume-stopped` for an exact stopped supervisor checkpoint.
 
+### Clean up transient run data without deleting receipts
+
+Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
+
+An abrupt process kill or machine crash can prevent `finally` cleanup. The next launch automatically removes a marked run directory only after it is at least one hour old, its recorded process is gone, and—on Linux—no live process has a working directory or open file inside it. Inspect the same decision without changing anything:
+
+```bash
+clawpatch-supervise cleanup --dry-run
+```
+
+Remove only entries reported as `STALE`:
+
+```bash
+clawpatch-supervise cleanup --apply
+```
+
+`ACTIVE`, `RECENT`, `UNOWNED`, and `UNSAFE` entries are retained. Cleanup never scans or deletes repository `.clawpatch` receipts, standalone checkpoints or completion proofs, dirty source repairs, Git worktrees, or npm/Cargo/Hardhat/uv/GitNexus caches it cannot prove this supervisor run owns. Older unmarked temporary data remains an explicit operator-cleanup decision instead of being guessed away.
+
 ## Why I made this
 
 I made this because ClawPatch is fucking awesome at finding garbage bugs that AI agents leave behind, but operating a long repair queue by hand sucks. I do not want to decode every internal step or copy and paste `next`, `show`, `fix`, and `revalidate` commands over and over just to make sure the same broken finding does not get skipped. Nobody else should have to babysit that shit either.
@@ -125,6 +143,7 @@ The supervisor provides:
 - durable checkpoints outside the repository being repaired;
 - repository-scoped active-process detection for console, script, and `python -m clawpatch_supervise` launches;
 - a child-process watchdog that terminates the entire timed-out process group;
+- one marked run-owned temporary root, automatic stale-run pruning, and explicit cleanup dry-run/apply commands;
 - optional verified `each` or `final` pushes;
 - fresh fixed-point review generations after repairs;
 - exact `false-positive` cleanup of only supervisor-owned repair paths;
@@ -167,6 +186,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary.
 - **False positives clean themselves up.** Only the exact supervisor-owned repair paths are restored; unrelated work is left alone.
 - **Completion stays inspectable.** The command exits successfully only after the queue is empty and a fresh review generation finds nothing else to repair, and it keeps `.clawpatch` so the result can still be checked with `clawpatch status --json`.
+- **Transient cleanup is ownership-gated.** Normal runs remove their exact marked temporary root. Relaunch and manual cleanup remove only old dead runs with no proven live reference; receipts, repairs, unknown worktrees, and unowned caches are preserved.
 
 The terminal shows these transitions directly, including `RESUME APPLIED REPAIR`, the current finding, the owned files, watchdog time, commit, push, and final proof. A failed sweep prints `STOPPED` with the remaining open-finding count; only a successful sweep prints `COMPLETE` and `QUEUE'S CLEAN`.
 
@@ -339,7 +359,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.18 alpha**.
+Current release: **0.1.19 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

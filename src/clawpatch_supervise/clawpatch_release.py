@@ -24,6 +24,7 @@ from .clawpatch_protocol import (
     decide_repair_transition,
     failure_from_legacy_outcome,
 )
+from .cleanup import current_temporary_root
 from .errors import GateFailure, SafetyError
 from .runner import CommandRunner
 from .util import atomic_write_json, utc_now
@@ -2196,7 +2197,11 @@ def _temporary_commit_matches_owned_source(
     paths: list[str],
 ) -> bool:
     """Compare dirty source with a recognized iteration commit without changing Git state."""
-    with tempfile.TemporaryDirectory(prefix="manageroo-clawpatch-index-") as temp:
+    temporary_root = current_temporary_root()
+    with tempfile.TemporaryDirectory(
+        prefix="manageroo-clawpatch-index-",
+        dir=str(temporary_root) if temporary_root is not None else None,
+    ) as temp:
         index_path = Path(temp) / "index"
         env = dict(os.environ)
         env["GIT_INDEX_FILE"] = str(index_path)
@@ -2445,7 +2450,11 @@ def _commit_attempt(
 
 
 def _commit_without_local_hooks(repo: Path, *args: str) -> None:
-    with tempfile.TemporaryDirectory(prefix="manageroo-empty-hooks-") as hooks_path:
+    temporary_root = current_temporary_root()
+    with tempfile.TemporaryDirectory(
+        prefix="manageroo-empty-hooks-",
+        dir=str(temporary_root) if temporary_root is not None else None,
+    ) as hooks_path:
         _must_run(
             [
                 "git",

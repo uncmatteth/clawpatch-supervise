@@ -20,6 +20,7 @@ from .clawpatch_release import (
     release_sweep,
     require_external_clawpatch_preflight,
 )
+from .cleanup import cleanup_owned_runs, owned_run_directory
 from .errors import SafetyError
 from .runner import CommandRunner
 from .validation_services import provision_disposable_validation_environment
@@ -288,13 +289,41 @@ def main(
     ),
     ensure_repository_idle: Callable[[Path], None] = require_external_clawpatch_preflight,
     heartbeat_seconds: float = 30,
+    cleanup_root: Path | None = None,
 ) -> int:
     reconfigure = getattr(sys.stdout, "reconfigure", None)
     if callable(reconfigure):
         reconfigure(errors="replace")
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "cleanup":
+        cleanup_parser = argparse.ArgumentParser(
+            prog="clawpatch-supervise cleanup",
+            description="Inspect or remove only stale supervisor-owned transient artifacts.",
+        )
+        cleanup_mode = cleanup_parser.add_mutually_exclusive_group(required=True)
+        cleanup_mode.add_argument("--dry-run", action="store_true")
+        cleanup_mode.add_argument("--apply", action="store_true")
+        cleanup_args = cleanup_parser.parse_args(raw_argv[1:])
+        try:
+            cleanup_report = cleanup_owned_runs(apply=cleanup_args.apply, root=cleanup_root)
+        except SafetyError as exc:
+            print(f"STOPPED: {exc}")
+            return 2
+        print(f"ClawPatch Supervise cleanup root: {cleanup_report.root}")
+        for entry in cleanup_report.entries:
+            print(f"{entry.status}: {entry.path} ({entry.bytes} bytes)")
+        print(
+            f"COMPLETE: inspected={len(cleanup_report.entries)} "
+            f"removed={cleanup_report.removed} removed_bytes={cleanup_report.removed_bytes}"
+        )
+        return 0
     parser = argparse.ArgumentParser(
         prog="clawpatch-supervise",
         description="Visibly process ClawPatch's live queue one current finding at a time.",
+        epilog=(
+            "Transient cleanup: clawpatch-supervise cleanup --dry-run | "
+            "clawpatch-supervise cleanup --apply"
+        ),
     )
     parser.add_argument("--repo", default=".")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -326,7 +355,7 @@ def main(
         type=int,
         default=CLAWPATCH_CHILD_WATCHDOG_SECONDS // 60,
     )
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw_argv)
     if args.timeout_minutes < 1:
         parser.error("--timeout-minutes must be at least 1")
     if args.print_state_path:
@@ -404,7 +433,18 @@ def main(
         )
         ensure_repository_idle(repo)
         resolved_fresh = _resolve_fresh_mode(repo, args.fresh)
-        with provision_validation_environment(repo, progress=display) as child_env_overrides:
+        with (
+            owned_run_directory(repo, root=cleanup_root) as owned_run,
+            provision_validation_environment(
+                repo,
+                progress=display,
+                temporary_root=owned_run.temporary_root,
+            ) as validation_env_overrides,
+        ):
+            child_env_overrides = {
+                **validation_env_overrides,
+                **owned_run.child_environment(),
+            }
             report = run_sweep(
                 repo,
                 apply=True,
