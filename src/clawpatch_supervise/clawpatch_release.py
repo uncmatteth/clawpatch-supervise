@@ -1814,13 +1814,40 @@ def _checkpoint_later_applied_attempt(
     *,
     inspected: dict[str, Any],
 ) -> dict[str, Any] | None:
-    """Recognize a repair ClawPatch applied after a source-clean stopped checkpoint."""
-    if progress_record.get("phase") != "stopped" or progress_record.get("owned_paths") != []:
+    """Recognize one exact later ClawPatch repair after an interrupted checkpoint."""
+    if progress_record.get("phase") != "stopped":
         return None
     finding_id = str(progress_record["finding_id"])
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
     source_paths = _source_paths(repo)
-    if not source_paths or progress_record.get("head_before") != current_head:
+    if not source_paths:
+        return None
+    checkpoint_head = str(progress_record.get("head_before", ""))
+    checkpoint_paths = sorted(str(path) for path in progress_record.get("owned_paths", []))
+    if checkpoint_head != current_head:
+        ancestry = _run(
+            ["git", "merge-base", "--is-ancestor", checkpoint_head, current_head],
+            cwd=repo,
+            timeout=60,
+        )
+        if ancestry.returncode != 0 or checkpoint_paths != source_paths:
+            return None
+        temporary_commit = str(progress_record.get("temporary_commit", ""))
+        if not temporary_commit:
+            return None
+        try:
+            iteration_paths = _verify_iteration_commit(
+                repo,
+                finding_id=finding_id,
+                original_head=checkpoint_head,
+                temporary_commit=temporary_commit,
+                require_current=False,
+            )
+        except SafetyError:
+            return None
+        if not iteration_paths or not set(iteration_paths).issubset(checkpoint_paths):
+            return None
+    elif checkpoint_paths and checkpoint_paths != source_paths:
         return None
     if inspected["finding"].get("status") not in {
         "open",
@@ -1831,7 +1858,7 @@ def _checkpoint_later_applied_attempt(
         return None
     matching_attempts = []
     for attempt in inspected["patchAttempts"]:
-        if not isinstance(attempt, dict) or attempt.get("status") != "applied":
+        if not isinstance(attempt, dict) or attempt.get("status") not in {"applied", "failed"}:
             continue
         finding_ids = attempt.get("findingIds")
         files_changed = attempt.get("filesChanged")
@@ -1848,8 +1875,34 @@ def _checkpoint_later_applied_attempt(
             and patch_attempt_id
         ):
             _validate_attempt_paths_syntax(files_changed)
+            if attempt.get("status") == "failed":
+                attempt_time = _parse_checkpoint_time(attempt.get("updatedAt"))
+                checkpoint_time = _parse_checkpoint_time(progress_record.get("updated_at"))
+                if (
+                    inspected["finding"].get("status") not in {"open", "uncertain"}
+                    or attempt_time is None
+                    or checkpoint_time is None
+                    or attempt_time <= checkpoint_time
+                ):
+                    continue
+                try:
+                    if any(
+                        (repo / path).is_symlink()
+                        or not (repo / path).is_file()
+                        or datetime.fromtimestamp((repo / path).stat().st_mtime, timezone.utc)
+                        > attempt_time
+                        for path in source_paths
+                    ):
+                        continue
+                except OSError:
+                    continue
             matching_attempts.append(attempt)
     if not matching_attempts:
+        return None
+    if (
+        any(attempt.get("status") == "failed" for attempt in matching_attempts)
+        and len(matching_attempts) != 1
+    ):
         return None
     _validate_attempt_paths(repo, source_paths)
     return {
@@ -3494,8 +3547,11 @@ def _resume_stopped_attempt(
             )
         patch = candidates[-1]
     else:
+        resumable_statuses = {"applied"}
+        if checkpoint.get("last_action") == RepairAction.STOP_TRANSIENT.value:
+            resumable_statuses.add("failed")
         for attempt in inspected["patchAttempts"]:
-            if not isinstance(attempt, dict) or attempt.get("status") != "applied":
+            if not isinstance(attempt, dict) or attempt.get("status") not in resumable_statuses:
                 continue
             git_record = attempt.get("git")
             if (
@@ -3507,7 +3563,7 @@ def _resume_stopped_attempt(
                 candidates.append(attempt)
         if len(candidates) != 1:
             raise SafetyError(
-                "Stopped Clawpatch progress requires exactly one applied patch attempt bound "
+                "Stopped Clawpatch progress requires exactly one resumable patch attempt bound "
                 "to the current HEAD and owned source paths."
             )
         patch = candidates[0]
@@ -4324,6 +4380,69 @@ def _release_sweep_locked(
                                 "resuming the same finding"
                             ),
                             "owned_paths": [],
+                        }
+                    )
+        if (
+            durable_progress is not None
+            and preexisting_source
+            and durable_progress["head_before"] != head_before
+            and durable_progress.get("owned_source_fingerprint")
+            and not _checkpoint_proves_exact_source(
+                root,
+                durable_progress,
+                preexisting_source,
+            )
+        ):
+            checkpoint_inspection = _show_finding(
+                root,
+                str(durable_progress["finding_id"]),
+                env=env,
+                required_status=None,
+                progress=progress,
+                current=1,
+                total="?",
+            )
+            later_applied = _checkpoint_later_applied_attempt(
+                root,
+                durable_progress,
+                inspected=checkpoint_inspection,
+            )
+            if later_applied is not None:
+                recovered_paths = list(later_applied["owned_paths"])
+                recovered_attempt = later_applied["patch_attempt"]
+                recovered_status = str(recovered_attempt.get("status", ""))
+                recovered_action = (
+                    RepairAction.STOP_TRANSIENT
+                    if recovered_status == "failed"
+                    else str(durable_progress.get("last_action", ""))
+                )
+                durable_progress = _write_release_progress(
+                    root,
+                    finding_id=str(durable_progress["finding_id"]),
+                    branch=str(durable_progress["branch"]),
+                    head_before=head_before,
+                    phase="stopped",
+                    owned_paths=recovered_paths,
+                    last_action=recovered_action,
+                    state_root=state_root,
+                )
+                report["recovered_later_applied_attempt"] = {
+                    "finding_id": str(later_applied["finding_id"]),
+                    "patch_attempt": str(recovered_attempt["patchAttemptId"]),
+                    "owned_paths": recovered_paths,
+                }
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "resume",
+                            "current": 1,
+                            "total": "?",
+                            "finding_id": str(later_applied["finding_id"]),
+                            "detail": (
+                                "recognized the later ClawPatch repair at the current HEAD; "
+                                "resuming its exact source paths"
+                            ),
+                            "owned_paths": recovered_paths,
                         }
                     )
         if durable_progress is not None and durable_progress["head_before"] != head_before:

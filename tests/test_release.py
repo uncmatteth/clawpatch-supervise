@@ -1982,7 +1982,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 require_project_gates=False,
             )
 
-            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=repo, text=True
+            )
 
         self.assertTrue(record["resumed"])
         self.assertEqual(record["patch_attempt"], "pat_one")
@@ -2051,9 +2053,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 pushed=False,
             )
 
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
 
         self.assertFalse(pushed)
         self.assertEqual(record["revalidation"]["outcome"], "open")
@@ -3429,6 +3429,241 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertIsNotNone(recovered)
         self.assertEqual(recovered["patch_attempt"]["patchAttemptId"], "pat_repair")
         self.assertEqual(recovered["owned_paths"], ["app.py", "test_app.py"])
+
+    def test_stale_checkpoint_recognizes_later_validation_failed_attempt_at_current_head(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            old_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            source.write_text("first interrupted repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "clawpatch-supervise iteration: fnd_one"],
+                cwd=repo,
+                check=True,
+            )
+            temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "reset", "--mixed", old_head], cwd=repo, check=True)
+            checkpoint = _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch="main",
+                head_before=old_head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                temporary_commit=temporary_commit,
+                last_action=RepairAction.STOP_TERMINAL,
+            )
+
+            (repo / "supervisor.py").write_text("upgrade\n", encoding="utf-8")
+            subprocess.run(["git", "add", "supervisor.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "supervisor progress"], cwd=repo, check=True
+            )
+            current_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("later validation-failed repair\n", encoding="utf-8")
+            inspected = {
+                "finding": {"id": "fnd_one", "status": "uncertain"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_later_failed",
+                        "status": "failed",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": current_head},
+                        "createdAt": "2099-01-01T00:00:00.000Z",
+                        "updatedAt": "2099-01-01T00:01:00.000Z",
+                    }
+                ],
+            }
+
+            recovered = _checkpoint_later_applied_attempt(
+                repo,
+                checkpoint,
+                inspected=inspected,
+            )
+
+        self.assertIsNotNone(recovered)
+        self.assertEqual(recovered["patch_attempt"]["patchAttemptId"], "pat_later_failed")
+        self.assertEqual(recovered["owned_paths"], ["app.py"])
+
+    def test_stale_checkpoint_does_not_claim_source_edited_after_failed_attempt(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            checkpoint = _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch="main",
+                head_before=head,
+                phase="stopped",
+                owned_paths=[],
+            )
+            source.write_text("manual edit after failed attempt\n", encoding="utf-8")
+            os.utime(source, (4_133_980_800, 4_133_980_800))
+            inspected = {
+                "finding": {"id": "fnd_one", "status": "uncertain"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_failed",
+                        "status": "failed",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": head},
+                        "createdAt": "2099-01-01T00:00:00.000Z",
+                        "updatedAt": "2099-01-01T00:01:00.000Z",
+                    }
+                ],
+            }
+
+            recovered = _checkpoint_later_applied_attempt(
+                repo,
+                checkpoint,
+                inspected=inspected,
+            )
+
+        self.assertIsNone(recovered)
+
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_relaunch_rebinds_stale_checkpoint_to_later_validation_failed_attempt(
+        self,
+        _version,
+        _processes,
+        show_finding,
+        resume_stopped,
+        json_clawpatch,
+        review_all,
+        next_finding,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            old_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("first interrupted repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "clawpatch-supervise iteration: fnd_one"],
+                cwd=repo,
+                check=True,
+            )
+            temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "reset", "--mixed", old_head], cwd=repo, check=True)
+            _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch="main",
+                head_before=old_head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                temporary_commit=temporary_commit,
+                last_action=RepairAction.STOP_TERMINAL,
+            )
+            (repo / "supervisor.py").write_text("upgrade\n", encoding="utf-8")
+            subprocess.run(["git", "add", "supervisor.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "supervisor progress"], cwd=repo, check=True
+            )
+            current_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("later validation-failed repair\n", encoding="utf-8")
+            inspection = {
+                "finding": {"id": "fnd_one", "status": "uncertain"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_later_failed",
+                        "status": "failed",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": current_head},
+                        "createdAt": "2099-01-01T00:00:00.000Z",
+                        "updatedAt": "2099-01-01T00:01:00.000Z",
+                    }
+                ],
+            }
+            show_finding.return_value = inspection
+
+            def finish_resumed_attempt(*_args, **_kwargs):
+                subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+                subprocess.run(
+                    ["git", "commit", "-q", "-m", "finish resumed repair"],
+                    cwd=repo,
+                    check=True,
+                )
+                return (
+                    {
+                        "finding_id": "fnd_one",
+                        "inspection": inspection,
+                        "head_before": current_head,
+                        "patch_attempt": "pat_later_failed",
+                        "files_changed": ["app.py"],
+                        "gate_runs": [],
+                        "revalidation": {"finding": "fnd_one", "outcome": "fixed"},
+                        "commit": subprocess.check_output(
+                            ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+                        ).strip(),
+                    },
+                    False,
+                )
+
+            resume_stopped.side_effect = finish_resumed_attempt
+            json_clawpatch.return_value = {
+                "activeLocks": 0,
+                "lockFiles": 0,
+                "openFindings": 0,
+            }
+            next_finding.return_value = (None, {"finding": None})
+            final_closure.return_value = {"pushed": False}
+
+            report = release_sweep(repo, apply=True, branch="current")
+            rebound = resume_stopped.call_args.args[1]
+
+        self.assertEqual(rebound["head_before"], current_head)
+        self.assertEqual(rebound["owned_paths"], ["app.py"])
+        self.assertEqual(rebound["temporary_commit"], "")
+        self.assertEqual(rebound["last_action"], RepairAction.STOP_TRANSIENT.value)
+        self.assertEqual(
+            report["recovered_later_applied_attempt"]["patch_attempt"],
+            "pat_later_failed",
+        )
+        review_all.assert_not_called()
 
     @patch("clawpatch_supervise.clawpatch_release._show_finding")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
