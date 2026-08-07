@@ -13,7 +13,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_external import main
-from clawpatch_supervise.cleanup import _pid_is_running
+from clawpatch_supervise import cleanup as cleanup_module
+from clawpatch_supervise.cleanup import _pid_is_running, cleanup_owned_runs
 
 
 class CleanupCommandTests(unittest.TestCase):
@@ -79,7 +80,12 @@ class CleanupCommandTests(unittest.TestCase):
             outside = root / "outside"
             outside.mkdir()
             unowned.mkdir(parents=True)
-            (cleanup_root / "run-link").symlink_to(outside, target_is_directory=True)
+            try:
+                (cleanup_root / "run-link").symlink_to(outside, target_is_directory=True)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("directory symlink privilege is unavailable")
+                raise
             self._mark(stale, pid=999_999_999, created_unix=0)
             self._mark(active, pid=os.getpid(), created_unix=0)
             self._mark(recent, pid=999_999_999, created_unix=time.time())
@@ -104,6 +110,38 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertIn("RECENT", output.getvalue())
             self.assertIn("UNOWNED", output.getvalue())
             self.assertIn("removed=1", output.getvalue())
+
+    def test_cleanup_apply_keeps_an_undeletable_owned_run_and_continues(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            blocked = cleanup_root / "run-blocked"
+            removable = cleanup_root / "run-removable"
+            self._mark(blocked, pid=999_999_999, created_unix=0)
+            self._mark(removable, pid=999_999_999, created_unix=0)
+            original_remove = cleanup_module._remove_exact_owned_run
+
+            def remove(candidate: Path, root: Path) -> None:
+                if candidate == blocked:
+                    raise PermissionError(5, "Access is denied", str(candidate / "node-compile-cache"))
+                original_remove(candidate, root)
+
+            with patch(
+                "clawpatch_supervise.cleanup._remove_exact_owned_run",
+                side_effect=remove,
+            ):
+                report = cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+            self.assertTrue(blocked.is_dir())
+            self.assertFalse(removable.exists())
+            self.assertEqual(report.removed, 1)
+            self.assertEqual(
+                {entry.path.name: entry.status for entry in report.entries},
+                {"run-blocked": "BLOCKED", "run-removable": "STALE"},
+            )
 
     def test_supervisor_run_routes_temporary_files_into_owned_directory_then_removes_it(
         self,
@@ -149,6 +187,7 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertEqual(child_env["TEST_ONLY"], "yes")
             for variable in ("TMPDIR", "TMP", "TEMP"):
                 self.assertEqual(child_env[variable], str(temporary_root))
+            self.assertEqual(child_env["NODE_DISABLE_COMPILE_CACHE"], "1")
             self.assertTrue(cleanup_root.is_dir())
             self.assertEqual(list(cleanup_root.iterdir()), [])
 
@@ -179,6 +218,7 @@ class CleanupCommandTests(unittest.TestCase):
                 child.terminate()
                 child.wait(timeout=5)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX lsof fallback")
     def test_cleanup_without_proc_preserves_directory_referenced_by_live_process(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
@@ -206,6 +246,7 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertIn("removed=0", output.getvalue())
             lsof_probe.assert_called_once_with(candidate)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX lsof fallback")
     def test_cleanup_without_proc_fails_closed_when_lsof_is_inconclusive(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
@@ -241,7 +282,12 @@ class CleanupCommandTests(unittest.TestCase):
             sentinel = target / "keep.txt"
             sentinel.write_text("keep", encoding="utf-8")
             cleanup_root = root / "clawpatch-supervise-runs"
-            cleanup_root.symlink_to(target, target_is_directory=True)
+            try:
+                cleanup_root.symlink_to(target, target_is_directory=True)
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("directory symlink privilege is unavailable")
+                raise
             output = StringIO()
 
             with redirect_stdout(output):

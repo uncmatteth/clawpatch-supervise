@@ -233,7 +233,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             result = main(["--repo", str(repo), "--print-state-path"])
 
         self.assertEqual(result, 0)
-        state_root.assert_called_once_with(repo)
+        state_root.assert_called_once_with(repo.expanduser().resolve())
         self.assertEqual(output.getvalue().strip(), str(expected))
 
     def test_python_validation_environment_lifecycle_is_visible(self):
