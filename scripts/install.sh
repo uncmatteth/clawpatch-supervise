@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.22}"
+version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.23}"
 source_package="${CLAWPATCH_SUPERVISE_SOURCE:-https://github.com/uncmatteth/clawpatch-supervise/releases/download/v${version}/clawpatch_supervise-${version}-py3-none-any.whl}"
 install_root="${CLAWPATCH_SUPERVISE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/clawpatch-supervise}"
 bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 readonly clawpatch_version="0.7.2"
 readonly clawhub_version="0.19.1"
-readonly release_sha256_0_1_21="7444e56bb1987f694f58c8df4146cfabaa2646b440fad3f32e1971781a7c5f42"
+readonly release_sha256_0_1_23="fd6c151724662ef5ffc16fe6b04f33ad8b8393c08598579679f898057df605c6"
 download_root=""
 staging_venv=""
 pending_supervisor_link=""
@@ -86,11 +86,11 @@ if [[ ! -d "$source_package" ]]; then
       echo "CLAWPATCH_SUPERVISE_SHA256 is required for a custom wheel source." >&2
       exit 2
     fi
-    if [[ "$version" != "0.1.22" ]]; then
+    if [[ "$version" != "0.1.23" ]]; then
       echo "No trusted SHA-256 is available for clawpatch-supervise $version." >&2
       exit 2
     fi
-    expected_sha256="$release_sha256_0_1_21"
+    expected_sha256="$release_sha256_0_1_23"
   fi
 
   download_root="$(mktemp -d)"
