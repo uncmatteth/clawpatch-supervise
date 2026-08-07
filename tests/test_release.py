@@ -2953,7 +2953,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._show_finding")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    def test_relaunch_reenters_same_finding_after_empty_planned_attempt(
+    def test_relaunch_recovers_interrupted_fix_phase_without_source_changes(
         self,
         _version,
         _processes,
@@ -2974,6 +2974,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
+            source_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
+            ).strip()
             clawpatch_state = repo / ".clawpatch"
             clawpatch_state.mkdir()
             (clawpatch_state / "project.json").write_text("{}\n", encoding="utf-8")
@@ -2982,23 +2985,24 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 finding_id="fnd_one",
                 branch=branch,
                 head_before=head,
-                phase="stopped",
+                phase="fix",
                 owned_paths=[],
+                source_states=[source_tree],
             )
-            planned = {
+            interrupted = {
                 "finding": {"id": "fnd_one", "status": "open"},
                 "validation": [],
                 "patchAttempts": [
                     {
                         "patchAttemptId": "pat_interrupted",
-                        "status": "planned",
+                        "status": "failed",
                         "findingIds": ["fnd_one"],
                         "filesChanged": [],
                         "git": {"baseSha": head},
                     }
                 ],
             }
-            show_finding.side_effect = [planned, planned]
+            show_finding.side_effect = [interrupted, interrupted]
             json_clawpatch.return_value = {
                 "activeLocks": 0,
                 "lockFiles": 0,
@@ -3032,6 +3036,10 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(next_finding.call_count, 2)
         resume_stopped.assert_not_called()
         review_all.assert_not_called()
+        self.assertEqual(
+            report["interrupted_phase_recovery"]["prior_phase"],
+            "fix",
+        )
         self.assertIsNone(_load_release_progress(repo))
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")

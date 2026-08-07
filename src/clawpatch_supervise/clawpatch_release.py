@@ -1750,6 +1750,44 @@ def _checkpoint_unapplied_attempt(
     }
 
 
+def _recover_interrupted_source_clean_fix(
+    repo: Path,
+    progress_record: dict[str, Any],
+    *,
+    state_root: Path,
+) -> dict[str, Any] | None:
+    """Turn one provably interrupted pre-edit fix checkpoint into a resumable stop."""
+    if (
+        progress_record.get("phase") != "fix"
+        or progress_record.get("owned_paths") != []
+        or progress_record.get("temporary_commit")
+        or progress_record.get("last_action")
+        or _source_paths(repo)
+    ):
+        return None
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    current_tree = _git_text(repo, ["git", "rev-parse", "HEAD^{tree}"])
+    source_states = progress_record.get("source_states")
+    if (
+        progress_record.get("head_before") != current_head
+        or not isinstance(source_states, list)
+        or not source_states
+        or set(source_states) != {current_tree}
+    ):
+        return None
+    return _write_release_progress(
+        repo,
+        finding_id=str(progress_record["finding_id"]),
+        branch=str(progress_record["branch"]),
+        head_before=current_head,
+        phase="stopped",
+        owned_paths=[],
+        source_states=source_states,
+        last_action=RepairAction.STOP_TRANSIENT,
+        state_root=state_root,
+    )
+
+
 def _checkpoint_later_applied_attempt(
     repo: Path,
     progress_record: dict[str, Any],
@@ -4359,6 +4397,34 @@ def _release_sweep_locked(
         raise SafetyError(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."
         )
+    if durable_progress is not None:
+        interrupted_phase = str(durable_progress["phase"])
+        recovered_progress = _recover_interrupted_source_clean_fix(
+            root,
+            durable_progress,
+            state_root=state_root,
+        )
+        if recovered_progress is not None:
+            durable_progress = recovered_progress
+            report["interrupted_phase_recovery"] = {
+                "finding_id": str(durable_progress["finding_id"]),
+                "prior_phase": interrupted_phase,
+                "owned_paths": [],
+            }
+            if progress is not None:
+                progress(
+                    {
+                        "phase": "resume",
+                        "current": 1,
+                        "total": "?",
+                        "finding_id": str(durable_progress["finding_id"]),
+                        "detail": (
+                            "interrupted source-clean fix had no repair content; "
+                            "resuming the same finding"
+                        ),
+                        "owned_paths": [],
+                    }
+                )
     if push_mode != "none":
         _require_synchronized_remote_branch(root, current_branch)
     if durable_progress is not None:
