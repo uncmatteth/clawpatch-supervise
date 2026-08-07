@@ -52,7 +52,9 @@ LIFECYCLE = (
     "the checkpoint, and advances; any ownership mismatch stops unchanged -> "
     "final open/uncertain closure -> rebuild generated ClawPatch state and repeat map plus complete "
     "review at the new HEAD after every nonempty generation -> COMPLETE only after a fresh full "
-    "review generation finds zero findings; a repeated non-clean source tree stops as nonconvergent"
+    "review generation finds zero findings; untracked node_modules install output remains runtime "
+    "noise while tracked dependency files remain source; a repeated non-clean source tree stops "
+    "as nonconvergent"
 )
 _FINDING_ID = re.compile(r"^fnd_[A-Za-z0-9_.-]+$")
 _ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -328,28 +330,75 @@ def _require_synchronized_remote_branch(repo: Path, branch: str) -> str:
     return remote
 
 
-def _status_paths(repo: Path) -> list[str]:
+def _status_entries(repo: Path) -> list[tuple[str, str]]:
     output = _must_run(
         ["git", "status", "--porcelain=v1", "--untracked-files=all", "--no-renames", "-z"],
         cwd=repo,
         timeout=120,
     )
-    paths: list[str] = []
+    entries: list[tuple[str, str]] = []
     for record in output.split("\0"):
         if not record:
             continue
-        if len(record) < 4:
+        if len(record) < 4 or record[2] != " ":
             raise SafetyError("Git returned malformed status output.")
-        paths.append(record[3:])
-    return sorted(set(paths))
+        entries.append((record[:2], record[3:]))
+    return sorted(set(entries), key=lambda entry: (entry[1], entry[0]))
+
+
+def _status_paths(repo: Path) -> list[str]:
+    return sorted({path for _status, path in _status_entries(repo)})
+
+
+def _is_untracked_dependency_path(status: str, path: str) -> bool:
+    return status == "??" and PurePosixPath(path).parts[:1] == ("node_modules",)
 
 
 def _source_paths(repo: Path) -> list[str]:
-    return [
-        path
-        for path in _status_paths(repo)
-        if path != ".clawpatch" and not path.startswith(".clawpatch/")
-    ]
+    return sorted(
+        {
+            path
+            for status, path in _status_entries(repo)
+            if path != ".clawpatch"
+            and not path.startswith(".clawpatch/")
+            and not _is_untracked_dependency_path(status, path)
+        }
+    )
+
+
+def _normalized_stopped_owned_paths(
+    repo: Path,
+    checkpoint: dict[str, Any],
+    recorded_paths: list[str],
+) -> list[str]:
+    current_source = _source_paths(repo)
+    if recorded_paths == current_source:
+        return recorded_paths
+    entries = _status_entries(repo)
+    legacy_source = sorted(
+        {
+            path
+            for _status, path in entries
+            if path != ".clawpatch" and not path.startswith(".clawpatch/")
+        }
+    )
+    removed_paths = sorted(set(recorded_paths) - set(current_source))
+    status_by_path = {path: status for status, path in entries}
+    recorded_fingerprint = str(checkpoint.get("owned_source_fingerprint", ""))
+    if (
+        not current_source
+        or not removed_paths
+        or not set(current_source).issubset(recorded_paths)
+        or recorded_paths != legacy_source
+        or any(
+            not _is_untracked_dependency_path(status_by_path.get(path, ""), path)
+            for path in removed_paths
+        )
+        or not recorded_fingerprint
+        or _source_paths_fingerprint(repo, recorded_paths) != recorded_fingerprint
+    ):
+        return recorded_paths
+    return current_source
 
 
 def _gitlink_paths(repo: Path) -> list[str]:
@@ -1015,8 +1064,7 @@ def _run_project_gates(
     return outcomes
 
 
-def _source_state_fingerprint(repo: Path) -> dict[str, Any]:
-    paths = _source_paths(repo)
+def _source_state_fingerprint_for_paths(repo: Path, paths: list[str]) -> dict[str, Any]:
     diff = (
         _must_run(
             ["git", "diff", "--binary", "--full-index", "--no-ext-diff", "HEAD", "--", *paths],
@@ -1058,6 +1106,10 @@ def _source_state_fingerprint(repo: Path) -> dict[str, Any]:
     }
 
 
+def _source_state_fingerprint(repo: Path) -> dict[str, Any]:
+    return _source_state_fingerprint_for_paths(repo, _source_paths(repo))
+
+
 def _untracked_path_fingerprint(repo: Path, path: str) -> str:
     candidate = repo / path
     if candidate.is_symlink():
@@ -1071,8 +1123,15 @@ def _owned_source_fingerprint(repo: Path, paths: list[str]) -> str:
     exact_paths = sorted(set(paths))
     if not exact_paths or _source_paths(repo) != exact_paths:
         return ""
+    return _source_paths_fingerprint(repo, exact_paths)
+
+
+def _source_paths_fingerprint(repo: Path, paths: list[str]) -> str:
+    exact_paths = sorted(set(paths))
+    if not exact_paths:
+        return ""
     payload = json.dumps(
-        _source_state_fingerprint(repo),
+        _source_state_fingerprint_for_paths(repo, exact_paths),
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -3262,7 +3321,8 @@ def _resume_stopped_attempt(
     require_project_gates: bool = True,
 ) -> tuple[dict[str, Any], bool]:
     finding_id = str(checkpoint["finding_id"])
-    owned_paths = sorted(str(path) for path in checkpoint["owned_paths"])
+    recorded_owned_paths = sorted(str(path) for path in checkpoint["owned_paths"])
+    owned_paths = _normalized_stopped_owned_paths(repo, checkpoint, recorded_owned_paths)
     if not owned_paths or owned_paths != _source_paths(repo):
         raise SafetyError(
             "Stopped Clawpatch progress does not exactly own the current source changes."

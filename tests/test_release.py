@@ -47,6 +47,8 @@ from clawpatch_supervise.clawpatch_release import (
     _review_all_features,
     _run_project_gates,
     _source_state_fingerprint,
+    _source_paths,
+    _source_paths_fingerprint,
     _UnresolvedFinding,
     _windows_clawpatch_processes,
     _write_release_progress,
@@ -107,6 +109,32 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         )
         subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+
+    def test_source_paths_ignore_only_untracked_node_modules(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            tracked_dependency = repo / "node_modules" / "vendored" / "source.js"
+            tracked_dependency.parent.mkdir(parents=True)
+            tracked_dependency.write_text("tracked v1\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "node_modules/vendored/source.js"], cwd=repo, check=True
+            )
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "tracked dependency"], cwd=repo, check=True
+            )
+            tracked_dependency.write_text("tracked v2\n", encoding="utf-8")
+            installed_dependency = repo / "node_modules" / "installed" / "runtime.js"
+            installed_dependency.parent.mkdir(parents=True)
+            installed_dependency.write_text("untracked runtime\n", encoding="utf-8")
+            (repo / "notes.txt").write_text("untracked source\n", encoding="utf-8")
+
+            source_paths = _source_paths(repo)
+
+        self.assertEqual(
+            source_paths,
+            ["node_modules/vendored/source.js", "notes.txt"],
+        )
 
     @staticmethod
     def init_plain_repo(repo: Path) -> None:
@@ -2041,6 +2069,90 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 )
 
         revalidate.assert_not_called()
+
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    def test_stopped_fixed_attempt_ignores_proven_untracked_node_modules_noise(
+        self,
+        show_finding,
+        _gates,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            scripts = repo / "scripts"
+            scripts.mkdir()
+            package = repo / "package.json"
+            check = scripts / "check.mjs"
+            package.write_text('{"scripts": {"check": "node scripts/check.mjs"}}\n')
+            check.write_text("// assertions\n", encoding="utf-8")
+            subprocess.run(["git", "add", "package.json", "scripts/check.mjs"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            package.write_text(
+                '{"scripts": {"check": "node scripts/check.mjs", '
+                '"test": "node scripts/check.mjs"}}\n',
+                encoding="utf-8",
+            )
+            check.write_text("// assertions\n// test script assertion\n", encoding="utf-8")
+            dependency = repo / "node_modules" / "entities"
+            dependency.mkdir(parents=True)
+            (dependency / "LICENSE").write_text("dependency license\n", encoding="utf-8")
+            old_owned_paths = [
+                "node_modules/entities/LICENSE",
+                "package.json",
+                "scripts/check.mjs",
+            ]
+            checkpoint = {
+                "finding_id": "fnd_one",
+                "branch": "main",
+                "head_before": head,
+                "phase": "stopped",
+                "owned_paths": old_owned_paths,
+                "owned_source_fingerprint": _source_paths_fingerprint(
+                    repo, old_owned_paths
+                ),
+            }
+            show_finding.return_value = {
+                "finding": {"id": "fnd_one", "status": "fixed"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_one",
+                        "status": "applied",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["package.json", "scripts/check.mjs"],
+                        "git": {"baseSha": head},
+                    }
+                ],
+            }
+
+            record, pushed = _resume_stopped_attempt(
+                repo,
+                checkpoint,
+                env={},
+                push_mode="none",
+                branch="main",
+                pushed=False,
+                require_project_gates=False,
+            )
+
+            committed_paths = subprocess.check_output(
+                ["git", "show", "--pretty=format:", "--name-only", "HEAD"],
+                cwd=repo,
+                text=True,
+            ).split()
+            remaining_source = _source_paths(repo)
+            dependency_exists = (repo / "node_modules" / "entities" / "LICENSE").is_file()
+
+        self.assertFalse(pushed)
+        self.assertEqual(record["revalidation"]["outcome"], "fixed")
+        self.assertEqual(record["files_changed"], ["package.json", "scripts/check.mjs"])
+        self.assertEqual(committed_paths, ["package.json", "scripts/check.mjs"])
+        self.assertEqual(remaining_source, [])
+        self.assertTrue(dependency_exists)
 
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._revalidate")

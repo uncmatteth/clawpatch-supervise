@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.15",
+    [string]$Version = "0.1.16",
     [string]$Source = "",
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise"),
     [string]$BinDir = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise\bin"),
