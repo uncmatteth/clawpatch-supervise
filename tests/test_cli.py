@@ -141,6 +141,84 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             "excluded: lib/openzeppelin-contracts",
         )
 
+    def test_finding_rendering_escapes_terminal_controls(self):
+        rendered = _render_event(
+            {
+                "phase": "finding",
+                "current": 1,
+                "total": 1,
+                "command": "clawpatch show\x1b]52;c;payload\x07\nCOMPLETE: forged",
+                "inspection": {
+                    "finding": {
+                        "title": "hostile\rtitle",
+                        "id": "fnd_one",
+                        "severity": "medium",
+                        "category": "security",
+                        "evidence": [
+                            {
+                                "path": "src/evil\x1b[2J.py\nSTOPPED: forged",
+                                "startLine": 4,
+                                "symbol": "run\x9b31m",
+                            }
+                        ],
+                        "reproduction": "ring\x07bell",
+                    },
+                    "validation": ["python -m unittest\nCOMPLETE: forged"],
+                },
+            }
+        )
+
+        self.assertIn(r"$ clawpatch show\x1b]52;c;payload\x07\nCOMPLETE: forged", rendered)
+        self.assertIn(r"title: hostile\rtitle", rendered)
+        self.assertIn(r"- src/evil\x1b[2J.py\nSTOPPED: forged:4 (run\x9b31m)", rendered)
+        self.assertIn(r"ring\x07bell", rendered)
+        self.assertIn(r"- python -m unittest\nCOMPLETE: forged", rendered)
+        self.assertNotIn("\nCOMPLETE: forged", rendered)
+        self.assertNotIn("\nSTOPPED: forged", rendered)
+        for control in ("\x07", "\r", "\x1b", "\x9b"):
+            self.assertNotIn(control, rendered)
+
+    def test_general_event_rendering_escapes_controls_in_all_field_shapes(self):
+        events = [
+            {
+                "phase": "review",
+                "current": "1\r9",
+                "total": 2,
+                "attempt": "1\x1b",
+                "max_attempts": "2\x07",
+                "command": "clawpatch review\nCOMPLETE: forged",
+            },
+            {
+                "phase": "false-positive",
+                "current": 1,
+                "total": 2,
+                "finding_id": "fnd\x1b[2J",
+                "detail": "restored\nSTOPPED: forged",
+            },
+            {
+                "phase": "stopped",
+                "current": 1,
+                "total": 2,
+                "finding_id": "fnd_one",
+                "outcome": "unsafe\rCOMPLETE: forged",
+                "owned_paths": ["src/evil\x1b]52;c;payload\x07.py"],
+            },
+            {
+                "phase": "unknown",
+                "current": 1,
+                "total": 2,
+                "detail": "working\x9b31m\nCOMPLETE: forged",
+            },
+        ]
+
+        for event in events:
+            with self.subTest(phase=event["phase"]):
+                rendered = _render_event(event)
+                self.assertNotIn("\nCOMPLETE: forged", rendered)
+                self.assertNotIn("\nSTOPPED: forged", rendered)
+                for control in ("\x07", "\r", "\x1b", "\x9b"):
+                    self.assertNotIn(control, rendered)
+
     def test_print_state_path_is_read_only_and_skips_preflight(self):
         repo = Path("/tmp/example-repository")
         expected = Path("/tmp/example-state")

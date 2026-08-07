@@ -89,9 +89,27 @@ def _resolve_fresh_mode(repo: Path, requested: bool | None) -> bool:
     return answer.strip().casefold() in {"y", "yes"}
 
 
+def _terminal_safe(value: Any) -> str:
+    text = str(value)
+    escaped = []
+    for character in text:
+        codepoint = ord(character)
+        if character == "\n":
+            escaped.append(r"\n")
+        elif character == "\r":
+            escaped.append(r"\r")
+        elif character == "\t":
+            escaped.append(r"\t")
+        elif codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
+            escaped.append(f"\\x{codepoint:02x}")
+        else:
+            escaped.append(character)
+    return "".join(escaped)
+
+
 def _counter(event: dict[str, Any]) -> str:
-    current = event.get("current", "?")
-    total = event.get("total", "?")
+    current = _terminal_safe(event.get("current", "?"))
+    total = _terminal_safe(event.get("total", "?"))
     return f"[{current}/{total}]"
 
 
@@ -99,15 +117,15 @@ def _render_inspection(event: dict[str, Any]) -> str:
     inspection = event.get("inspection")
     finding = inspection.get("finding") if isinstance(inspection, dict) else None
     if not isinstance(finding, dict):
-        return f"{_counter(event)} SHOW {event.get('finding_id', '')}"
+        return f"{_counter(event)} SHOW {_terminal_safe(event.get('finding_id', ''))}"
     lines = [
         "",
         f"{_counter(event)} SHOW — 🔎🐛🗑️ LOOK AT THIS FUCKING THING",
-        f"$ {event.get('command', '')}",
-        f"title: {finding.get('title', '')}",
-        f"id: {finding.get('id', '')}",
-        f"severity: {finding.get('severity', '')}",
-        f"category: {finding.get('category', '')}",
+        f"$ {_terminal_safe(event.get('command', ''))}",
+        f"title: {_terminal_safe(finding.get('title', ''))}",
+        f"id: {_terminal_safe(finding.get('id', ''))}",
+        f"severity: {_terminal_safe(finding.get('severity', ''))}",
+        f"category: {_terminal_safe(finding.get('category', ''))}",
     ]
     evidence = finding.get("evidence")
     if isinstance(evidence, list) and evidence:
@@ -117,14 +135,14 @@ def _render_inspection(event: dict[str, Any]) -> str:
                 continue
             start = item.get("startLine")
             end = item.get("endLine")
-            location = str(item.get("path", ""))
+            location = _terminal_safe(item.get("path", ""))
             if isinstance(start, int):
                 location += f":{start}"
                 if isinstance(end, int) and end != start:
                     location += f"-{end}"
             symbol = item.get("symbol")
             if symbol:
-                location += f" ({symbol})"
+                location += f" ({_terminal_safe(symbol)})"
             lines.append(f"- {location}")
     for label, field in (
         ("reproduction", "reproduction"),
@@ -133,10 +151,10 @@ def _render_inspection(event: dict[str, Any]) -> str:
     ):
         value = finding.get(field)
         if value:
-            lines.extend([f"{label}:", str(value)])
+            lines.extend([f"{label}:", _terminal_safe(value)])
     validation = inspection.get("validation") if isinstance(inspection, dict) else None
     if isinstance(validation, list) and validation:
-        lines.extend(["validation:", *[f"- {command}" for command in validation]])
+        lines.extend(["validation:", *[f"- {_terminal_safe(command)}" for command in validation]])
     return "\n".join(lines)
 
 
@@ -171,7 +189,11 @@ def _render_event(event: dict[str, Any]) -> str:
     if phase in command_phases:
         attempt = event.get("attempt")
         maximum = event.get("max_attempts")
-        suffix = f" (attempt {attempt}/{maximum})" if attempt and maximum else ""
+        suffix = (
+            f" (attempt {_terminal_safe(attempt)}/{_terminal_safe(maximum)})"
+            if attempt and maximum
+            else ""
+        )
         personality = {
             "preflight": " — 🥾🔍 CHECK THE DAMN TOOLS",
             "fresh": " — 🌱🤬 START THIS SHIT CLEAN",
@@ -192,7 +214,7 @@ def _render_event(event: dict[str, Any]) -> str:
         }.get(str(phase), "")
         return (
             f"\n{_counter(event)} {command_phases[str(phase)]}{suffix}{personality}\n"
-            f"$ {event.get('command', '')}"
+            f"$ {_terminal_safe(event.get('command', ''))}"
         )
     if phase == "finding":
         return _render_inspection(event)
@@ -200,66 +222,75 @@ def _render_event(event: dict[str, Any]) -> str:
         return (
             f"\n{_counter(event)} FALSE-POSITIVE — 🙄🗑️ BOGUS BUG. "
             "THROW OUT ONLY OUR SHIT AND KEEP MOVING\n"
-            f"finding: {event.get('finding_id', '')}\n"
-            f"detail: {event.get('detail', '')}"
+            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
+            f"detail: {_terminal_safe(event.get('detail', ''))}"
         )
     if phase == "reset-recovery":
         return (
             f"\n{_counter(event)} CHECKPOINT RECOVERY — "
             "🧹🔧 CLEANING UP INTERRUPTED SHIT SAFELY\n"
-            f"finding: {event.get('finding_id', '')}\n"
-            f"$ {event.get('command', '')}"
+            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
+            f"$ {_terminal_safe(event.get('command', ''))}"
         )
     if phase == "submodule-exclusion":
         return (
             f"\n{_counter(event)} SUBMODULE EXCLUSION — "
             "🚧🙅 NOT TOUCHING SOMEBODY ELSE'S SHIT\n"
-            f"excluded: {event.get('detail', '')}"
+            f"excluded: {_terminal_safe(event.get('detail', ''))}"
         )
     if phase == "validation-service-ready":
-        return f"\n{_counter(event)} VALIDATION SERVICE READY\n$ {event.get('detail', '')}"
+        return f"\n{_counter(event)} VALIDATION SERVICE READY\n$ {_terminal_safe(event.get('detail', ''))}"
     if phase == "validation-service-cleanup":
-        return f"\n{_counter(event)} VALIDATION SERVICE CLEANUP\n$ {event.get('detail', '')}"
+        return f"\n{_counter(event)} VALIDATION SERVICE CLEANUP\n$ {_terminal_safe(event.get('detail', ''))}"
     if phase == "validation-environment-ready":
-        return f"\n{_counter(event)} VALIDATION ENVIRONMENT READY\n$ {event.get('detail', '')}"
+        return f"\n{_counter(event)} VALIDATION ENVIRONMENT READY\n$ {_terminal_safe(event.get('detail', ''))}"
     if phase == "validation-environment-cleanup":
-        return f"\n{_counter(event)} VALIDATION ENVIRONMENT CLEANUP\n$ {event.get('detail', '')}"
+        return f"\n{_counter(event)} VALIDATION ENVIRONMENT CLEANUP\n$ {_terminal_safe(event.get('detail', ''))}"
     if phase == "fix":
         attempt = int(event.get("attempt", 1))
         maximum = event.get("max_attempts")
         if maximum:
-            suffix = f" (attempt {attempt}/{maximum})"
+            suffix = f" (attempt {attempt}/{_terminal_safe(maximum)})"
         else:
             suffix = f" (attempt {attempt})" if attempt > 1 else ""
         return (
             f"\n{_counter(event)} FIX{suffix} — 🔨🤬🦶 KICK THIS BUG'S ASS\n"
-            f"$ {event.get('command', '')}"
+            f"$ {_terminal_safe(event.get('command', ''))}"
         )
     if phase == "stopped":
         owned = event.get("owned_paths")
-        paths = ", ".join(str(path) for path in owned) if isinstance(owned, list) else ""
+        paths = (
+            ", ".join(_terminal_safe(path) for path in owned)
+            if isinstance(owned, list)
+            else ""
+        )
         return (
-            f"\n{_counter(event)} STOPPED - {event.get('outcome', 'not fixed')} — "
+            f"\n{_counter(event)} STOPPED - "
+            f"{_terminal_safe(event.get('outcome', 'not fixed'))} — "
             "🛑💥🤬 FUCK. THIS SHIT ISN'T SAFE TO ADVANCE\n"
-            f"finding: {event.get('finding_id', '')}\n"
+            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
             f"source left in place: {paths or 'none'}"
         )
     if phase == "fixed":
         commit = event.get("commit") or "no source commit required"
-        return f"\n{_counter(event)} FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED\ncommit: {commit}"
+        return (
+            f"\n{_counter(event)} FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED\n"
+            f"commit: {_terminal_safe(commit)}"
+        )
     if phase == "continuing":
         commit = event.get("commit") or "no source commit required"
         return (
             f"\n{_counter(event)} MOTHERFUCKER, SHIT'S STILL FUCKED. "
             "CONTINUING THE SAME FUCKING FINDING. 🤬🦶💥\n"
-            f"commit: {commit}"
+            f"commit: {_terminal_safe(commit)}"
         )
     if phase == "fixed-point-rescan":
         generation = event.get("attempt", "?")
         return (
-            f"\n{_counter(event)} FRESH FIXED-POINT REVIEW (generation {generation}) — "
+            f"\n{_counter(event)} FRESH FIXED-POINT REVIEW "
+            f"(generation {_terminal_safe(generation)}) — "
             "🕵️🗑️ CHECKING FOR MORE GARBAGE\n"
-            f"$ {event.get('command', '')}"
+            f"$ {_terminal_safe(event.get('command', ''))}"
         )
     if phase == "resume":
         owned = event.get("owned_paths")
@@ -267,17 +298,17 @@ def _render_event(event: dict[str, Any]) -> str:
             return (
                 f"\n{_counter(event)} RESUME APPLIED REPAIR — "
                 "😤🔧 FOUND THE SAVED FIX\n"
-                f"finding: {event.get('finding_id', '')}\n"
-                f"source changes: {', '.join(str(path) for path in owned)}"
+                f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
+                f"source changes: {', '.join(_terminal_safe(path) for path in owned)}"
             )
         return (
             f"\n{_counter(event)} RESUME INTERRUPTED PLANNED ATTEMPT — "
             "🧟🔧 PICKING THIS SHIT BACK UP\n"
-            f"finding: {event.get('finding_id', '')}\n"
+            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
             "source changes: none; returning through ClawPatch next"
         )
     detail = event.get("detail") or event.get("command") or phase or "working"
-    return f"{_counter(event)} {str(detail).upper()}"
+    return f"{_counter(event)} {_terminal_safe(detail).upper()}"
 
 
 def main(
