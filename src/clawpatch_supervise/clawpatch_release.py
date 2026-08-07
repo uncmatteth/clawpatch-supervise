@@ -2857,7 +2857,7 @@ def _process_finding_until_fixed(
                 raise
             continuations += 1
             zero_source_retries = 0
-            if failure is not None and failure.kind.value == "validation-failed":
+            if failure is not None and failure.phase == "fix" and failure.progress_capable:
                 try:
                     gate_runs = _run_project_gates(
                         repo,
@@ -2888,7 +2888,7 @@ def _process_finding_until_fixed(
                     "finding_id": finding_id,
                     "inspection": inspected,
                     "head_before": original_head,
-                    "patch_attempt": "validation-failed-recovery",
+                    "patch_attempt": "saved-repair-recovery",
                     "files_changed": _paths_between(repo, original_head, temporary_commit),
                     "gate_runs": gate_runs,
                     "revalidation": validation,
@@ -2905,8 +2905,9 @@ def _process_finding_until_fixed(
                                 "finding_id": finding_id,
                                 "commit": temporary_commit,
                                 "detail": (
-                                    "fix validation failed, fresh revalidation returned "
-                                    f"{validation_outcome} evidence, and the next fix will use it"
+                                    f"{failure.kind.value} left a saved repair; fresh "
+                                    f"revalidation returned {validation_outcome} evidence, "
+                                    "and the next fix will use it"
                                 ),
                             }
                         )

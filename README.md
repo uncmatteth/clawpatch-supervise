@@ -138,6 +138,7 @@ The supervisor provides:
 | `fixed` with a verified repair | Create one exact-path repair commit, push if requested, continue. |
 | `open` or `uncertain` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
 | `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with new `open` or `uncertain` evidence. |
+| `fix` times out or loses its provider after applying source progress | Save the exact repair and revalidate it before spending another provider attempt; finalize immediately when the saved repair is already fixed. |
 | Other validation/provider failure after new source progress | Preserve the exact progress and continue the same finding. |
 | Configured project gate is red while resuming an exact stopped `open` or `uncertain` repair | Preserve the checkpoint and re-enter only that finding with the exact gate failure as repair evidence. |
 | A legacy checkpoint includes fingerprinted untracked `node_modules` install output beside an exact applied repair | Keep the dependency tree in place, normalize ownership to the applied repair paths, and resume. Tracked dependency files remain source. |
@@ -337,7 +338,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.16 alpha**.
+Current release: **0.1.17 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

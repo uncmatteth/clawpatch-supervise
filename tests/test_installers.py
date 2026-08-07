@@ -120,7 +120,7 @@ class InstallerContractTests(unittest.TestCase):
         npm_mode: str = "success",
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
-        fake_bin = root / "bin"
+        fake_bin = root / "bin with spaces"
         fake_bin.mkdir()
         command_stub = root / "command-stub.cmd"
         self._write_batch(command_stub, "@echo off\nexit /b 0\n")
@@ -177,6 +177,13 @@ class InstallerContractTests(unittest.TestCase):
         system_root = Path(os.environ["SystemRoot"])
         install_root = root / "install"
         environment = os.environ.copy()
+        # Windows environment-variable names are case-insensitive, while the
+        # Python mapping can retain differently-cased duplicates. Remove the
+        # inherited spellings so this test cannot accidentally use the host's
+        # real PATH or Program Files npm installation.
+        for key in list(environment):
+            if key.casefold() in {"path", "programfiles"}:
+                del environment[key]
         environment.update(
             {
                 "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),

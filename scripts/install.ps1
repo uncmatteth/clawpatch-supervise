@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.16",
+    [string]$Version = "0.1.17",
     [string]$Source = "",
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise"),
     [string]$BinDir = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise\bin"),
@@ -10,23 +10,35 @@ param(
 $ErrorActionPreference = "Stop"
 $ClawPatchVersion = "0.7.2"
 $ClawHubVersion = "0.19.1"
+function Find-PathApplication {
+    param([string[]]$Names)
+    foreach ($directory in ($env:Path -split ";")) {
+        $directory = $directory.Trim().Trim('"')
+        if ([string]::IsNullOrWhiteSpace($directory)) { continue }
+        foreach ($name in $Names) {
+            $candidate = Join-Path $directory $name
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) { return $candidate }
+        }
+    }
+    return $null
+}
 if ([string]::IsNullOrWhiteSpace($Source)) {
     $Source = "https://github.com/uncmatteth/clawpatch-supervise/releases/download/v$Version/clawpatch_supervise-$Version-py3-none-any.whl"
 }
 
 $clawpatch = Get-Command clawpatch -ErrorAction SilentlyContinue
 if ($null -eq $clawpatch) {
-    $npm = Get-Command npm -ErrorAction SilentlyContinue
-    if ($null -eq $npm) {
+    $npmPath = Find-PathApplication @("npm.cmd", "npm.exe")
+    if ($null -eq $npmPath) {
         throw "npm is required to install ClawPatch."
     }
 
-    & $npm.Source install --global "clawpatch@$ClawPatchVersion"
+    & $npmPath install --global "clawpatch@$ClawPatchVersion"
     if ($LASTEXITCODE -ne 0) {
         throw "npm could not install ClawPatch."
     }
 
-    $npmPrefixOutput = & $npm.Source prefix --global
+    $npmPrefixOutput = & $npmPath prefix --global
     if ($LASTEXITCODE -ne 0) {
         throw "npm could not report its global installation directory."
     }
@@ -61,20 +73,11 @@ $wrapperText = "@echo off`r`n`"$supervisor`" %*`r`n"
 Set-Content -Path $wrapper -Value $wrapperText -Encoding Ascii -NoNewline
 $env:Path = "$BinDir;$env:Path"
 
-$clawHubCommand = Get-Command clawhub.cmd, clawhub.exe, clawhub -CommandType Application -ErrorAction SilentlyContinue |
-    Select-Object -First 1
-if ($null -eq $clawHubCommand) {
-    $npmCommand = Get-Command npm.cmd, npm.exe, npm -CommandType Application -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($null -eq $npmCommand) {
-        $knownNpm = Join-Path $env:ProgramFiles "nodejs\npm.cmd"
-        if (Test-Path -LiteralPath $knownNpm -PathType Leaf) {
-            $npmPath = $knownNpm
-        } else {
-            throw "ClawHub is missing and npm is unavailable. Install Node.js 22 or newer, then rerun this installer."
-        }
-    } else {
-        $npmPath = $npmCommand.Source
+$clawHubPath = Find-PathApplication @("clawhub.cmd", "clawhub.exe")
+if ($null -eq $clawHubPath) {
+    $npmPath = Find-PathApplication @("npm.cmd", "npm.exe")
+    if ($null -eq $npmPath) {
+        throw "ClawHub is missing and npm is unavailable. Install Node.js 22 or newer, then rerun this installer."
     }
     $clawHubRoot = Join-Path $InstallRoot "clawhub"
     Write-Host "ClawHub is missing; installing clawhub@$ClawHubVersion into $clawHubRoot"
@@ -90,8 +93,6 @@ if ($null -eq $clawHubCommand) {
     $clawHubWrapperText = "@echo off`r`ncall `"$installedClawHub`" %*`r`nexit /b %ERRORLEVEL%`r`n"
     Set-Content -Path $clawHubWrapper -Value $clawHubWrapperText -Encoding Ascii -NoNewline
     $clawHubPath = $clawHubWrapper
-} else {
-    $clawHubPath = $clawHubCommand.Source
 }
 
 if ($AddToPath) {
