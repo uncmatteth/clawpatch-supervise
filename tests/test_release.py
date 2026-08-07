@@ -1116,6 +1116,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
         )
 
+    def test_process_matcher_recognizes_supported_package_module_invocation(self):
+        self.assertTrue(_is_clawpatch_argv(["python", "-m", "clawpatch_supervise"]))
+
     @unittest.skipIf(os.name == "nt", "POSIX process inventory only")
     @patch("clawpatch_supervise.clawpatch_release.Path.is_dir", return_value=False)
     @patch("clawpatch_supervise.clawpatch_release.os.getpid", return_value=101)

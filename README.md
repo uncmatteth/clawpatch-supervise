@@ -121,6 +121,7 @@ The supervisor provides:
 - exact-path temporary commits for genuine partial progress;
 - same-finding continuation only when ClawPatch produced a new source tree;
 - durable checkpoints outside the repository being repaired;
+- repository-scoped active-process detection for console, script, and `python -m clawpatch_supervise` launches;
 - a child-process watchdog that terminates the entire timed-out process group;
 - optional verified `each` or `final` pushes;
 - fresh fixed-point review generations after repairs;

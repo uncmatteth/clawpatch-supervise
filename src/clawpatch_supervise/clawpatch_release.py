@@ -402,6 +402,7 @@ def _is_clawpatch_argv(argv: list[str]) -> bool:
         return False
     if len(argv) >= 3 and argv[1] == "-m":
         return argv[2] in {
+            "clawpatch_supervise",
             "clawpatch_supervise.clawpatch_external",
             "manageroo.clawpatch_external",
         }
