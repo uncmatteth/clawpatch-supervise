@@ -1,6 +1,8 @@
+import hashlib
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -25,6 +27,8 @@ class InstallerContractTests(unittest.TestCase):
         clawpatch_version: str = CLAWPATCH_VERSION,
         clawhub_version: str = CLAWHUB_VERSION,
         npm_mode: str = "success",
+        source_package: Path | str = REPOSITORY_ROOT,
+        source_sha256: str | None = None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
         fake_bin = root / "bin"
@@ -40,7 +44,7 @@ class InstallerContractTests(unittest.TestCase):
             "exit 0\n",
         )
 
-        for command in ("bash", "cp", "ln", "mkdir"):
+        for command in ("bash", "cp", "ln", "mkdir", "mktemp", "rm"):
             command_path = shutil.which(command)
             self.assertIsNotNone(command_path)
             (fake_bin / command).symlink_to(command_path)
@@ -54,7 +58,9 @@ class InstallerContractTests(unittest.TestCase):
         self._write_executable(
             python,
             "#!/bin/sh\n"
-            'if [ "$1" = "-c" ]; then exit 0; fi\n'
+            'if [ "$1" = "-c" ] || [ "$1" = "-" ]; then\n'
+            '  exec "$CLAWPATCH_TEST_REAL_PYTHON" "$@"\n'
+            "fi\n"
             'if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then\n'
             '  mkdir -p "$3/bin"\n'
             '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/python"\n'
@@ -97,15 +103,20 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_SUPERVISE_BIN_DIR": str(root / "installed-bin"),
                 "CLAWPATCH_SUPERVISE_HOME": str(install_root),
                 "CLAWPATCH_SUPERVISE_PYTHON": str(python),
+                "CLAWPATCH_SUPERVISE_SOURCE": str(source_package),
                 "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
                 "CLAWPATCH_TEST_CLAWPATCH_VERSION": clawpatch_version,
                 "CLAWPATCH_TEST_CLAWHUB_VERSION": clawhub_version,
                 "CLAWPATCH_TEST_LOG": str(invocation_log),
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
                 "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
+                "CLAWPATCH_TEST_REAL_PYTHON": sys.executable,
                 "PATH": str(fake_bin),
             }
         )
+        environment.pop("CLAWPATCH_SUPERVISE_SHA256", None)
+        if source_sha256 is not None:
+            environment["CLAWPATCH_SUPERVISE_SHA256"] = source_sha256
         result = subprocess.run(
             [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
             capture_output=True,
@@ -403,6 +414,51 @@ class InstallerContractTests(unittest.TestCase):
             self.assertIn("Python 3.11 or newer is required.", result.stderr)
             self.assertFalse(install_root.exists())
             self.assertNotIn("-m venv", invocation_log.read_text(encoding="utf-8"))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_accepts_wheel_with_matching_digest(self) -> None:
+        wheel = Path(self._temporary_directory.name) / "clawpatch-supervise.whl"
+        wheel.write_bytes(b"verified wheel")
+
+        result, _invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            source_package=wheel,
+            source_sha256=hashlib.sha256(wheel.read_bytes()).hexdigest(),
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_wheel_with_mismatched_digest_before_installation(self) -> None:
+        wheel = Path(self._temporary_directory.name) / "clawpatch-supervise.whl"
+        wheel.write_bytes(b"tampered wheel")
+
+        result, _invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            source_package=wheel,
+            source_sha256="0" * 64,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Artifact SHA-256 mismatch", result.stderr)
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_requires_digest_for_custom_remote_source(self) -> None:
+        result, _invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            source_package="https://example.invalid/clawpatch-supervise.whl",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("CLAWPATCH_SUPERVISE_SHA256 is required", result.stderr)
+        self.assertFalse(install_root.exists())
 
     def test_installer_defaults_match_the_packaged_release(self) -> None:
         project = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[

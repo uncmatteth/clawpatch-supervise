@@ -8,6 +8,7 @@ bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 readonly clawpatch_version="0.7.2"
 readonly clawhub_version="0.19.1"
+readonly release_sha256_0_1_21="7444e56bb1987f694f58c8df4146cfabaa2646b440fad3f32e1971781a7c5f42"
 
 check_command_version() {
   local command_name="$1"
@@ -68,8 +69,54 @@ fi
 check_command_version "ClawPatch" "$clawpatch_version" "$clawpatch_command" --version
 clawpatch_installed_version="$checked_version"
 
+package_to_install="$source_package"
+if [[ ! -d "$source_package" ]]; then
+  expected_sha256="${CLAWPATCH_SUPERVISE_SHA256:-}"
+  if [[ -z "$expected_sha256" ]]; then
+    if [[ -n "${CLAWPATCH_SUPERVISE_SOURCE:-}" ]]; then
+      echo "CLAWPATCH_SUPERVISE_SHA256 is required for a custom wheel source." >&2
+      exit 2
+    fi
+    if [[ "$version" != "0.1.21" ]]; then
+      echo "No trusted SHA-256 is available for clawpatch-supervise $version." >&2
+      exit 2
+    fi
+    expected_sha256="$release_sha256_0_1_21"
+  fi
+
+  download_root="$(mktemp -d)"
+  trap 'rm -rf "$download_root"' EXIT
+  package_to_install="$download_root/clawpatch_supervise-${version}-py3-none-any.whl"
+  "$python_command" - "$source_package" "$package_to_install" "$expected_sha256" <<'PY'
+import hashlib
+import hmac
+import shutil
+import sys
+import urllib.request
+from pathlib import Path
+
+source, destination, expected = sys.argv[1:]
+if len(expected) != 64 or any(character not in "0123456789abcdefABCDEF" for character in expected):
+    print("CLAWPATCH_SUPERVISE_SHA256 must be a 64-character hexadecimal digest.", file=sys.stderr)
+    raise SystemExit(2)
+
+source_path = Path(source)
+if source_path.is_file():
+    shutil.copyfile(source_path, destination)
+else:
+    with urllib.request.urlopen(source) as response, open(destination, "wb") as output:
+        shutil.copyfileobj(response, output)
+
+with open(destination, "rb") as artifact:
+    actual = hashlib.file_digest(artifact, "sha256").hexdigest()
+if not hmac.compare_digest(actual, expected.lower()):
+    print(f"Artifact SHA-256 mismatch: expected {expected.lower()}, found {actual}.", file=sys.stderr)
+    raise SystemExit(2)
+PY
+fi
+
 "$python_command" -m venv "$install_root/venv"
-"$install_root/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$source_package"
+"$install_root/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$package_to_install"
 
 if [[ -z "$clawhub_command" ]]; then
   clawhub_root="$install_root/clawhub"
