@@ -12,6 +12,8 @@ from clawpatch_supervise.clawpatch_protocol import RepairAction, classify_clawpa
 from clawpatch_supervise.clawpatch_release import ClawpatchCommandFailure, ClawpatchStop
 from clawpatch_supervise.errors import SafetyError
 
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+
 
 class ExternalClawpatchSupervisorTests(unittest.TestCase):
     def test_version_is_available_without_running_clawpatch(self):
@@ -258,7 +260,9 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         )
 
     def test_package_installs_external_supervisor_command(self):
-        project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+        project = tomllib.loads(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )["project"]
         self.assertEqual(
             project["scripts"]["clawpatch-supervise"],
             "clawpatch_supervise.clawpatch_external:main",
