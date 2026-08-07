@@ -70,7 +70,7 @@ clawpatch-supervise `
   --timeout-minutes 15
 ```
 
-Use `--push none` if you want verified local commits without publishing them. The normal command preserves and processes an existing `.clawpatch` queue instead of deleting it. When an existing queue is proven clean and project source is clean, an interactive run asks whether to remove that state and start a new full review; closing input at this prompt retains the state and stops safely. `--fresh` is the explicit non-interactive reset choice, but it still requires proof that the existing queue has no open findings, locks, lock files, or uncertain findings and that no project source is retained. Use `--resume-stopped` for an exact stopped supervisor checkpoint.
+Use `--push none` if you want verified local commits without publishing them. The normal command preserves and processes an existing `.clawpatch` queue instead of deleting it. When an existing queue is proven clean and project source is clean, an interactive run asks whether to remove that state and start a new full review. Press `Enter` or answer `n` to keep the existing state and continue; answer `y` to reset the proven-clean state and review again. While that question is waiting, the heartbeat explicitly identifies a user prompt and never claims `clawpatch --version` or a child watchdog is still running. Closing input at this prompt retains the state and stops safely. `--fresh` is the explicit non-interactive reset choice, but it still requires proof that the existing queue has no open findings, locks, lock files, or uncertain findings and that no project source is retained. Use `--resume-stopped` for an exact stopped supervisor checkpoint.
 
 The supervisor resolves `--repo` to one canonical path before preflight and uses that same path for the entire run, so retargeting a repository symlink cannot redirect later repair work.
 
@@ -362,7 +362,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.23 alpha**.
+Current release: **0.1.24 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

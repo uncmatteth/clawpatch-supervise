@@ -10,7 +10,12 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from clawpatch_supervise.clawpatch_external import _render_event, _run_state_query, main
+from clawpatch_supervise.clawpatch_external import (
+    _heartbeat_lines,
+    _render_event,
+    _run_state_query,
+    main,
+)
 from clawpatch_supervise.clawpatch_protocol import RepairAction, classify_clawpatch_failure
 from clawpatch_supervise.clawpatch_release import ClawpatchCommandFailure, ClawpatchStop
 from clawpatch_supervise.errors import SafetyError
@@ -19,6 +24,25 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExternalClawpatchSupervisorTests(unittest.TestCase):
+    def test_clean_queue_prompt_heartbeat_does_not_claim_clawpatch_is_running(self):
+        lines = _heartbeat_lines(
+            {
+                "phase": "fresh-choice",
+                "current": "?",
+                "total": "?",
+                "changed": 0.0,
+            },
+            watchdog_seconds=900,
+            now=960.0,
+        )
+
+        rendered = "\n".join(lines)
+        self.assertIn("WAITING FOR YOUR Y/N ANSWER", rendered)
+        self.assertIn("Enter or n", rendered)
+        self.assertIn("keeps the existing state and continues", rendered)
+        self.assertNotIn("clawpatch --version", rendered)
+        self.assertNotIn("child watchdog", rendered)
+
     @unittest.skipUnless(os.name == "nt", "Windows command shim test")
     def test_state_query_launches_clawpatch_cmd_from_path_with_spaces(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -92,7 +116,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.23")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.24")
 
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
@@ -894,8 +918,42 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             )
 
         self.assertEqual(code, 0)
-        prompt.assert_called_once()
+        prompt.assert_called_once_with(
+            "ClawPatch queue is clean. Start a new full review? "
+            "[y/N] (Enter or N keeps this state and continues) "
+        )
         self.assertTrue(calls[0][1]["fresh"])
+
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_default_no_at_clean_queue_prompt_keeps_state_and_continues(
+        self, _state_exists, _queue_is_clean, _source
+    ):
+        calls = []
+        output = StringIO()
+
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="") as prompt,
+            redirect_stdout(output),
+        ):
+            code = main(
+                ["--repo", "."],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertFalse(calls[0][1]["fresh"])
+        self.assertIn("WAITING FOR YOUR Y/N ANSWER", output.getvalue())
+        self.assertIn("not a stuck ClawPatch command", output.getvalue())
+        prompt.assert_called_once()
 
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)

@@ -62,7 +62,12 @@ def _existing_queue_is_clean(repo: Path) -> bool:
     return total == 0
 
 
-def _resolve_fresh_mode(repo: Path, requested: bool | None) -> bool:
+def _resolve_fresh_mode(
+    repo: Path,
+    requested: bool | None,
+    *,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> bool:
     if requested is False:
         return False
     if not _clawpatch_state_exists(repo):
@@ -83,9 +88,22 @@ def _resolve_fresh_mode(repo: Path, requested: bool | None) -> bool:
             flush=True,
         )
         return False
+    if progress is not None:
+        progress(
+            {
+                "phase": "fresh-choice",
+                "current": "?",
+                "total": "?",
+                "detail": (
+                    "waiting for y/N; Enter or N keeps the existing state and continues; "
+                    "this is not a stuck ClawPatch command"
+                ),
+            }
+        )
     try:
         answer = input(
-            "ClawPatch queue is clean. Remove .clawpatch and start a new full review? [y/N] "
+            "ClawPatch queue is clean. Start a new full review? "
+            "[y/N] (Enter or N keeps this state and continues) "
         )
     except EOFError as exc:
         raise SafetyError("Fresh-state prompt closed; existing .clawpatch state retained.") from exc
@@ -221,6 +239,12 @@ def _render_event(event: dict[str, Any]) -> str:
         )
     if phase == "finding":
         return _render_inspection(event)
+    if phase == "fresh-choice":
+        return (
+            f"\n{_counter(event)} WAITING FOR YOUR Y/N ANSWER — "
+            "⌨️👀 THIS IS A PROMPT, NOT A HUNG COMMAND\n"
+            f"detail: {_terminal_safe(event.get('detail', ''))}"
+        )
     if phase == "false-positive":
         return (
             f"\n{_counter(event)} FALSE-POSITIVE — 🙄🗑️ BOGUS BUG. "
@@ -312,6 +336,36 @@ def _render_event(event: dict[str, Any]) -> str:
         )
     detail = event.get("detail") or event.get("command") or phase or "working"
     return f"{_counter(event)} {_terminal_safe(detail).upper()}"
+
+
+def _heartbeat_lines(
+    snapshot: dict[str, Any],
+    *,
+    watchdog_seconds: int,
+    now: float | None = None,
+) -> list[str]:
+    phase = str(snapshot.get("phase", "working"))
+    if phase == "fresh-choice":
+        return [
+            f"{_counter(snapshot)} WAITING FOR YOUR Y/N ANSWER — NOT A STUCK COMMAND",
+            "Press Enter or n: keeps the existing state and continues. "
+            "Press y: removes the proven-clean state and starts a new full review.",
+        ]
+    current_time = time.monotonic() if now is None else now
+    elapsed = int(current_time - float(snapshot["changed"]))
+    attempt = snapshot.get("attempt")
+    maximum = snapshot.get("max_attempts")
+    attempt_text = f" attempt {attempt}/{maximum}" if attempt and maximum else ""
+    if attempt and not maximum:
+        attempt_text = f" attempt {attempt}"
+    finding = f" {snapshot['finding_id']}" if snapshot.get("finding_id") else ""
+    lines = [
+        f"{_counter(snapshot)} still running: {phase}{attempt_text}{finding}",
+        f"({elapsed}s in this displayed phase; child watchdog is {watchdog_seconds}s)",
+    ]
+    if snapshot.get("command"):
+        lines.append(f"$ {snapshot['command']}")
+    return lines
 
 
 def main(
@@ -428,20 +482,7 @@ def main(
         while not stopped.wait(heartbeat_seconds):
             with state_lock:
                 snapshot = dict(state)
-            elapsed = int(time.monotonic() - float(snapshot["changed"]))
-            phase = str(snapshot.get("phase", "working"))
-            attempt = snapshot.get("attempt")
-            maximum = snapshot.get("max_attempts")
-            attempt_text = f" attempt {attempt}/{maximum}" if attempt and maximum else ""
-            if attempt and not maximum:
-                attempt_text = f" attempt {attempt}"
-            finding = f" {snapshot['finding_id']}" if snapshot.get("finding_id") else ""
-            lines = [
-                f"{_counter(snapshot)} still running: {phase}{attempt_text}{finding}",
-                f"({elapsed}s in this displayed phase; child watchdog is {watchdog_seconds}s)",
-            ]
-            if snapshot.get("command"):
-                lines.append(f"$ {snapshot['command']}")
+            lines = _heartbeat_lines(snapshot, watchdog_seconds=watchdog_seconds)
             print("\n".join(lines), flush=True)
 
     thread = None
@@ -470,7 +511,7 @@ def main(
             }
         )
         ensure_repository_idle(repo)
-        resolved_fresh = _resolve_fresh_mode(repo, args.fresh)
+        resolved_fresh = _resolve_fresh_mode(repo, args.fresh, progress=display)
         with (
             owned_run_directory(repo, root=cleanup_root) as owned_run,
             provision_validation_environment(
