@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 import tomllib
 import unittest
 from contextlib import contextmanager, redirect_stdout
@@ -7,7 +8,7 @@ from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
 
-from clawpatch_supervise.clawpatch_external import _render_event, main
+from clawpatch_supervise.clawpatch_external import _render_event, _run_state_query, main
 from clawpatch_supervise.clawpatch_protocol import RepairAction, classify_clawpatch_failure
 from clawpatch_supervise.clawpatch_release import ClawpatchCommandFailure, ClawpatchStop
 from clawpatch_supervise.errors import SafetyError
@@ -16,6 +17,58 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExternalClawpatchSupervisorTests(unittest.TestCase):
+    def test_state_query_parses_stdout_despite_stderr_diagnostics(self):
+        repo = Path("/tmp/example-repository")
+        argv = ["clawpatch", "status", "--json"]
+        completed = subprocess.CompletedProcess(
+            argv,
+            0,
+            '{"openFindings": 0}',
+            "warning: optional metadata unavailable\n",
+        )
+
+        with patch(
+            "clawpatch_supervise.clawpatch_external.subprocess.run",
+            return_value=completed,
+        ) as run:
+            result = _run_state_query(repo, argv)
+
+        self.assertEqual(result, {"openFindings": 0})
+        run.assert_called_once_with(
+            argv,
+            cwd=repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=120,
+            check=False,
+        )
+
+    def test_state_query_failure_reports_bounded_stdout_and_stderr(self):
+        repo = Path("/tmp/example-repository")
+        argv = ["clawpatch", "status", "--json"]
+        completed = subprocess.CompletedProcess(
+            argv,
+            2,
+            "discarded stdout\n" + ("o" * 4000),
+            "discarded stderr\n" + ("e" * 4000),
+        )
+
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external.subprocess.run",
+                return_value=completed,
+            ),
+            self.assertRaises(SafetyError) as raised,
+        ):
+            _run_state_query(repo, argv)
+
+        message = str(raised.exception)
+        self.assertIn("stdout:\n" + ("o" * 4000), message)
+        self.assertIn("stderr:\n" + ("e" * 4000), message)
+        self.assertNotIn("discarded stdout", message)
+        self.assertNotIn("discarded stderr", message)
+
     def test_version_is_available_without_running_clawpatch(self):
         output = StringIO()
         with self.assertRaises(SystemExit) as raised, redirect_stdout(output):

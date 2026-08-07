@@ -37,7 +37,7 @@ def _run_state_query(repo: Path, argv: list[str]) -> dict[str, Any]:
             cwd=repo,
             text=True,
             stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stderr=subprocess.PIPE,
             timeout=120,
             check=False,
         )
@@ -46,7 +46,8 @@ def _run_state_query(repo: Path, argv: list[str]) -> dict[str, Any]:
     if result.returncode != 0:
         raise SafetyError(
             "Could not prove whether existing ClawPatch state is clean; preserving it.\n"
-            + result.stdout[-4000:]
+            f"stdout:\n{result.stdout[-4000:]}\n"
+            f"stderr:\n{result.stderr[-4000:]}"
         )
     return _parse_json_output(result.stdout, command=" ".join(argv[1:]))
 
