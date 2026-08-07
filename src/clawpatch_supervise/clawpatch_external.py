@@ -83,9 +83,12 @@ def _resolve_fresh_mode(repo: Path, requested: bool | None) -> bool:
             flush=True,
         )
         return False
-    answer = input(
-        "ClawPatch queue is clean. Remove .clawpatch and start a new full review? [y/N] "
-    )
+    try:
+        answer = input(
+            "ClawPatch queue is clean. Remove .clawpatch and start a new full review? [y/N] "
+        )
+    except EOFError as exc:
+        raise SafetyError("Fresh-state prompt closed; existing .clawpatch state retained.") from exc
     return answer.strip().casefold() in {"y", "yes"}
 
 

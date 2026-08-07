@@ -867,6 +867,35 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         prompt.assert_called_once()
         self.assertTrue(calls[0][1]["fresh"])
 
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_default_run_stops_safely_when_fresh_prompt_reaches_eof(
+        self, _state_exists, _queue_is_clean, _source
+    ):
+        calls = []
+        output = StringIO()
+
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", side_effect=EOFError),
+            redirect_stdout(output),
+        ):
+            code = main(
+                ["--repo", "."],
+                run_sweep=lambda repo, **kwargs: calls.append((repo, kwargs)),
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertEqual(calls, [])
+        self.assertIn(
+            "STOPPED: Fresh-state prompt closed; existing .clawpatch state retained.",
+            output.getvalue(),
+        )
+        self.assertNotIn("Traceback", output.getvalue())
+
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
