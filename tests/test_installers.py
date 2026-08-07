@@ -12,6 +12,61 @@ CLAWHUB_VERSION = "0.19.1"
 
 
 class InstallerContractTests(unittest.TestCase):
+    def test_linux_installer_requires_clawhub_prerequisite_before_mutation(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fake_bin = root / "fake-bin"
+            fake_bin.mkdir()
+            (fake_bin / "bash").symlink_to("/bin/bash")
+
+            command_stub = fake_bin / "command-stub"
+            command_stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            command_stub.chmod(0o755)
+            (fake_bin / "git").symlink_to(command_stub)
+            (fake_bin / "clawpatch").symlink_to(command_stub)
+
+            python = fake_bin / "python3"
+            invocation_log = root / "python-invocations.log"
+            python.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            python.chmod(0o755)
+
+            install_root = root / "install"
+            bin_dir = root / "installed-bin"
+            bin_dir.mkdir()
+            previous_command = root / "previous-clawpatch-supervise"
+            previous_command.write_text("previous installation\n", encoding="utf-8")
+            installed_command = bin_dir / "clawpatch-supervise"
+            installed_command.symlink_to(previous_command)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "CLAWPATCH_SUPERVISE_BIN_DIR": str(bin_dir),
+                    "CLAWPATCH_SUPERVISE_HOME": str(install_root),
+                    "CLAWPATCH_SUPERVISE_PYTHON": str(python),
+                    "CLAWPATCH_TEST_LOG": str(invocation_log),
+                    "PATH": str(fake_bin),
+                }
+            )
+
+            result = subprocess.run(
+                [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 2)
+            self.assertIn("ClawHub is missing and npm is unavailable.", result.stderr)
+            self.assertFalse(install_root.exists())
+            self.assertEqual(installed_command.resolve(), previous_command)
+            self.assertNotIn("-m venv", invocation_log.read_text(encoding="utf-8"))
+
     def test_linux_installer_passes_exact_versions_to_npm(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
