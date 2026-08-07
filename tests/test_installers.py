@@ -1,4 +1,5 @@
 import os
+import shutil
 import subprocess
 import tempfile
 import tomllib
@@ -11,139 +12,307 @@ CLAWHUB_VERSION = "0.19.1"
 
 
 class InstallerContractTests(unittest.TestCase):
-    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
-    def test_linux_installer_requires_clawhub_prerequisite_before_mutation(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            fake_bin = root / "fake-bin"
-            fake_bin.mkdir()
-            (fake_bin / "bash").symlink_to("/bin/bash")
+    @staticmethod
+    def _write_executable(path: Path, content: str) -> None:
+        path.write_text(content, encoding="utf-8")
+        path.chmod(0o755)
 
-            command_stub = fake_bin / "command-stub"
-            command_stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            command_stub.chmod(0o755)
-            (fake_bin / "git").symlink_to(command_stub)
+    def _run_linux_installer(
+        self,
+        *,
+        clawpatch_present: bool,
+        clawhub_present: bool,
+        npm_mode: str = "success",
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
+        root = Path(self._temporary_directory.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        command_stub = root / "command-stub"
+        self._write_executable(command_stub, "#!/bin/sh\nexit 0\n")
+
+        for command in ("bash", "cp", "ln", "mkdir"):
+            command_path = shutil.which(command)
+            self.assertIsNotNone(command_path)
+            (fake_bin / command).symlink_to(command_path)
+        (fake_bin / "git").symlink_to(command_stub)
+        if clawpatch_present:
             (fake_bin / "clawpatch").symlink_to(command_stub)
+        if clawhub_present:
+            (fake_bin / "clawhub").symlink_to(command_stub)
 
-            python = fake_bin / "python3"
-            invocation_log = root / "python-invocations.log"
-            python.write_text(
-                '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\nexit 0\n',
-                encoding="utf-8",
-            )
-            python.chmod(0o755)
+        python = fake_bin / "python3"
+        self._write_executable(
+            python,
+            "#!/bin/sh\n"
+            'if [ "$1" = "-c" ]; then exit 0; fi\n'
+            'if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then\n'
+            '  mkdir -p "$3/bin"\n'
+            '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/python"\n'
+            '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/clawpatch-supervise"\n'
+            "fi\n"
+            "exit 0\n",
+        )
 
-            install_root = root / "install"
-            bin_dir = root / "installed-bin"
-            bin_dir.mkdir()
-            previous_command = root / "previous-clawpatch-supervise"
-            previous_command.write_text("previous installation\n", encoding="utf-8")
-            installed_command = bin_dir / "clawpatch-supervise"
-            installed_command.symlink_to(previous_command)
-            environment = os.environ.copy()
-            environment.update(
-                {
-                    "CLAWPATCH_SUPERVISE_BIN_DIR": str(bin_dir),
-                    "CLAWPATCH_SUPERVISE_HOME": str(install_root),
-                    "CLAWPATCH_SUPERVISE_PYTHON": str(python),
-                    "CLAWPATCH_TEST_LOG": str(invocation_log),
-                    "PATH": str(fake_bin),
-                }
-            )
-
-            result = subprocess.run(
-                [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
-                capture_output=True,
-                check=False,
-                env=environment,
-                text=True,
-            )
-
-            self.assertEqual(result.returncode, 2)
-            self.assertIn("ClawHub is missing and npm is unavailable.", result.stderr)
-            self.assertFalse(install_root.exists())
-            self.assertEqual(installed_command.resolve(), previous_command.resolve())
-            self.assertNotIn("-m venv", invocation_log.read_text(encoding="utf-8"))
-
-    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
-    def test_linux_installer_passes_exact_versions_to_npm(self) -> None:
-        with tempfile.TemporaryDirectory() as temporary_directory:
-            root = Path(temporary_directory)
-            fake_bin = root / "bin"
-            fake_bin.mkdir()
-            command_stub = root / "command-stub"
-            command_stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-            command_stub.chmod(0o755)
-
-            python = fake_bin / "python3"
-            python.write_text(
-                "#!/bin/sh\n"
-                'if [ "$1" = "-c" ]; then exit 0; fi\n'
-                'if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then\n'
-                '  mkdir -p "$3/bin"\n'
-                '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/python"\n'
-                '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/clawpatch-supervise"\n'
-                "fi\n"
-                "exit 0\n",
-                encoding="utf-8",
-            )
-            python.chmod(0o755)
-
-            npm = fake_bin / "npm"
-            npm.write_text(
+        invocation_log = root / "npm-invocations.log"
+        npm_prefix = root / "npm-prefix"
+        if npm_mode != "missing":
+            self._write_executable(
+                fake_bin / "npm",
                 "#!/bin/sh\n"
                 'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
-                'if [ "$1" = "prefix" ]; then\n'
-                '  printf "%s\\n" "$CLAWPATCH_TEST_NPM_PREFIX"\n'
-                "  exit 0\n"
-                "fi\n"
                 'if [ "$1" = "install" ] && [ "$2" = "--global" ]; then\n'
+                '  [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawpatch" ] || exit 23\n'
                 '  mkdir -p "$CLAWPATCH_TEST_NPM_PREFIX/bin"\n'
                 '  cp "$CLAWPATCH_TEST_COMMAND_STUB" '
                 '"$CLAWPATCH_TEST_NPM_PREFIX/bin/clawpatch"\n'
                 "  exit 0\n"
                 "fi\n"
-                "exit 23\n",
-                encoding="utf-8",
-            )
-            npm.chmod(0o755)
-
-            invocation_log = root / "npm-invocations.log"
-            install_root = root / "install"
-            npm_prefix = root / "npm-prefix"
-            environment = os.environ.copy()
-            environment.update(
-                {
-                    "CLAWPATCH_SUPERVISE_BIN_DIR": str(root / "installed-bin"),
-                    "CLAWPATCH_SUPERVISE_HOME": str(install_root),
-                    "CLAWPATCH_SUPERVISE_PYTHON": str(python),
-                    "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
-                    "CLAWPATCH_TEST_LOG": str(invocation_log),
-                    "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
-                    "PATH": f"{fake_bin}:/usr/bin:/bin",
-                }
+                'if [ "$1" = "prefix" ]; then\n'
+                '  printf "%s\\n" "$CLAWPATCH_TEST_NPM_PREFIX"\n'
+                "  exit 0\n"
+                "fi\n"
+                'if [ "$1" = "install" ] && [ "$2" = "--prefix" ]; then\n'
+                '  [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawhub" ] || exit 24\n'
+                '  mkdir -p "$3/node_modules/.bin"\n'
+                '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/node_modules/.bin/clawhub"\n'
+                "  exit 0\n"
+                "fi\n"
+                "exit 25\n",
             )
 
-            result = subprocess.run(
-                [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
-                capture_output=True,
-                check=False,
-                env=environment,
-                text=True,
+        install_root = root / "install"
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "CLAWPATCH_SUPERVISE_BIN_DIR": str(root / "installed-bin"),
+                "CLAWPATCH_SUPERVISE_HOME": str(install_root),
+                "CLAWPATCH_SUPERVISE_PYTHON": str(python),
+                "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
+                "CLAWPATCH_TEST_LOG": str(invocation_log),
+                "CLAWPATCH_TEST_NPM_MODE": npm_mode,
+                "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
+                "PATH": str(fake_bin),
+            }
+        )
+        result = subprocess.run(
+            [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
+            capture_output=True,
+            check=False,
+            env=environment,
+            text=True,
+        )
+        invocations = (
+            invocation_log.read_text(encoding="utf-8").splitlines()
+            if invocation_log.exists()
+            else []
+        )
+        return result, invocations, install_root
+
+    @staticmethod
+    def _write_batch(path: Path, content: str) -> None:
+        path.write_text(content.replace("\n", "\r\n"), encoding="ascii")
+
+    def _run_windows_installer(
+        self,
+        *,
+        clawpatch_present: bool,
+        clawhub_present: bool,
+        npm_mode: str = "success",
+    ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
+        root = Path(self._temporary_directory.name)
+        fake_bin = root / "bin"
+        fake_bin.mkdir()
+        command_stub = root / "command-stub.cmd"
+        self._write_batch(command_stub, "@echo off\nexit /b 0\n")
+        if clawpatch_present:
+            shutil.copyfile(command_stub, fake_bin / "clawpatch.cmd")
+        if clawhub_present:
+            shutil.copyfile(command_stub, fake_bin / "clawhub.cmd")
+
+        self._write_batch(
+            fake_bin / "py.cmd",
+            "@echo off\n"
+            'if not "%1"=="-3" exit /b 91\n'
+            'if not "%2"=="-m" exit /b 92\n'
+            'if not "%3"=="venv" exit /b 93\n'
+            'mkdir "%~4\\Scripts"\n'
+            'copy /Y "%CLAWPATCH_TEST_NATIVE_STUB%" "%~4\\Scripts\\python.exe" >nul\n'
+            'copy /Y "%CLAWPATCH_TEST_NATIVE_STUB%" '
+            '"%~4\\Scripts\\clawpatch-supervise.exe" >nul\n'
+            "exit /b 0\n",
+        )
+
+        invocation_log = root / "npm-invocations.log"
+        npm_prefix = root / "npm-prefix"
+        if npm_mode != "missing":
+            self._write_batch(
+                fake_bin / "npm.cmd",
+                "@echo off\n"
+                'echo %*>>"%CLAWPATCH_TEST_LOG%"\n'
+                'if /I "%CLAWPATCH_TEST_NPM_MODE%"=="fail-clawpatch" '
+                'if /I "%1"=="install" if /I "%2"=="--global" exit /b 23\n'
+                'if /I "%1"=="install" if /I "%2"=="--global" (\n'
+                '  mkdir "%CLAWPATCH_TEST_NPM_PREFIX%"\n'
+                '  copy /Y "%CLAWPATCH_TEST_COMMAND_STUB%" '
+                '"%CLAWPATCH_TEST_NPM_PREFIX%\\clawpatch.cmd" >nul\n'
+                "  exit /b 0\n"
+                ")\n"
+                'if /I "%1"=="prefix" (\n'
+                '  echo %CLAWPATCH_TEST_NPM_PREFIX%\n'
+                "  exit /b 0\n"
+                ")\n"
+                'if /I "%CLAWPATCH_TEST_NPM_MODE%"=="fail-clawhub" '
+                'if /I "%1"=="install" if /I "%2"=="--prefix" exit /b 24\n'
+                'if /I "%1"=="install" if /I "%2"=="--prefix" (\n'
+                '  mkdir "%~3\\node_modules\\.bin"\n'
+                '  copy /Y "%CLAWPATCH_TEST_COMMAND_STUB%" '
+                '"%~3\\node_modules\\.bin\\clawhub.cmd" >nul\n'
+                "  exit /b 0\n"
+                ")\n"
+                "exit /b 25\n",
             )
 
-            self.assertEqual(result.returncode, 23)
-            self.assertEqual(
-                invocation_log.read_text(encoding="utf-8").splitlines(),
-                [
-                    f"install --global clawpatch@{CLAWPATCH_VERSION}",
-                    "prefix --global",
-                    (
-                        f"install --prefix {install_root}/clawhub --no-fund "
-                        f"--no-audit clawhub@{CLAWHUB_VERSION}"
-                    ),
-                ],
-            )
+        powershell = shutil.which("pwsh") or shutil.which("powershell")
+        self.assertIsNotNone(powershell)
+        system_root = Path(os.environ["SystemRoot"])
+        install_root = root / "install"
+        environment = os.environ.copy()
+        environment.update(
+            {
+                "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
+                "CLAWPATCH_TEST_INSTALLER": str(REPOSITORY_ROOT / "scripts" / "install.ps1"),
+                "CLAWPATCH_TEST_LOG": str(invocation_log),
+                "CLAWPATCH_TEST_NPM_MODE": npm_mode,
+                "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
+                "CLAWPATCH_TEST_NATIVE_STUB": str(system_root / "System32" / "where.exe"),
+                "CLAWPATCH_TEST_SOURCE": str(REPOSITORY_ROOT),
+                "CLAWPATCH_TEST_INSTALL_ROOT": str(install_root),
+                "CLAWPATCH_TEST_BIN_DIR": str(root / "installed-bin"),
+                "PATH": os.pathsep.join((str(fake_bin), str(system_root / "System32"))),
+                "ProgramFiles": str(root / "missing-program-files"),
+            }
+        )
+        command = (
+            "$global:PSNativeCommandUseErrorActionPreference = $false; "
+            "& $env:CLAWPATCH_TEST_INSTALLER "
+            "-Source $env:CLAWPATCH_TEST_SOURCE "
+            "-InstallRoot $env:CLAWPATCH_TEST_INSTALL_ROOT "
+            "-BinDir $env:CLAWPATCH_TEST_BIN_DIR"
+        )
+        result = subprocess.run(
+            [
+                powershell,
+                "-NoProfile",
+                "-NonInteractive",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                command,
+            ],
+            capture_output=True,
+            check=False,
+            env=environment,
+            text=True,
+        )
+        invocations = (
+            [line.replace('"', "") for line in invocation_log.read_text().splitlines()]
+            if invocation_log.exists()
+            else []
+        )
+        return result, invocations, install_root
+
+    def setUp(self) -> None:
+        self._temporary_directory = tempfile.TemporaryDirectory()
+
+    def tearDown(self) -> None:
+        self._temporary_directory.cleanup()
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_does_not_install_dependencies_that_are_present(self) -> None:
+        result, invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(invocations, [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_installs_missing_dependencies_and_finds_them(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            invocations,
+            [
+                f"install --global clawpatch@{CLAWPATCH_VERSION}",
+                "prefix --global",
+                (
+                    f"install --prefix {install_root}/clawhub --no-fund "
+                    f"--no-audit clawhub@{CLAWHUB_VERSION}"
+                ),
+            ],
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_requires_npm_when_clawpatch_is_missing(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=True,
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("npm is required to install ClawPatch.", result.stderr)
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_requires_npm_when_clawhub_is_missing(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("ClawHub is missing and npm is unavailable.", result.stderr)
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_propagates_clawpatch_install_failure(self) -> None:
+        result, invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=True,
+            npm_mode="fail-clawpatch",
+        )
+
+        self.assertEqual(result.returncode, 23)
+        self.assertEqual(invocations, [f"install --global clawpatch@{CLAWPATCH_VERSION}"])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_propagates_clawhub_install_failure(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="fail-clawhub",
+        )
+
+        self.assertEqual(result.returncode, 24)
+        self.assertEqual(
+            invocations,
+            [
+                (
+                    f"install --prefix {install_root}/clawhub --no-fund "
+                    f"--no-audit clawhub@{CLAWHUB_VERSION}"
+                )
+            ],
+        )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_rejects_python_older_than_3_11_before_mutation(self) -> None:
@@ -193,67 +362,96 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(f"CLAWPATCH_SUPERVISE_VERSION:-{version}", linux)
         self.assertIn(f'[string]$Version = "{version}"', windows)
 
-    def test_linux_installer_bootstraps_pinned_clawpatch_only_when_missing(self) -> None:
-        script = (REPOSITORY_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
-
-        condition = "if ! command -v clawpatch >/dev/null 2>&1; then"
-        install = 'npm install --global "clawpatch@${clawpatch_version}"'
-
-        self.assertIn(f'readonly clawpatch_version="{CLAWPATCH_VERSION}"', script)
-        self.assertNotIn("@latest", script)
-        self.assertIn(condition, script)
-        self.assertEqual(script.count(install), 1)
-        self.assertLess(script.index(condition), script.index(install))
-        self.assertIn("command -v npm >/dev/null 2>&1", script)
-        self.assertGreater(script.rindex("command -v clawpatch"), script.index(install))
-
-    def test_windows_installer_bootstraps_pinned_clawpatch_only_when_missing(self) -> None:
-        script = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
-
-        lookup = "$clawpatch = Get-Command clawpatch -ErrorAction SilentlyContinue"
-        condition = "if ($null -eq $clawpatch)"
-        install = 'install --global "clawpatch@$ClawPatchVersion"'
-
-        self.assertIn(f'$ClawPatchVersion = "{CLAWPATCH_VERSION}"', script)
-        self.assertNotIn("@latest", script)
-        self.assertIn(lookup, script)
-        self.assertIn(condition, script)
-        self.assertEqual(script.count(install), 1)
-        self.assertLess(script.index(condition), script.index(install))
-        self.assertIn("Get-Command npm -ErrorAction SilentlyContinue", script)
-        self.assertGreater(script.rindex("Get-Command clawpatch"), script.index(install))
-
-    def test_linux_installer_bootstraps_pinned_clawhub_only_when_missing(self) -> None:
-        script = (REPOSITORY_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
-
-        condition = "if command -v clawhub >/dev/null 2>&1; then"
-        install = (
-            'npm install --prefix "$clawhub_root" --no-fund --no-audit "clawhub@${clawhub_version}"'
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_does_not_install_dependencies_that_are_present(self) -> None:
+        result, invocations, _install_root = self._run_windows_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
         )
 
-        self.assertIn(f'readonly clawhub_version="{CLAWHUB_VERSION}"', script)
-        self.assertNotIn("@latest", script)
-        self.assertIn(condition, script)
-        self.assertEqual(script.count(install), 1)
-        self.assertLess(script.index(condition), script.index(install))
-        self.assertIn("command -v npm >/dev/null 2>&1", script)
-        self.assertIn('"$clawhub_command" --cli-version', script)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(invocations, [])
 
-    def test_windows_installer_bootstraps_pinned_clawhub_only_when_missing(self) -> None:
-        script = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_installs_missing_dependencies_and_finds_them(self) -> None:
+        result, invocations, install_root = self._run_windows_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+        )
 
-        lookup = "$clawHubCommand = Get-Command clawhub.cmd, clawhub.exe, clawhub"
-        condition = "if ($null -eq $clawHubCommand)"
-        install = 'install --prefix $clawHubRoot --no-fund --no-audit "clawhub@$ClawHubVersion"'
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            invocations,
+            [
+                f"install --global clawpatch@{CLAWPATCH_VERSION}",
+                "prefix --global",
+                (
+                    f"install --prefix {install_root / 'clawhub'} --no-fund "
+                    f"--no-audit clawhub@{CLAWHUB_VERSION}"
+                ),
+            ],
+        )
 
-        self.assertIn(f'$ClawHubVersion = "{CLAWHUB_VERSION}"', script)
-        self.assertNotIn("@latest", script)
-        self.assertIn(lookup, script)
-        self.assertIn(condition, script)
-        self.assertEqual(script.count(install), 1)
-        self.assertLess(script.index(condition), script.index(install))
-        self.assertIn("Get-Command npm.cmd, npm.exe, npm", script)
-        self.assertIn("& $clawHubPath --cli-version", script)
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_requires_npm_when_clawpatch_is_missing(self) -> None:
+        result, invocations, install_root = self._run_windows_installer(
+            clawpatch_present=False,
+            clawhub_present=True,
+            npm_mode="missing",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("npm is required to install ClawPatch.", result.stderr)
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_requires_npm_when_clawhub_is_missing(self) -> None:
+        result, invocations, _install_root = self._run_windows_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="missing",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ClawHub is missing and npm is unavailable.", result.stderr)
+        self.assertEqual(invocations, [])
+
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_propagates_clawpatch_install_failure(self) -> None:
+        result, invocations, _install_root = self._run_windows_installer(
+            clawpatch_present=False,
+            clawhub_present=True,
+            npm_mode="fail-clawpatch",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("npm could not install ClawPatch.", result.stderr)
+        self.assertEqual(invocations, [f"install --global clawpatch@{CLAWPATCH_VERSION}"])
+
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_propagates_clawhub_install_failure(self) -> None:
+        result, invocations, install_root = self._run_windows_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="fail-clawhub",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"npm could not install clawhub@{CLAWHUB_VERSION} (exit 24).",
+            result.stderr,
+        )
+        self.assertEqual(
+            invocations,
+            [
+                (
+                    f"install --prefix {install_root / 'clawhub'} --no-fund "
+                    f"--no-audit clawhub@{CLAWHUB_VERSION}"
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":
