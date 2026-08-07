@@ -28,7 +28,6 @@ from .errors import SafetyError
 from .runner import CommandRunner
 from .util import atomic_write_json, utc_now
 
-
 PROJECT_DIR = ".manageroo"
 MINIMUM_CLAWPATCH_VERSION = (0, 7, 2)
 CLAWPATCH_CHILD_WATCHDOG_SECONDS = 900
@@ -170,7 +169,9 @@ def _release_clawpatch_env(
         child_env["MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK"] = "1"
     for name, value in overrides.items():
         if not _ENV_NAME.fullmatch(name) or "\x00" in value:
-            raise SafetyError("The supervisor received an invalid validation-service environment value.")
+            raise SafetyError(
+                "The supervisor received an invalid validation-service environment value."
+            )
         if name.upper() in _CLAWPATCH_POLICY_ENV_NAMES:
             raise SafetyError(
                 f"Validation services cannot override policy-owned supervisor variable {name}."
@@ -283,7 +284,9 @@ def _parse_json_output(output: str, *, command: str) -> dict[str, Any]:
                 f"Clawpatch {command} returned multiple ambiguous JSON objects:\n{output[-4000:]}"
             ) from exc
         if value is None:
-            raise SafetyError(f"Clawpatch {command} did not return valid JSON:\n{output[-4000:]}") from exc
+            raise SafetyError(
+                f"Clawpatch {command} did not return valid JSON:\n{output[-4000:]}"
+            ) from exc
     if not isinstance(value, dict):
         raise SafetyError(f"Clawpatch {command} returned an unexpected JSON value.")
     return value
@@ -341,7 +344,11 @@ def _status_paths(repo: Path) -> list[str]:
 
 
 def _source_paths(repo: Path) -> list[str]:
-    return [path for path in _status_paths(repo) if path != ".clawpatch" and not path.startswith(".clawpatch/")]
+    return [
+        path
+        for path in _status_paths(repo)
+        if path != ".clawpatch" and not path.startswith(".clawpatch/")
+    ]
 
 
 def _gitlink_paths(repo: Path) -> list[str]:
@@ -829,7 +836,9 @@ def _with_json(argv: list[str]) -> list[str]:
     return list(argv) if "--json" in argv else [*argv, "--json"]
 
 
-def _fix_command(repo: Path, argv: list[str], *, env: dict[str, str] | None = None) -> dict[str, Any]:
+def _fix_command(
+    repo: Path, argv: list[str], *, env: dict[str, str] | None = None
+) -> dict[str, Any]:
     finding_id = _finding_from_fix_argv(argv)
     command = _with_json(argv)
     result = _run_clawpatch(
@@ -838,7 +847,11 @@ def _fix_command(repo: Path, argv: list[str], *, env: dict[str, str] | None = No
         env=env or dict(os.environ),
     )
     if result.returncode:
-        requirement = "clawpatch fix validation passed" if result.returncode == 6 else "clawpatch fix exited 0"
+        requirement = (
+            "clawpatch fix validation passed"
+            if result.returncode == 6
+            else "clawpatch fix exited 0"
+        )
         message = (
             f"phase: fix\ncommand: {shlex.join(command)}\nfinding ID: {finding_id}\n"
             f"exit code: {result.returncode}\nfailed requirement: {requirement}\n"
@@ -1002,20 +1015,28 @@ def _run_project_gates(
 
 def _source_state_fingerprint(repo: Path) -> dict[str, Any]:
     paths = _source_paths(repo)
-    diff = _must_run(
-        ["git", "diff", "--binary", "--full-index", "--no-ext-diff", "HEAD", "--", *paths],
-        cwd=repo,
-        timeout=120,
-    ) if paths else ""
-    untracked = sorted(
-        path
-        for path in _must_run(
-            ["git", "ls-files", "--others", "--exclude-standard", "-z", "--", *paths],
+    diff = (
+        _must_run(
+            ["git", "diff", "--binary", "--full-index", "--no-ext-diff", "HEAD", "--", *paths],
             cwd=repo,
             timeout=120,
-        ).split("\0")
-        if path
-    ) if paths else []
+        )
+        if paths
+        else ""
+    )
+    untracked = (
+        sorted(
+            path
+            for path in _must_run(
+                ["git", "ls-files", "--others", "--exclude-standard", "-z", "--", *paths],
+                cwd=repo,
+                timeout=120,
+            ).split("\0")
+            if path
+        )
+        if paths
+        else []
+    )
     untracked_hashes = {path: _untracked_path_fingerprint(repo, path) for path in untracked}
     dirty_gitlinks = sorted(set(paths).intersection(_gitlink_paths(repo)))
     gitlinks: dict[str, Any] = {}
@@ -1175,10 +1196,7 @@ def _revalidate(
         payload["managerooSandboxEscalated"] = True
         payload["managerooInitialOutcome"] = outcome
         outcome = escalated_outcome
-        if (
-            outcome == "uncertain"
-            and env.get("MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK") == "1"
-        ):
+        if outcome == "uncertain" and env.get("MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK") == "1":
             host_env = dict(env)
             host_env["CLAWPATCH_CODEX_SANDBOX"] = "bypass"
             _argv, host_payload, host_outcome = _revalidation_payload(
@@ -1262,9 +1280,7 @@ def _release_state_root(repo: Path, *, integration_mode: str) -> Path:
         path = _repository_state_root(home, repo)
         for candidate in (home, repositories, path):
             if candidate.is_symlink():
-                raise SafetyError(
-                    f"External Clawpatch state path cannot be a symlink: {candidate}"
-                )
+                raise SafetyError(f"External Clawpatch state path cannot be a symlink: {candidate}")
         return path
     raise SafetyError("integration_mode must be one of: manageroo, external.")
 
@@ -1307,7 +1323,9 @@ def _write_release_progress(
         )
     ):
         raise SafetyError("Cannot checkpoint malformed Clawpatch release progress.")
-    action_value = last_action.value if isinstance(last_action, RepairAction) else (last_action or "")
+    action_value = (
+        last_action.value if isinstance(last_action, RepairAction) else (last_action or "")
+    )
     if action_value and action_value not in {action.value for action in RepairAction}:
         raise SafetyError("Cannot checkpoint an unknown Clawpatch repair action.")
     progress = {
@@ -1347,19 +1365,18 @@ def _load_release_progress(
     stored_version = progress.get("version")
     if (
         stored_version not in {2, 3, 4, 5, RELEASE_PROGRESS_VERSION}
-        or any(not isinstance(progress.get(field), str) or not progress[field] for field in required_strings)
+        or any(
+            not isinstance(progress.get(field), str) or not progress[field]
+            for field in required_strings
+        )
         or not _FINDING_ID.fullmatch(str(progress.get("finding_id", "")))
         or not isinstance(progress.get("owned_paths"), list)
-        or any(
-            not isinstance(path, str) or not path
-            for path in progress.get("owned_paths", [])
-        )
+        or any(not isinstance(path, str) or not path for path in progress.get("owned_paths", []))
     ):
         raise SafetyError("Clawpatch release progress is malformed.")
     owned_source_fingerprint = progress.get("owned_source_fingerprint", "")
     if not isinstance(owned_source_fingerprint, str) or (
-        owned_source_fingerprint
-        and not re.fullmatch(r"[0-9a-f]{64}", owned_source_fingerprint)
+        owned_source_fingerprint and not re.fullmatch(r"[0-9a-f]{64}", owned_source_fingerprint)
     ):
         raise SafetyError("Clawpatch release progress has a malformed source fingerprint.")
     progress["owned_source_fingerprint"] = owned_source_fingerprint
@@ -1508,11 +1525,7 @@ def _checkpoint_completed_commit(
         return ""
     old_head = progress.get("head_before")
     owned_paths = progress.get("owned_paths")
-    if (
-        not isinstance(old_head, str)
-        or not isinstance(owned_paths, list)
-        or not owned_paths
-    ):
+    if not isinstance(old_head, str) or not isinstance(owned_paths, list) or not owned_paths:
         return ""
     expected = sorted(str(path) for path in owned_paths)
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
@@ -1617,10 +1630,7 @@ def _checkpoint_later_applied_attempt(
     inspected: dict[str, Any],
 ) -> dict[str, Any] | None:
     """Recognize a repair ClawPatch applied after a source-clean stopped checkpoint."""
-    if (
-        progress_record.get("phase") != "stopped"
-        or progress_record.get("owned_paths") != []
-    ):
+    if progress_record.get("phase") != "stopped" or progress_record.get("owned_paths") != []:
         return None
     finding_id = str(progress_record["finding_id"])
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
@@ -1978,8 +1988,10 @@ def _exclude_gitlinks_from_clawpatch_config(repo: Path) -> list[str]:
         config = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise SafetyError("Clawpatch config is unreadable after initialization.") from exc
-    if not isinstance(config, dict) or not isinstance(config.get("exclude"), list) or any(
-        not isinstance(pattern, str) for pattern in config.get("exclude", [])
+    if (
+        not isinstance(config, dict)
+        or not isinstance(config.get("exclude"), list)
+        or any(not isinstance(pattern, str) for pattern in config.get("exclude", []))
     ):
         raise SafetyError("Clawpatch config has a malformed exclude list.")
     excludes = list(config["exclude"])
@@ -2064,9 +2076,7 @@ def _temporary_commit_matches_owned_source(
         env["GIT_INDEX_FILE"] = str(index_path)
         _must_run(["git", "read-tree", original_head], cwd=repo, timeout=120, env=env)
         _must_run(["git", "add", "-A", "--", *paths], cwd=repo, timeout=120, env=env)
-        actual_tree = _must_run(
-            ["git", "write-tree"], cwd=repo, timeout=120, env=env
-        ).strip()
+        actual_tree = _must_run(["git", "write-tree"], cwd=repo, timeout=120, env=env).strip()
     expected_tree = _git_text(repo, ["git", "rev-parse", f"{temporary_commit}^{{tree}}"])
     return actual_tree == expected_tree
 
@@ -2084,9 +2094,7 @@ def _recover_checkpoint_temporary_commit(
     temporary_commit = str(checkpoint["temporary_commit"])
     current_branch = _git_text(repo, ["git", "rev-parse", "--abbrev-ref", "HEAD"])
     if checkpoint["branch"] != current_branch:
-        raise SafetyError(
-            "Interrupted Clawpatch temporary commit belongs to a different branch."
-        )
+        raise SafetyError("Interrupted Clawpatch temporary commit belongs to a different branch.")
     owned_paths = _verify_iteration_commit(
         repo,
         finding_id=finding_id,
@@ -2219,38 +2227,15 @@ def _prepare_fresh_release(
         ):
             raise
     clawpatch_state_root = repo / ".clawpatch"
-    if (
-        clawpatch_state_root.is_symlink()
-        or clawpatch_state_root.resolve().parent != repo.resolve()
-    ):
+    if clawpatch_state_root.is_symlink() or clawpatch_state_root.resolve().parent != repo.resolve():
         raise SafetyError("The .clawpatch state path is not a safe repository-owned directory.")
     source_changes = _source_paths(repo)
     if source_changes:
-        checkpoint_owned = _fresh_checkpoint_owned_paths(
-            repo,
-            source_changes,
-            state_root=state_root,
+        raise SafetyError(
+            "A fresh Clawpatch reset is allowed only when project source is clean. "
+            "The supervisor preserved .clawpatch, its checkpoint, and these source changes: "
+            + ", ".join(source_changes)
         )
-        if checkpoint_owned == source_changes:
-            cleanup_paths = checkpoint_owned
-            cleanup_description = "discard exact interrupted Clawpatch finding files"
-        else:
-            raise SafetyError(
-                "A fresh Clawpatch run refuses unrelated source changes: "
-                + ", ".join(source_changes)
-            )
-        if progress is not None:
-            progress(
-                {
-                    "phase": "fresh-discard",
-                    "current": "?",
-                    "total": "?",
-                    "command": cleanup_description,
-                    "attempt": 1,
-                    "max_attempts": 1,
-                }
-            )
-        _discard_checkpoint_owned_source(repo, cleanup_paths)
     config_text = _committed_clawpatch_config(repo)
     if clawpatch_state_root.exists():
         if not clawpatch_state_root.is_dir():
@@ -2311,7 +2296,9 @@ def _commit_attempt(
     staged_paths = sorted(path for path in staged.split("\0") if path)
     reported_paths = set(files)
     if any(path not in reported_paths or path.startswith(".clawpatch/") for path in staged_paths):
-        raise SafetyError("The staged paths do not exactly match the current Clawpatch patch attempt.")
+        raise SafetyError(
+            "The staged paths do not exactly match the current Clawpatch patch attempt."
+        )
     if _source_paths(repo) != staged_paths:
         raise SafetyError("The staged repair does not contain every current source change.")
     if not staged_paths:
@@ -2321,9 +2308,13 @@ def _commit_attempt(
     commit_kind = "continuation" if outcome == "open" else "fix"
     _commit_without_local_hooks(repo, "-m", f"clawpatch {commit_kind}: {finding_id}")
     commit = _git_text(repo, ["git", "rev-parse", "HEAD"])
-    committed = _git_text(repo, ["git", "show", "--pretty=", "--name-only", "--no-renames", commit]).splitlines()
+    committed = _git_text(
+        repo, ["git", "show", "--pretty=", "--name-only", "--no-renames", commit]
+    ).splitlines()
     if sorted(path for path in committed if path) != staged_paths:
-        raise SafetyError("The resulting commit does not contain exactly the verified source repair.")
+        raise SafetyError(
+            "The resulting commit does not contain exactly the verified source repair."
+        )
     return commit
 
 
@@ -2533,7 +2524,9 @@ def _finalize_finding_commit(
     parent = _git_text(repo, ["git", "rev-parse", f"{commit}^"])
     count = _git_text(repo, ["git", "rev-list", "--count", f"{original_head}..{commit}"])
     if parent != original_head or count != "1":
-        raise SafetyError("A repaired finding must produce exactly one commit above its start HEAD.")
+        raise SafetyError(
+            "A repaired finding must produce exactly one commit above its start HEAD."
+        )
     committed_paths = _paths_between(repo, original_head, commit)
     if not committed_paths or _source_paths(repo):
         raise SafetyError("The final Clawpatch commit is empty or left source changes behind.")
@@ -2634,9 +2627,7 @@ def _process_finding_until_fixed(
             head_before=original_head,
             phase="fix",
             owned_paths=(
-                _paths_between(repo, original_head, temporary_commit)
-                if temporary_commit
-                else []
+                _paths_between(repo, original_head, temporary_commit) if temporary_commit else []
             ),
             temporary_commit=temporary_commit,
             source_states=sorted(seen_states),
@@ -2739,27 +2730,83 @@ def _process_finding_until_fixed(
                 )
                 raise
             continuations += 1
-            if progress is not None:
-                progress(
-                    {
-                        "phase": "continuing",
-                        "current": current,
-                        "total": total,
-                        "finding_id": finding_id,
-                        "commit": temporary_commit,
-                        "detail": (
-                            "revalidation source progress preserved locally; continuing same finding"
-                            if exc.outcome in {
-                                "revalidation-command-failed-with-source-progress",
-                                "revalidation-mutated-source",
-                                "revalidation-provider-failed",
+            if failure is not None and failure.kind.value == "validation-failed":
+                try:
+                    gate_runs = _run_project_gates(
+                        repo,
+                        finding_id=finding_id,
+                        required=require_project_gates,
+                    )
+                    validation = _revalidate(
+                        repo,
+                        finding_id,
+                        env=env,
+                        expected_paths=[],
+                        progress=progress,
+                        current=current,
+                        total=total,
+                    )
+                except BaseException:
+                    _stop_finding_iteration(
+                        repo,
+                        finding_id=finding_id,
+                        branch=branch,
+                        original_head=original_head,
+                        temporary_commit=temporary_commit,
+                        seen_states=seen_states,
+                        state_root=state_root,
+                    )
+                    raise
+                record = {
+                    "finding_id": finding_id,
+                    "inspection": inspected,
+                    "head_before": original_head,
+                    "patch_attempt": "validation-failed-recovery",
+                    "files_changed": _paths_between(repo, original_head, temporary_commit),
+                    "gate_runs": gate_runs,
+                    "revalidation": validation,
+                    "commit": "",
+                }
+                if validation.get("outcome") == "open":
+                    if progress is not None:
+                        progress(
+                            {
+                                "phase": "continuing",
+                                "current": current,
+                                "total": total,
+                                "finding_id": finding_id,
+                                "commit": temporary_commit,
+                                "detail": (
+                                    "fix validation failed, fresh revalidation kept the finding "
+                                    "open, and the next fix will use that evidence"
+                                ),
                             }
-                            else "partial repair preserved locally; continuing same finding"
-                        ),
-                    }
-                )
-            attempt += 1
-            continue
+                        )
+                    attempt += 1
+                    continue
+            else:
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "continuing",
+                            "current": current,
+                            "total": total,
+                            "finding_id": finding_id,
+                            "commit": temporary_commit,
+                            "detail": (
+                                "revalidation source progress preserved locally; continuing same finding"
+                                if exc.outcome
+                                in {
+                                    "revalidation-command-failed-with-source-progress",
+                                    "revalidation-mutated-source",
+                                    "revalidation-provider-failed",
+                                }
+                                else "partial repair preserved locally; continuing same finding"
+                            ),
+                        }
+                    )
+                attempt += 1
+                continue
         except BaseException:
             _stop_finding_iteration(
                 repo,
@@ -2852,9 +2899,7 @@ def _process_finding_until_fixed(
                 str(path) for path in record.get("files_changed", []) if isinstance(path, str)
             }
             if temporary_commit:
-                exact_repair_paths.update(
-                    _paths_between(repo, original_head, temporary_commit)
-                )
+                exact_repair_paths.update(_paths_between(repo, original_head, temporary_commit))
             stopped_paths = _stop_finding_iteration(
                 repo,
                 finding_id=finding_id,
@@ -2905,10 +2950,7 @@ def _process_finding_until_fixed(
             )
             raise SafetyError("Clawpatch returned an unsupported revalidation outcome.")
         no_commit_required = not temporary_commit and not _source_paths(repo)
-        if (
-            no_commit_required
-            and _git_text(repo, ["git", "rev-parse", "HEAD"]) != original_head
-        ):
+        if no_commit_required and _git_text(repo, ["git", "rev-parse", "HEAD"]) != original_head:
             raise SafetyError(
                 "Git history changed while Clawpatch fixed a finding without source changes."
             )
@@ -2953,9 +2995,7 @@ def _process_finding_until_fixed(
                 )
                 raise
         record["head_before"] = original_head
-        record["files_changed"] = (
-            _paths_between(repo, original_head, commit) if commit else []
-        )
+        record["files_changed"] = _paths_between(repo, original_head, commit) if commit else []
         record["commit"] = commit
         _write_release_progress(
             repo,
@@ -2970,9 +3010,7 @@ def _process_finding_until_fixed(
         if push_mode == "each" and commit:
             if progress is not None:
                 push_argv = (
-                    f"git push -u origin {branch}"
-                    if not pushed
-                    else f"git push origin {branch}"
+                    f"git push -u origin {branch}" if not pushed else f"git push origin {branch}"
                 )
                 progress(
                     {
@@ -3003,7 +3041,11 @@ def _push_and_verify(repo: Path, branch: str, *, first: bool) -> None:
 
 
 def _publish_final_state(repo: Path, *, branch: str) -> str:
-    state_paths = [path for path in _status_paths(repo) if path == ".clawpatch" or path.startswith(".clawpatch/")]
+    state_paths = [
+        path
+        for path in _status_paths(repo)
+        if path == ".clawpatch" or path.startswith(".clawpatch/")
+    ]
     if not state_paths:
         return ""
     _require_branch(repo, branch, phase="state publication")
@@ -3016,7 +3058,9 @@ def _publish_final_state(repo: Path, *, branch: str) -> str:
         if path
     )
     if staged != sorted(state_paths) or any(not path.startswith(".clawpatch/") for path in staged):
-        raise SafetyError("Final state commit is not exactly limited to authorized .clawpatch paths.")
+        raise SafetyError(
+            "Final state commit is not exactly limited to authorized .clawpatch paths."
+        )
     _must_run(["git", "commit", "-m", "clawpatch state: final closure"], cwd=repo, timeout=300)
     return _git_text(repo, ["git", "rev-parse", "HEAD"])
 
@@ -3471,8 +3515,7 @@ def _review_all_features(
             (
                 batch["jobs"]
                 for batch in batches
-                if isinstance(batch.get("jobs"), int)
-                and not isinstance(batch.get("jobs"), bool)
+                if isinstance(batch.get("jobs"), int) and not isinstance(batch.get("jobs"), bool)
             ),
             default=0,
         ),
@@ -3656,7 +3699,9 @@ def _final_closure(
     recovered_findings: list[dict[str, Any]] = []
     recovered_continuations: list[dict[str, Any]] = []
     if uncertain_total:
-        current_offset = current if isinstance(current, int) and not isinstance(current, bool) else 0
+        current_offset = (
+            current if isinstance(current, int) and not isinstance(current, bool) else 0
+        )
         fixed_uncertain, reopened = _resolve_uncertain_findings(
             repo,
             env=env,
@@ -3816,22 +3861,26 @@ def _final_closure(
             if progress is not None:
                 progress(
                     {
-                        "phase": "state-cleanup",
+                        "phase": "state-retained",
                         "current": current,
                         "total": total,
-                        "command": "restore committed .clawpatch state",
+                        "command": "keep .clawpatch for status and queue proof",
                         "attempt": 1,
                         "max_attempts": 1,
                     }
                 )
-            _restore_committed_clawpatch_state(repo)
         if push_mode == "final" or state_commit:
             _push_and_verify(repo, branch, first=not pushed)
             pushed = True
-        if _status_paths(repo):
+        unexpected_paths = [
+            path
+            for path in _status_paths(repo)
+            if path != ".clawpatch" and not path.startswith(".clawpatch/")
+        ]
+        if unexpected_paths:
             raise SafetyError(
-                "Final authorized Git worktree is not clean after restoring committed "
-                "Clawpatch state: " + ", ".join(_status_paths(repo))
+                "Final authorized Git source is not clean after retaining Clawpatch state: "
+                + ", ".join(unexpected_paths)
             )
     _require_no_process(repo)
     return {
@@ -3843,6 +3892,7 @@ def _final_closure(
         "gate_runs": final_gates,
         "pushed": pushed,
         "state_commit": state_commit,
+        "state_retained": (repo / ".clawpatch").is_dir(),
         "recovered_findings": recovered_findings,
         "recovered_continuations": recovered_continuations,
         "needs_fresh_review": needs_fresh_review,
@@ -4094,7 +4144,10 @@ def _release_sweep_locked(
         durable_progress = None
         preexisting_source = _source_paths(root)
     if preexisting_source and durable_progress is None:
-        raise SafetyError("Clawpatch release sweep found pre-existing source changes: " + ", ".join(preexisting_source))
+        raise SafetyError(
+            "Clawpatch release sweep found pre-existing source changes: "
+            + ", ".join(preexisting_source)
+        )
     if durable_progress is not None and branch not in {"auto", "current", current_branch}:
         raise SafetyError(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."
@@ -4135,9 +4188,7 @@ def _release_sweep_locked(
                 )
                 report["recovered_later_applied_attempt"] = {
                     "finding_id": str(later_applied["finding_id"]),
-                    "patch_attempt": str(
-                        later_applied["patch_attempt"]["patchAttemptId"]
-                    ),
+                    "patch_attempt": str(later_applied["patch_attempt"]["patchAttemptId"]),
                     "owned_paths": recovered_paths,
                 }
                 if progress is not None:
@@ -4169,15 +4220,9 @@ def _release_sweep_locked(
                         "finding_id": finding_id,
                         "inspection": false_positive_without_source["inspection"],
                         "head_before": false_positive_without_source["head_before"],
-                        "temporary_commit": false_positive_without_source[
-                            "temporary_commit"
-                        ],
-                        "discarded_paths": list(
-                            false_positive_without_source["discarded_paths"]
-                        ),
-                        "patch_attempts": list(
-                            false_positive_without_source["patch_attempts"]
-                        ),
+                        "temporary_commit": false_positive_without_source["temporary_commit"],
+                        "discarded_paths": list(false_positive_without_source["discarded_paths"]),
+                        "patch_attempts": list(false_positive_without_source["patch_attempts"]),
                         "resumed": True,
                     }
                 )
@@ -4302,14 +4347,10 @@ def _release_sweep_locked(
             if resumed_outcome == "open":
                 finding_id = str(resumed["finding_id"])
                 provider_failure_continuation = bool(
-                    resumed.get("revalidation", {}).get(
-                        "managerooProviderFailureContinuation"
-                    )
+                    resumed.get("revalidation", {}).get("managerooProviderFailureContinuation")
                 )
                 original_head = str(resumed["head_before"])
-                seen_states = {
-                    _git_text(root, ["git", "rev-parse", f"{original_head}^{{tree}}"])
-                }
+                seen_states = {_git_text(root, ["git", "rev-parse", f"{original_head}^{{tree}}"])}
                 temporary_commit = ""
                 try:
                     temporary_commit, _owned_paths, _state = _save_partial_iteration(
@@ -4325,17 +4366,15 @@ def _release_sweep_locked(
                         root,
                         finding_id,
                         env=env,
-                        required_status=(
-                            None if provider_failure_continuation else "open"
-                        ),
+                        required_status=(None if provider_failure_continuation else "open"),
                         progress=progress,
                         current=1,
                         total="?",
                     )
-                    if (
-                        provider_failure_continuation
-                        and inspected["finding"].get("status") not in {"open", "uncertain"}
-                    ):
+                    if provider_failure_continuation and inspected["finding"].get("status") not in {
+                        "open",
+                        "uncertain",
+                    }:
                         raise SafetyError(
                             "Codex revalidation provider failure can continue only the same "
                             "open or uncertain finding."
@@ -4361,9 +4400,8 @@ def _release_sweep_locked(
                     )
                 except BaseException:
                     current_resume_head = _git_text(root, ["git", "rev-parse", "HEAD"])
-                    if (
-                        (temporary_commit and current_resume_head == temporary_commit)
-                        or (not temporary_commit and current_resume_head == original_head)
+                    if (temporary_commit and current_resume_head == temporary_commit) or (
+                        not temporary_commit and current_resume_head == original_head
                     ):
                         _stop_finding_iteration(
                             root,
@@ -4388,9 +4426,7 @@ def _release_sweep_locked(
                 )
                 resumed = completed
                 resumed_phase = "fixed"
-                resumed_detail = (
-                    "stopped attempt revalidated open, continued locally, then fixed"
-                )
+                resumed_detail = "stopped attempt revalidated open, continued locally, then fixed"
             elif resumed_outcome == "false-positive":
                 finding_id = str(resumed["finding_id"])
                 discarded_paths = sorted(str(path) for path in resumed["files_changed"])
@@ -4406,9 +4442,7 @@ def _release_sweep_locked(
                         "finding_id": finding_id,
                         "inspection": resumed["inspection"],
                         "head_before": resumed["head_before"],
-                        "temporary_commit": str(
-                            durable_progress.get("temporary_commit", "")
-                        ),
+                        "temporary_commit": str(durable_progress.get("temporary_commit", "")),
                         "discarded_paths": discarded_paths,
                         "patch_attempts": [resumed["patch_attempt"]],
                         "resumed": True,
@@ -4476,8 +4510,15 @@ def _release_sweep_locked(
         if _source_paths(root):
             raise SafetyError("Clawpatch initialization unexpectedly changed project source files.")
         report["init"] = initialized
-    if not resumed_checkpoint and durable_progress is None and branch == "auto" and current_branch in {"main", "master", "HEAD"}:
-        selected_branch = "clawpatch/release-sweep-" + datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    if (
+        not resumed_checkpoint
+        and durable_progress is None
+        and branch == "auto"
+        and current_branch in {"main", "master", "HEAD"}
+    ):
+        selected_branch = "clawpatch/release-sweep-" + datetime.now(timezone.utc).strftime(
+            "%Y%m%d-%H%M%S"
+        )
         _must_run(["git", "switch", "-c", selected_branch], cwd=root, timeout=120)
     elif not resumed_checkpoint and durable_progress is None and branch not in {"auto", "current"}:
         selected_branch = branch
@@ -4559,8 +4600,14 @@ def _release_sweep_locked(
         if isinstance(open_findings, int) and not isinstance(open_findings, bool)
         else reviewed_findings
     )
-    if not isinstance(total_findings, int) or isinstance(total_findings, bool) or total_findings < 0:
-        raise SafetyError("Clawpatch returned an invalid open-finding count for progress reporting.")
+    if (
+        not isinstance(total_findings, int)
+        or isinstance(total_findings, bool)
+        or total_findings < 0
+    ):
+        raise SafetyError(
+            "Clawpatch returned an invalid open-finding count for progress reporting."
+        )
     total_findings += len(report["results"])
     current_finding = len(report["results"])
     while True:

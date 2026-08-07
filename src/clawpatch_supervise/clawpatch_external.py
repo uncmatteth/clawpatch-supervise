@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import threading
 import time
@@ -9,17 +10,81 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import __version__
+from .clawpatch_protocol import RepairAction
 from .clawpatch_release import (
     CLAWPATCH_CHILD_WATCHDOG_SECONDS,
     ClawpatchCommandFailure,
     ClawpatchStop,
+    _parse_json_output,
+    _source_paths,
     external_state_root,
     release_sweep,
     require_external_clawpatch_preflight,
 )
-from .clawpatch_protocol import RepairAction
 from .errors import SafetyError
 from .validation_services import provision_disposable_validation_environment
+
+
+def _clawpatch_state_exists(repo: Path) -> bool:
+    state = repo.resolve() / ".clawpatch"
+    return state.is_dir() and (state / "project.json").is_file()
+
+
+def _run_state_query(repo: Path, argv: list[str]) -> dict[str, Any]:
+    try:
+        result = subprocess.run(
+            argv,
+            cwd=repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            timeout=120,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise SafetyError(f"Could not inspect existing ClawPatch state: {exc}") from exc
+    if result.returncode != 0:
+        raise SafetyError(
+            "Could not prove whether existing ClawPatch state is clean; preserving it.\n"
+            + result.stdout[-4000:]
+        )
+    return _parse_json_output(result.stdout, command=" ".join(argv[1:]))
+
+
+def _existing_queue_is_clean(repo: Path) -> bool:
+    status = _run_state_query(repo, ["clawpatch", "status", "--json"])
+    for field in ("openFindings", "activeLocks", "lockFiles"):
+        value = status.get(field)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise SafetyError(f"Existing ClawPatch status has an invalid {field!r} value.")
+    if any(status[field] for field in ("openFindings", "activeLocks", "lockFiles")):
+        return False
+    uncertain = _run_state_query(repo, ["clawpatch", "report", "--status", "uncertain", "--json"])
+    total = uncertain.get("total")
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise SafetyError("Existing ClawPatch uncertain report has an invalid total.")
+    return total == 0
+
+
+def _resolve_fresh_mode(repo: Path, requested: bool | None) -> bool:
+    if requested is not None:
+        return requested
+    if not _clawpatch_state_exists(repo):
+        return True
+    if not _existing_queue_is_clean(repo):
+        return False
+    if _source_paths(repo):
+        return False
+    if not sys.stdin.isatty():
+        print(
+            "Existing clean .clawpatch state retained; use --fresh to explicitly start over.",
+            flush=True,
+        )
+        return False
+    answer = input(
+        "ClawPatch queue is clean. Remove .clawpatch and start a new full review? [y/N] "
+    )
+    return answer.strip().casefold() in {"y", "yes"}
 
 
 def _counter(event: dict[str, Any]) -> str:
@@ -98,6 +163,7 @@ def _render_event(event: dict[str, Any]) -> str:
         "push": "PUSH",
         "report": "REPORT",
         "state-cleanup": "CLAWPATCH STATE CLEANUP",
+        "state-retained": "CLAWPATCH STATE RETAINED",
     }
     if phase in command_phases:
         attempt = event.get("attempt")
@@ -118,6 +184,7 @@ def _render_event(event: dict[str, Any]) -> str:
             "commit": " — 📦🔒 LOCKING IN THE FIX",
             "push": " — 🚀🔥 SHIP THE FIXED SHIT",
             "state-cleanup": " — 🧹🗑️ CLEAN UP THE RUNTIME CRAP",
+            "state-retained": " — 🔒📋 KEEP THE FUCKING RECEIPTS",
         }.get(str(phase), "")
         return (
             f"\n{_counter(event)} {command_phases[str(phase)]}{suffix}{personality}\n"
@@ -175,10 +242,7 @@ def _render_event(event: dict[str, Any]) -> str:
         )
     if phase == "fixed":
         commit = event.get("commit") or "no source commit required"
-        return (
-            f"\n{_counter(event)} FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED\n"
-            f"commit: {commit}"
-        )
+        return f"\n{_counter(event)} FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED\ncommit: {commit}"
     if phase == "continuing":
         commit = event.get("commit") or "no source commit required"
         return (
@@ -245,14 +309,14 @@ def main(
         "--fresh",
         dest="fresh",
         action="store_true",
-        default=True,
-        help="start a fresh ClawPatch map/review queue (the default)",
+        default=None,
+        help="explicitly remove clean existing ClawPatch state and start a fresh review",
     )
     start_mode.add_argument(
         "--resume-stopped",
         dest="fresh",
         action="store_false",
-        help="resume one exactly checkpoint-owned stopped attempt before continuing its queue",
+        help="resume existing state or one exactly checkpoint-owned stopped attempt",
     )
     parser.add_argument(
         "--timeout-minutes",
@@ -303,8 +367,7 @@ def main(
             finding = f" {snapshot['finding_id']}" if snapshot.get("finding_id") else ""
             lines = [
                 f"{_counter(snapshot)} still running: {phase}{attempt_text}{finding}",
-                f"({elapsed}s in this displayed phase; child watchdog is "
-                f"{watchdog_seconds}s)",
+                f"({elapsed}s in this displayed phase; child watchdog is {watchdog_seconds}s)",
             ]
             if snapshot.get("command"):
                 lines.append(f"$ {snapshot['command']}")
@@ -312,13 +375,15 @@ def main(
 
     thread = None
     if heartbeat_seconds > 0:
-        thread = threading.Thread(target=heartbeat, name="clawpatch-supervise-heartbeat", daemon=True)
+        thread = threading.Thread(
+            target=heartbeat, name="clawpatch-supervise-heartbeat", daemon=True
+        )
         thread.start()
 
     print("🤬🦶💥 NEW AND FUCKING IMPROVED — NOW WITH MORE CURSING", flush=True)
     print(
         f"ClawPatch external supervisor: repo={Path(args.repo).resolve()} "
-        f"branch={args.branch} push={args.push} fresh={args.fresh} "
+        f"branch={args.branch} push={args.push} fresh={'auto' if args.fresh is None else args.fresh} "
         f"timeout={args.timeout_minutes}m",
         flush=True,
     )
@@ -335,6 +400,7 @@ def main(
             }
         )
         ensure_repository_idle(repo)
+        resolved_fresh = _resolve_fresh_mode(repo, args.fresh)
         with provision_validation_environment(repo, progress=display) as child_env_overrides:
             report = run_sweep(
                 repo,
@@ -343,7 +409,7 @@ def main(
                 push_mode=args.push,
                 publish_clawpatch_state=args.publish_clawpatch_state,
                 trusted_host_codex_sandbox_bypass=args.trusted_host_codex_sandbox_bypass,
-                fresh=args.fresh,
+                fresh=resolved_fresh,
                 child_timeout_seconds=watchdog_seconds,
                 progress=display_after_external_preflight,
                 integration_mode="external",

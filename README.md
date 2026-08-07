@@ -56,8 +56,7 @@ clawpatch-supervise \
   --repo /absolute/path/to/your/repository \
   --branch current \
   --push each \
-  --timeout-minutes 15 \
-  --fresh
+  --timeout-minutes 15
 ```
 
 Windows PowerShell:
@@ -67,11 +66,10 @@ clawpatch-supervise `
   --repo "C:\absolute\path\to\your\repository" `
   --branch current `
   --push each `
-  --timeout-minutes 15 `
-  --fresh
+  --timeout-minutes 15
 ```
 
-Use `--push none` if you want verified local commits without publishing them. Use `--resume-stopped` instead of `--fresh` only when the same repository already has an exact stopped supervisor checkpoint.
+Use `--push none` if you want verified local commits without publishing them. The normal command preserves and processes an existing `.clawpatch` queue instead of deleting it. When an existing queue is proven clean and project source is clean, an interactive run asks whether to remove that state and start a new full review. `--fresh` is the explicit non-interactive reset choice, and it refuses to reset while any project source is dirty. Use `--resume-stopped` for an exact stopped supervisor checkpoint.
 
 ## Why I made this
 
@@ -137,13 +135,14 @@ The supervisor provides:
 |---|---|
 | `fixed` with a verified repair | Create one exact-path repair commit, push if requested, continue. |
 | `open` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding. |
-| Validation/provider failure after new source progress | Preserve the exact progress and continue the same finding. |
+| `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with the new evidence when it says `open`. |
+| Other validation/provider failure after new source progress | Preserve the exact progress and continue the same finding. |
 | `false-positive` | Restore only the exact supervisor-owned repair paths to the finding's starting tree, retire the checkpoint, continue. |
 | Open revalidation with no source changes | Feed the new evidence into up to two more same-finding attempts; never advance the queue. |
 | Same finding still returns the same tree after bounded recovery | Preserve the checkpoint and stop without losing source. |
 | Transient provider, refusal, quota, or timeout with no source progress | Exit `75` so a service may restart later. |
 | Ownership, branch, checkpoint, or Git provenance mismatch | Exit `2` and leave the source for inspection. |
-| Fresh final review proves zero remaining work | Write `status: COMPLETE` proof and exit `0`. |
+| Fresh final review proves zero remaining work | Write `status: COMPLETE` proof, retain `.clawpatch` so `clawpatch status` remains verifiable, and exit `0`. |
 
 ## Built for real repositories
 
@@ -154,8 +153,10 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and inherited database credentials and reset guards are removed from ClawPatch child processes.
 - **New evidence gets another chance.** An open revalidation can inform up to two additional attempts on the same finding without skipping ahead.
+- **Existing queues do not get erased.** The default command resumes the current `.clawpatch` queue. A reset is offered only for a proven-clean queue with clean project source, and dirty source blocks reset.
+- **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary.
 - **False positives clean themselves up.** Only the exact supervisor-owned repair paths are restored; unrelated work is left alone.
-- **Completion means completion.** The command exits successfully only after the queue is empty and a fresh review generation finds nothing else to repair.
+- **Completion stays inspectable.** The command exits successfully only after the queue is empty and a fresh review generation finds nothing else to repair, and it keeps `.clawpatch` so the result can still be checked with `clawpatch status --json`.
 
 The terminal shows these transitions directly, including `RESUME APPLIED REPAIR`, the current finding, the owned files, watchdog time, commit, push, and final proof.
 
@@ -279,8 +280,8 @@ ClawPatch owns the findings and repairs. The supervisor owns the reliable journe
 --repo PATH                 target Git repository; absolute paths are recommended
 --branch current            stay on the checked-out branch
 --push none|each|final      local only, push every repair, or push final state
---fresh                     discard only exact checkpoint-owned interrupted work and rebuild the queue
---resume-stopped            resume one exact stopped checkpoint
+--fresh                     explicitly reset only clean project source and rebuild the queue
+--resume-stopped            resume existing state or one exact stopped checkpoint
 --timeout-minutes N         watchdog for each ClawPatch child; default 15
 --print-state-path          print the external checkpoint/proof directory and exit
 --publish-clawpatch-state   explicitly commit safe generated ClawPatch state
@@ -322,7 +323,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.8 alpha**.
+Current release: **0.1.9 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

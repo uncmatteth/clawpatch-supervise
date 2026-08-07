@@ -7,15 +7,16 @@ from pathlib import Path
 from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_release import (
-    _UnresolvedFinding,
     _final_closure,
     _load_release_progress,
     _prepare_fresh_release,
     _process_finding_until_fixed,
-    _restore_committed_clawpatch_state,
     _resolve_uncertain_findings,
+    _restore_committed_clawpatch_state,
+    _UnresolvedFinding,
     _write_release_progress,
 )
+from clawpatch_supervise.errors import SafetyError
 
 
 class ClawpatchPartialProgressTests(unittest.TestCase):
@@ -35,9 +36,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
         branch = subprocess.check_output(
             ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
         ).strip()
-        head = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=repo, text=True
-        ).strip()
+        head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
         return branch, head
 
     def test_final_state_cleanup_restores_committed_config_and_removes_runtime_state(self):
@@ -92,13 +91,9 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
             repo = root / "repo"
             repo.mkdir()
             branch, _base_head = self.init_repo(repo)
-            (repo / "app.py").write_text(
-                "already repaired by prior finding\n", encoding="utf-8"
-            )
+            (repo / "app.py").write_text("already repaired by prior finding\n", encoding="utf-8")
             subprocess.run(["git", "add", "--", "app.py"], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "commit", "-q", "-m", "prior finding"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "commit", "-q", "-m", "prior finding"], cwd=repo, check=True)
             starting_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
@@ -127,9 +122,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
             )
 
             self.assertEqual(
-                subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], cwd=repo, text=True
-                ).strip(),
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
                 starting_head,
             )
             self.assertEqual(record["files_changed"], [])
@@ -147,10 +140,15 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
 
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch(
+        "clawpatch_supervise.clawpatch_release._revalidate",
+        return_value={"finding": "fnd_one", "outcome": "open"},
+    )
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
     def test_partial_repair_is_locally_preserved_then_finished_as_one_final_commit(
         self,
         execute_fix,
+        _revalidate,
         _processes,
         push_and_verify,
     ):
@@ -175,9 +173,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                         outcome="fix-validation-failed",
                     )
                 self.assertEqual(
-                    subprocess.check_output(
-                        ["git", "status", "--porcelain"], cwd=repo, text=True
-                    ),
+                    subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True),
                     "",
                 )
                 self.assertEqual(source.read_text(encoding="utf-8"), "before\npartial\n")
@@ -203,6 +199,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 pushed=False,
                 state_root=state_root,
                 progress=progress_events.append,
+                require_project_gates=False,
             )
 
             final_head = subprocess.check_output(
@@ -218,9 +215,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 cwd=repo,
                 text=True,
             ).splitlines()
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
 
             self.assertEqual(calls, 2)
             self.assertEqual(commit_count, "1")
@@ -240,16 +235,25 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 [1, 2],
             )
             self.assertEqual(
-                [event["phase"] for event in progress_events if event["phase"] in {"commit", "push"}],
+                [
+                    event["phase"]
+                    for event in progress_events
+                    if event["phase"] in {"commit", "push"}
+                ],
                 ["commit", "push"],
             )
 
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch(
+        "clawpatch_supervise.clawpatch_release._revalidate",
+        return_value={"finding": "fnd_one", "outcome": "open"},
+    )
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
     def test_no_progress_unwinds_temporary_commit_and_leaves_partial_source_visible(
         self,
         execute_fix,
+        _revalidate,
         _processes,
         push_and_verify,
     ):
@@ -265,9 +269,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 nonlocal calls
                 calls += 1
                 if calls == 1:
-                    (repo / "app.py").write_text(
-                        "before\nvaluable partial\n", encoding="utf-8"
-                    )
+                    (repo / "app.py").write_text("before\nvaluable partial\n", encoding="utf-8")
                 raise _UnresolvedFinding(
                     "validation failed after applying fix: database assertion failed",
                     finding_id="fnd_one",
@@ -285,6 +287,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                     branch=branch,
                     pushed=False,
                     state_root=state_root,
+                    require_project_gates=False,
                 )
 
             self.assertIn(
@@ -296,9 +299,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
             current_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
             checkpoint = _load_release_progress(repo, state_root=state_root)
 
             self.assertEqual(calls, 2)
@@ -315,7 +316,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
-    def test_interrupted_temporary_commit_is_proven_recovered_and_freshly_initialized(
+    def test_interrupted_temporary_commit_is_recovered_but_dirty_source_blocks_reset(
         self,
         json_clawpatch,
         _processes,
@@ -382,24 +383,29 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 return {"created": True}
 
             json_clawpatch.side_effect = initialize
-            _prepare_fresh_release(
-                repo,
-                env={},
-                state_root=state_root,
-            )
+            with self.assertRaisesRegex(
+                SafetyError,
+                "fresh Clawpatch reset is allowed only when project source is clean",
+            ):
+                _prepare_fresh_release(
+                    repo,
+                    env={},
+                    state_root=state_root,
+                )
 
             current_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
             self.assertEqual(current_head, original_head)
-            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "before\n")
             self.assertEqual(
-                (repo / "unrelated.txt").read_text(encoding="utf-8"), "preserve me\n"
+                (repo / "app.py").read_text(encoding="utf-8"),
+                "before\npartial\n",
             )
+            self.assertEqual((repo / "unrelated.txt").read_text(encoding="utf-8"), "preserve me\n")
             self.assertEqual(config.read_text(encoding="utf-8"), '{"provider":"codex"}\n')
-            self.assertTrue((repo / ".clawpatch/project.json").is_file())
-            self.assertIsNone(_load_release_progress(repo, state_root=state_root))
-            json_clawpatch.assert_called_once()
+            self.assertFalse((repo / ".clawpatch/project.json").is_file())
+            self.assertIsNotNone(_load_release_progress(repo, state_root=state_root))
+            json_clawpatch.assert_not_called()
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
@@ -461,12 +467,12 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
             _prepare_fresh_release(repo, env={}, state_root=state_root)
 
             self.assertEqual(
-                subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], cwd=repo, text=True
-                ).strip(),
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
                 current_head,
             )
-            self.assertEqual(source.read_text(encoding="utf-8"), "before\nnew committed user work\n")
+            self.assertEqual(
+                source.read_text(encoding="utf-8"), "before\nnew committed user work\n"
+            )
             self.assertEqual(user_file.read_text(encoding="utf-8"), "preserve me\n")
             self.assertEqual(
                 subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True),
@@ -505,7 +511,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 Exception,
-                "A fresh Clawpatch run refuses unrelated source changes: app.py, user.txt",
+                "fresh Clawpatch reset is allowed only when project source is clean",
             ):
                 _prepare_fresh_release(repo, env={}, state_root=state_root)
 
@@ -517,9 +523,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 (repo / "app.py").read_text(encoding="utf-8"),
                 "before\nowned partial\n",
             )
-            self.assertEqual(
-                (repo / "user.txt").read_text(encoding="utf-8"), "unrelated work\n"
-            )
+            self.assertEqual((repo / "user.txt").read_text(encoding="utf-8"), "unrelated work\n")
             self.assertIsNotNone(_load_release_progress(repo, state_root=state_root))
             json_clawpatch.assert_not_called()
 
@@ -599,9 +603,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
             repo.mkdir()
             branch, _head = self.init_repo(repo)
             (repo / ".clawpatch" / "runs").mkdir(parents=True)
-            (repo / ".clawpatch" / "runs" / "generated.json").write_text(
-                "{}\n", encoding="utf-8"
-            )
+            (repo / ".clawpatch" / "runs" / "generated.json").write_text("{}\n", encoding="utf-8")
             recovered = {
                 "finding_id": "fnd_uncertain",
                 "revalidation": {"outcome": "fixed"},
@@ -645,6 +647,57 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 progress=None,
                 current_offset=9,
             )
+
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch(
+        "clawpatch_supervise.clawpatch_release._next_finding",
+        return_value=(None, {"finding": None}),
+    )
+    @patch(
+        "clawpatch_supervise.clawpatch_release._resolve_uncertain_findings", return_value=([], [])
+    )
+    @patch("clawpatch_supervise.clawpatch_release._review_completion", return_value={"done": True})
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_successful_final_closure_retains_clawpatch_state_for_status_proof(
+        self,
+        json_clawpatch,
+        _review,
+        _resolve,
+        _next,
+        _gates,
+        _processes,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            branch, _head = self.init_repo(repo)
+            state_file = repo / ".clawpatch" / "project.json"
+            state_file.parent.mkdir(parents=True)
+            state_file.write_text('{"schemaVersion":1}\n', encoding="utf-8")
+            json_clawpatch.side_effect = [
+                {"revalidated": 0},
+                {"total": 0, "items": []},
+                {"total": 0, "items": []},
+                {"openFindings": 0, "activeLocks": 0, "lockFiles": 0},
+            ]
+
+            closure = _final_closure(
+                repo,
+                env={},
+                state_root=root / "state",
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                publish_clawpatch_state=False,
+                review_limit=1,
+                require_project_gates=False,
+            )
+
+            self.assertFalse(closure["needs_fresh_review"])
+            self.assertTrue(closure["state_retained"])
+            self.assertEqual(state_file.read_text(encoding="utf-8"), '{"schemaVersion":1}\n')
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])

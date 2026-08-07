@@ -7,55 +7,51 @@ import os
 import subprocess
 import tempfile
 import unittest
-from contextlib import redirect_stdout
-from io import StringIO
 from pathlib import Path
-from unittest.mock import call, patch
+from unittest.mock import patch
 
+from clawpatch_supervise.clawpatch_protocol import (
+    RepairAction,
+    classify_clawpatch_failure,
+)
 from clawpatch_supervise.clawpatch_release import (
-    _MissingFinding,
-    _UnresolvedFinding,
     _active_clawpatch_processes,
     _checkpoint_can_follow_supervisor_upgrade,
     _checkpoint_later_applied_attempt,
     _checkpoint_unapplied_attempt,
     _clawpatch_version,
     _commit_attempt,
-    _external_state_home,
     _execute_fix,
-    _final_closure,
+    _external_state_home,
     _fix_command,
     _is_clawpatch_argv,
-    _json_clawpatch,
     _load_release_progress,
     _migrate_legacy_external_progress,
+    _MissingFinding,
     _must_clawpatch,
     _next_finding,
-    _patch_attempt_from_show,
     _parse_json_output,
+    _patch_attempt_from_show,
     _platform_command,
     _prepare_fresh_release,
     _process_finding_until_fixed,
     _publish_final_state,
     _push_and_verify,
+    _rebuilt_generation_owns_checkpoint_source,
     _release_clawpatch_env,
     _repository_state_root,
-    _rebuilt_generation_owns_checkpoint_source,
     _require_synchronized_remote_branch,
     _resume_stopped_attempt,
     _revalidate,
     _review_all_features,
     _run_project_gates,
     _source_state_fingerprint,
-    _write_release_progress,
+    _UnresolvedFinding,
     _windows_clawpatch_processes,
+    _write_release_progress,
     release_sweep,
 )
 from clawpatch_supervise.errors import SafetyError
-from clawpatch_supervise.clawpatch_protocol import (
-    RepairAction,
-    classify_clawpatch_failure,
-)
 
 
 def _hold_clawpatch_release_lock(repo: str, acquired, release) -> None:
@@ -82,14 +78,18 @@ def _hold_clawpatch_release_lock(repo: str, acquired, release) -> None:
 
 class ClawpatchReleaseSweepTests(unittest.TestCase):
     @staticmethod
-    def completed(argv: list[str], output: str = "", code: int = 0) -> subprocess.CompletedProcess[str]:
+    def completed(
+        argv: list[str], output: str = "", code: int = 0
+    ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, code, output, None)
 
     @staticmethod
     def init_repo(repo: Path) -> None:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
-        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+        )
         (repo / ".gitignore").write_text(".clawpatch/\n.manageroo/\n", encoding="utf-8")
         manageroo = repo / ".manageroo"
         manageroo.mkdir()
@@ -111,7 +111,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     def init_plain_repo(repo: Path) -> None:
         subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
         subprocess.run(["git", "config", "user.name", "Test"], cwd=repo, check=True)
-        subprocess.run(["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.invalid"], cwd=repo, check=True
+        )
         (repo / ".gitignore").write_text(".clawpatch/\n", encoding="utf-8")
         subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
@@ -281,9 +283,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             def complete_fix(*_args, **_kwargs):
                 self.assertFalse((repo / ".manageroo").exists())
                 self.assertEqual(
-                    subprocess.check_output(
-                        ["git", "status", "--porcelain"], cwd=repo, text=True
-                    ),
+                    subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True),
                     "",
                 )
                 (repo / "app.py").write_text("fixed\n", encoding="utf-8")
@@ -382,9 +382,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             ):
                 _migrate_legacy_external_progress(repo, state_root=current_root)
 
-            self.assertEqual(
-                _load_release_progress(repo, state_root=current_root), expected
-            )
+            self.assertEqual(_load_release_progress(repo, state_root=current_root), expected)
             self.assertFalse((legacy_root / "clawpatch-release-progress.json").exists())
 
     def test_external_progress_upgrades_a_verified_legacy_source_fingerprint(self):
@@ -569,25 +567,21 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 "clawpatch_supervise.clawpatch_release._external_state_home",
                 return_value=manageroo_state,
             ):
-                report = release_sweep(
-                    repo,
-                    apply=True,
-                    branch="current",
-                    fresh=True,
-                    integration_mode="external",
-                )
+                with self.assertRaisesRegex(
+                    SafetyError,
+                    "fresh Clawpatch reset is allowed only when project source is clean",
+                ):
+                    release_sweep(
+                        repo,
+                        apply=True,
+                        branch="current",
+                        fresh=True,
+                        integration_mode="external",
+                    )
 
-            self.assertTrue(report["ok"])
-            self.assertEqual(source.read_text(encoding="utf-8"), "before\n")
-            self.assertFalse(
-                (repo / ".manageroo/cache/clawpatch-release-progress.json").exists()
-            )
-            self.assertFalse(
+            self.assertEqual(source.read_text(encoding="utf-8"), "interrupted ClawPatch repair\n")
+            self.assertIsNotNone(
                 next(manageroo_state.rglob("clawpatch-release-progress.json"), None)
-            )
-            self.assertEqual(
-                subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True),
-                "",
             )
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
@@ -638,7 +632,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     SafetyError,
-                    "A fresh Clawpatch run refuses unrelated source changes: app.py",
+                    "fresh Clawpatch reset is allowed only when project source is clean",
                 ):
                     release_sweep(
                         repo,
@@ -684,7 +678,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
             with self.assertRaisesRegex(
                 SafetyError,
-                "cannot prove exact checkpoint-owned source content",
+                "fresh Clawpatch reset is allowed only when project source is clean",
             ):
                 _prepare_fresh_release(repo, env={"PATH": "test"})
 
@@ -716,8 +710,6 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
         self.assertEqual(payload["features"], 35)
         self.assertEqual(payload["next"], "clawpatch review --limit 3")
-
-
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
@@ -804,7 +796,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
-    def test_fresh_run_discards_only_checkpoint_owned_interrupted_source(
+    def test_fresh_run_preserves_checkpoint_owned_interrupted_source(
         self, json_clawpatch, _processes
     ):
         with tempfile.TemporaryDirectory() as temp:
@@ -849,22 +841,22 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 return {"created": True}
 
             json_clawpatch.side_effect = initialize
-            _prepare_fresh_release(repo, env={"PATH": "test"})
+            with self.assertRaisesRegex(
+                SafetyError,
+                "fresh Clawpatch reset is allowed only when project source is clean",
+            ):
+                _prepare_fresh_release(repo, env={"PATH": "test"})
 
-            self.assertEqual(source.read_text(encoding="utf-8"), "original\n")
+            self.assertEqual(source.read_text(encoding="utf-8"), "interrupted Clawpatch repair\n")
             self.assertEqual(unrelated.read_text(encoding="utf-8"), "original notes\n")
             self.assertEqual(
-                subprocess.check_output(
-                    ["git", "stash", "list"], cwd=repo, text=True
-                ),
+                subprocess.check_output(["git", "stash", "list"], cwd=repo, text=True),
                 "",
             )
-            self.assertFalse(
-                (repo / ".manageroo/cache/clawpatch-release-progress.json").exists()
-            )
+            self.assertTrue((repo / ".manageroo/cache/clawpatch-release-progress.json").exists())
 
             unrelated.write_text("operator work\n", encoding="utf-8")
-            with self.assertRaisesRegex(SafetyError, "refuses unrelated source changes"):
+            with self.assertRaisesRegex(SafetyError, "project source is clean"):
                 _prepare_fresh_release(repo, env={"PATH": "test"})
             self.assertEqual(unrelated.read_text(encoding="utf-8"), "operator work\n")
 
@@ -880,9 +872,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             test_source = repo / "test_app.py"
             source.write_text("original\n", encoding="utf-8")
             test_source.write_text("original test\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "app.py", "test_app.py"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "add", "app.py", "test_app.py"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
             original_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
@@ -890,9 +880,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             finding_id = "fnd_sig-feat-library-abc123-1234_abcdef1234"
             source.write_text("partial repair\n", encoding="utf-8")
             test_source.write_text("partial test repair\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "app.py", "test_app.py"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "add", "app.py", "test_app.py"], cwd=repo, check=True)
             subprocess.run(
                 [
                     "git",
@@ -910,12 +898,8 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             temporary_tree = subprocess.check_output(
                 ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
             ).strip()
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
-            subprocess.run(
-                ["git", "restore", "--", "app.py", "test_app.py"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
+            subprocess.run(["git", "restore", "--", "app.py", "test_app.py"], cwd=repo, check=True)
 
             checkpoint = _write_release_progress(
                 repo,
@@ -949,15 +933,11 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
             self.assertFalse(progress_path.exists())
             self.assertEqual(
-                subprocess.check_output(
-                    ["git", "status", "--porcelain"], cwd=repo, text=True
-                ),
+                subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True),
                 "",
             )
             self.assertEqual(
-                subprocess.check_output(
-                    ["git", "rev-parse", "HEAD"], cwd=repo, text=True
-                ).strip(),
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
                 original_head,
             )
             self.assertEqual(
@@ -973,20 +953,26 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             self.init_repo(repo)
             (repo / ".gitignore").write_text(".manageroo/\n", encoding="utf-8")
             subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-q", "-m", "track clawpatch state"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "track clawpatch state"], cwd=repo, check=True
+            )
             feature = repo / ".clawpatch" / "features" / "feat_one.json"
             feature.parent.mkdir(parents=True)
             feature.write_text('{"featureId":"feat_one"}\n', encoding="utf-8")
 
             commit = _publish_final_state(repo, branch="main")
 
-            head = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
             self.assertEqual(commit, head)
             committed = subprocess.check_output(
                 ["git", "show", "--pretty=", "--name-only", "HEAD"], cwd=repo, text=True
             ).splitlines()
             self.assertEqual(committed, [".clawpatch/features/feat_one.json"])
-            self.assertEqual(subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True), "")
+            self.assertEqual(
+                subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True), ""
+            )
 
     @patch("clawpatch_supervise.clawpatch_release._require_branch")
     @patch("clawpatch_supervise.clawpatch_release._validate_attempt_paths")
@@ -1230,7 +1216,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             committed_paths = subprocess.check_output(
                 ["git", "show", "--pretty=", "--name-only", commit], cwd=repo, text=True
             ).splitlines()
-            local = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+            local = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
             remote_sha = subprocess.check_output(
                 ["git", "ls-remote", "origin", f"refs/heads/{branch}"],
                 cwd=repo,
@@ -1257,9 +1245,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         with self.assertRaisesRegex(SafetyError, "non-open"):
             _next_finding(Path("/repo"), env={})
 
-        finding_id, _payload = _next_finding(
-            Path("/repo"), env={}, status="uncertain"
-        )
+        finding_id, _payload = _next_finding(Path("/repo"), env={}, status="uncertain")
         self.assertEqual(finding_id, "fnd_one")
         self.assertEqual(
             json_clawpatch.call_args.args[1],
@@ -1282,9 +1268,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release.shutil.which")
     def test_windows_resolves_clawpatch_command_shim_without_a_shell(self, which):
         which.return_value = r"C:\Users\Test\AppData\Roaming\npm\clawpatch.cmd"
-        command = _platform_command(
-            ["clawpatch", "next", "--json"], platform_name="nt"
-        )
+        command = _platform_command(["clawpatch", "next", "--json"], platform_name="nt")
         self.assertEqual(command[0], which.return_value)
         self.assertEqual(command[1:], ["next", "--json"])
 
@@ -1304,7 +1288,6 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(processes[0]["pid"], 42)
         self.assertIn("conservative", processes[0]["cwd"])
         self.assertEqual(run.call_args.args[0][0], "powershell.exe")
-
 
     def test_exhausted_checkpoint_follows_only_a_disjoint_supervisor_upgrade(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -1331,7 +1314,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             ).stdout.strip()
             (repo / "README.md").write_text("controller docs\n", encoding="utf-8")
             subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-q", "-m", "controller upgrade"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "controller upgrade"], cwd=repo, check=True
+            )
             progress = {
                 "finding_id": finding_id,
                 "head_before": old_head,
@@ -1344,7 +1329,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             source.parent.mkdir(parents=True)
             source.write_text("changed finding source\n", encoding="utf-8")
             subprocess.run(["git", "add", str(source.relative_to(repo))], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-q", "-m", "finding source changed"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "finding source changed"], cwd=repo, check=True
+            )
             self.assertFalse(_checkpoint_can_follow_supervisor_upgrade(repo, progress))
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
@@ -1396,7 +1383,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             source_before = source.read_bytes()
             (repo / "README.md").write_text("controller upgrade\n", encoding="utf-8")
             subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-q", "-m", "controller upgrade"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "controller upgrade"], cwd=repo, check=True
+            )
             legacy = _load_release_progress(repo)
             self.assertTrue(_checkpoint_can_follow_supervisor_upgrade(repo, legacy))
 
@@ -1468,9 +1457,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             resume_stopped_attempt.assert_not_called()
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
-    def test_complete_review_uses_bounded_worker_waves_until_zero_pending(
-        self, json_clawpatch
-    ):
+    def test_complete_review_uses_bounded_worker_waves_until_zero_pending(self, json_clawpatch):
         json_clawpatch.side_effect = [
             {"dryRun": True, "wouldReview": 12, "jobs": 4},
             {"run": "run-1", "reviewed": 4, "findings": 1, "jobs": 4},
@@ -1552,9 +1539,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(run.call_args.kwargs["timeout"], 900)
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
-    def test_uncertain_read_only_revalidation_escalates_without_rerunning_fix(
-        self, json_clawpatch
-    ):
+    def test_uncertain_read_only_revalidation_escalates_without_rerunning_fix(self, json_clawpatch):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
@@ -1783,9 +1768,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 require_project_gates=False,
             )
 
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
 
         self.assertTrue(record["resumed"])
         self.assertEqual(record["patch_attempt"], "pat_one")
@@ -1980,9 +1963,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             source_state = subprocess.check_output(
                 ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
             ).strip()
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
             checkpoint = _write_release_progress(
                 repo,
                 finding_id="fnd_one",
@@ -2024,9 +2005,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 require_project_gates=False,
             )
 
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
 
         self.assertTrue(record["resumed"])
         self.assertEqual(record["patch_attempt"], "pat_no_edit")
@@ -2070,9 +2049,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             prior_temporary_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
             subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
             subprocess.run(
                 [
@@ -2101,9 +2078,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                     text=True,
                 ).strip(),
             )
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
             source.write_text("different repair\n", encoding="utf-8")
             subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
             subprocess.run(
@@ -2114,9 +2089,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             mismatched_temporary_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
             source.write_text("checkpoint-owned repair\n", encoding="utf-8")
             checkpoint = _write_release_progress(
                 repo,
@@ -2208,9 +2181,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             temporary_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
             source.write_text("second partial repair\n", encoding="utf-8")
             validation.write_text('{"proof": "revalidated"}\n', encoding="utf-8")
             checkpoint = _write_release_progress(
@@ -2288,9 +2259,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             temporary_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
             checkpoint = _write_release_progress(
                 repo,
                 finding_id="fnd_one",
@@ -2414,11 +2383,8 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 "lockFiles": 0,
                 "openFindings": 1,
             }
-            queue = {
-                "finding": {"id": "fnd_one", "status": "open"},
-                "next": "clawpatch show --finding fnd_one",
-            }
             next_finding.side_effect = [(None, {"finding": None})]
+
             def complete_fix(*_args, **_kwargs):
                 source.write_text("completed Clawpatch repair\n", encoding="utf-8")
                 return (
@@ -2514,6 +2480,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 "next": "clawpatch show --finding fnd_one",
             }
             next_finding.side_effect = [("fnd_one", queue), (None, {"finding": None})]
+
             def complete_fix(*_args, **_kwargs):
                 (repo / "fixed.py").write_text("fixed\n", encoding="utf-8")
                 return (
@@ -2604,9 +2571,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             final_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
 
         self.assertEqual(final_head, head)
         self.assertEqual(status, "")
@@ -2672,9 +2637,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             temporary_commit = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            subprocess.run(
-                ["git", "reset", "--mixed", original_head], cwd=repo, check=True
-            )
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
             source.write_text("correct original\n", encoding="utf-8")
             _write_release_progress(
                 repo,
@@ -2711,9 +2674,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             final_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
 
         self.assertEqual(final_head, original_head)
         self.assertEqual(status, "")
@@ -2791,9 +2752,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             final_closure.return_value = {"pushed": False}
 
             report = release_sweep(repo, apply=True, branch="current")
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
             restored = source.read_text(encoding="utf-8")
 
         self.assertEqual(restored, "correct original\n")
@@ -2862,9 +2821,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             regression = repo / "test_app.py"
             source.write_text("before\n", encoding="utf-8")
             regression.write_text("before test\n", encoding="utf-8")
-            subprocess.run(
-                ["git", "add", "app.py", "test_app.py"], cwd=repo, check=True
-            )
+            subprocess.run(["git", "add", "app.py", "test_app.py"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
             branch = subprocess.check_output(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
@@ -3195,7 +3152,13 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             source.write_text("first committed repair\n", encoding="utf-8")
             subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
             subprocess.run(
-                ["git", "add", "-f", ".clawpatch/project.json", ".clawpatch/features/feat_new.json"],
+                [
+                    "git",
+                    "add",
+                    "-f",
+                    ".clawpatch/project.json",
+                    ".clawpatch/features/feat_new.json",
+                ],
                 cwd=repo,
                 check=True,
             )
@@ -3279,9 +3242,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (state / "findings" / "fnd_still_present.json").write_text(
-                "{}\n", encoding="utf-8"
-            )
+            (state / "findings" / "fnd_still_present.json").write_text("{}\n", encoding="utf-8")
             source.write_text("committed change\n", encoding="utf-8")
             subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
             subprocess.run(
@@ -3303,7 +3264,6 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
         self.assertIsNotNone(checkpoint)
         self.assertEqual(checkpoint["finding_id"], "fnd_still_present")
-
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._next_finding")
@@ -3422,9 +3382,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(checkpoint["head_before"], stopped_head)
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
-    def test_workspace_write_revalidation_cannot_silently_change_the_repair(
-        self, json_clawpatch
-    ):
+    def test_workspace_write_revalidation_cannot_silently_change_the_repair(self, json_clawpatch):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
@@ -3448,9 +3406,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(raised.exception.outcome, "revalidation-mutated-source")
 
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
-    def test_revalidation_source_progress_continues_the_same_finding(
-        self, execute_fix
-    ):
+    def test_revalidation_source_progress_continues_the_same_finding(self, execute_fix):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
@@ -3512,9 +3468,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(commit_count, "1")
 
     @patch("clawpatch_supervise.clawpatch_release._revalidation_payload")
-    def test_failed_revalidation_with_source_progress_is_preserved(
-        self, revalidation_payload
-    ):
+    def test_failed_revalidation_with_source_progress_is_preserved(self, revalidation_payload):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
@@ -3571,9 +3525,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(result, payload)
 
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
-    def test_false_positive_discards_exact_multi_iteration_repair_and_advances(
-        self, execute_fix
-    ):
+    def test_false_positive_discards_exact_multi_iteration_repair_and_advances(self, execute_fix):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = root / "repo"
@@ -3626,9 +3578,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             final_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
             checkpoint = _load_release_progress(repo, state_root=state_root)
 
         self.assertEqual(execute_fix.call_count, 2)
@@ -3644,9 +3594,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertIsNone(checkpoint)
 
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
-    def test_false_positive_discards_exact_first_attempt_repair_and_advances(
-        self, execute_fix
-    ):
+    def test_false_positive_discards_exact_first_attempt_repair_and_advances(self, execute_fix):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = root / "repo"
@@ -3694,9 +3642,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             final_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            status = subprocess.check_output(
-                ["git", "status", "--porcelain"], cwd=repo, text=True
-            )
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
 
         self.assertEqual(execute_fix.call_count, 1)
         self.assertEqual(record["revalidation"]["outcome"], "false-positive")
@@ -3710,9 +3656,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(status, "")
 
     @patch("clawpatch_supervise.clawpatch_release._run_clawpatch")
-    def test_codex_revalidation_refusal_is_same_finding_provider_failure(
-        self, run_clawpatch
-    ):
+    def test_codex_revalidation_refusal_is_same_finding_provider_failure(self, run_clawpatch):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
@@ -3734,9 +3678,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(raised.exception.outcome, "revalidation-provider-failed")
 
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
-    def test_revalidation_provider_failure_continues_only_with_new_fix_tree(
-        self, execute_fix
-    ):
+    def test_revalidation_provider_failure_continues_only_with_new_fix_tree(self, execute_fix):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
@@ -3786,9 +3728,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(record["revalidation"]["outcome"], "fixed")
 
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
-    def test_failed_revalidation_source_progress_continues_the_same_finding(
-        self, execute_fix
-    ):
+    def test_failed_revalidation_source_progress_continues_the_same_finding(self, execute_fix):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
@@ -3851,9 +3791,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(run_clawpatch.call_count, 1)
 
     @patch("clawpatch_supervise.clawpatch_release._run_clawpatch")
-    def test_missing_show_finding_stops_immediately_without_transient_retries(
-        self, run_clawpatch
-    ):
+    def test_missing_show_finding_stops_immediately_without_transient_retries(self, run_clawpatch):
         argv = ["clawpatch", "show", "--finding", "fnd_old", "--json"]
         run_clawpatch.return_value = self.completed(
             argv,
@@ -3868,8 +3806,6 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 _must_clawpatch(repo, argv, env={})
 
         self.assertEqual(run_clawpatch.call_count, 1)
-
-
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._run")
@@ -3903,7 +3839,10 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 release_sweep(repo, apply=True, branch="current")
 
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[{"pid": 42}])
+    @patch(
+        "clawpatch_supervise.clawpatch_release._active_clawpatch_processes",
+        return_value=[{"pid": 42}],
+    )
     def test_apply_refuses_a_second_clawpatch_process(self, _processes, _version):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
@@ -3926,7 +3865,10 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 owner.start()
                 self.assertTrue(acquired.wait(timeout=5))
                 with (
-                    patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2"),
+                    patch(
+                        "clawpatch_supervise.clawpatch_release._clawpatch_version",
+                        return_value="0.7.2",
+                    ),
                     patch(
                         "clawpatch_supervise.clawpatch_release._active_clawpatch_processes",
                         return_value=[],
@@ -4206,7 +4148,10 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         execute_fix.assert_not_called()
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
-    @patch("clawpatch_supervise.clawpatch_release._next_finding", return_value=(None, {"finding": None}))
+    @patch(
+        "clawpatch_supervise.clawpatch_release._next_finding",
+        return_value=(None, {"finding": None}),
+    )
     @patch("clawpatch_supervise.clawpatch_release._review_all_features")
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates")
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
@@ -4256,7 +4201,6 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
         self.assertEqual(json_clawpatch.call_count, 1)
         review_all.assert_not_called()
-
 
     def test_project_gate_failure_surfaces_the_exact_command_output(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -4313,6 +4257,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 },
                 {"finding": None, "status": "open", "next": "clawpatch report --status open"},
             ]
+
             def complete_fix(*_args, **_kwargs):
                 (repo / "fixed.py").write_text("fixed\n", encoding="utf-8")
                 return (
@@ -4439,6 +4384,77 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertTrue(any(event["phase"] == "continuing" for event in progress_events))
         self.assertFalse(any(event["phase"] == "stopped" for event in progress_events))
         final_closure.assert_called_once()
+
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._revalidate")
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    def test_fix_validation_failure_revalidates_saved_repair_before_another_fix(
+        self,
+        execute_fix,
+        revalidate,
+        _gates,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            def failed_validation(*_args, **_kwargs):
+                (repo / "repair.py").write_text("fixed\n", encoding="utf-8")
+                raise _UnresolvedFinding(
+                    "error: validation failed after applying fix",
+                    finding_id="fnd_one",
+                    outcome="fix-validation-failed",
+                    failure=classify_clawpatch_failure("fix", 6),
+                )
+
+            execute_fix.side_effect = failed_validation
+            revalidate.return_value = {
+                "finding": "fnd_one",
+                "outcome": "fixed",
+                "reasoning": "the saved repair passes fresh revalidation",
+            }
+
+            record, pushed, continuations = _process_finding_until_fixed(
+                repo,
+                "fnd_one",
+                inspected={
+                    "finding": {"id": "fnd_one", "status": "open"},
+                    "validation": [],
+                    "patchAttempts": [],
+                },
+                env={},
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                state_root=repo / ".manageroo" / "cache",
+                require_project_gates=False,
+            )
+
+            self.assertFalse(pushed)
+            self.assertEqual(continuations, 1)
+            self.assertEqual(execute_fix.call_count, 1)
+            revalidate.assert_called_once_with(
+                repo,
+                "fnd_one",
+                env={},
+                expected_paths=[],
+                progress=None,
+                current="?",
+                total="?",
+            )
+            self.assertEqual(record["revalidation"]["outcome"], "fixed")
+            self.assertEqual(record["files_changed"], ["repair.py"])
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "show", "-s", "--format=%s", "HEAD"],
+                    cwd=repo,
+                    text=True,
+                ).strip(),
+                "clawpatch fix: fnd_one",
+            )
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
@@ -4606,9 +4622,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 "fnd_old",
                 {"finding": {"id": "fnd_old", "status": "open"}},
             )
-            show_finding.side_effect = _MissingFinding(
-                "finding not found", finding_id="fnd_old"
-            )
+            show_finding.side_effect = _MissingFinding("finding not found", finding_id="fnd_old")
 
             with self.assertRaisesRegex(SafetyError, "stopped without remapping"):
                 release_sweep(repo, apply=True, branch="current")
@@ -4682,7 +4696,13 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
             execute_fix.side_effect = fail_once
 
-            with self.assertRaisesRegex(SafetyError, "stopped"):
+            with (
+                patch(
+                    "clawpatch_supervise.clawpatch_release._revalidate",
+                    return_value={"finding": "fnd_one", "outcome": "open"},
+                ),
+                self.assertRaisesRegex(SafetyError, "stopped"),
+            ):
                 release_sweep(
                     repo,
                     apply=True,
@@ -4719,10 +4739,6 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             [event["attempt"] for event in progress_events if event["phase"] == "fix"],
             [1, 2],
         )
-
-
-
-
 
     def test_release_progress_is_durable_and_bound_to_the_current_finding(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -4819,19 +4835,11 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
             terminal = dict(transient, last_action=RepairAction.STOP_TERMINAL.value)
 
-            resumed = _checkpoint_unapplied_attempt(
-                repo, transient, env={}, inspected=inspected
-            )
-            blocked = _checkpoint_unapplied_attempt(
-                repo, terminal, env={}, inspected=inspected
-            )
+            resumed = _checkpoint_unapplied_attempt(repo, transient, env={}, inspected=inspected)
+            blocked = _checkpoint_unapplied_attempt(repo, terminal, env={}, inspected=inspected)
 
         self.assertEqual(resumed["patch_attempts"], ["pat_timeout"])
         self.assertIsNone(blocked)
-
-
-
-
 
 
 if __name__ == "__main__":

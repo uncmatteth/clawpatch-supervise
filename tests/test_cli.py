@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from contextlib import contextmanager
-from contextlib import redirect_stdout
-from io import StringIO
-from pathlib import Path
 import tomllib
 import unittest
+from contextlib import contextmanager, redirect_stdout
+from io import StringIO
+from pathlib import Path
 from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_external import _render_event, main
-from clawpatch_supervise.clawpatch_protocol import RepairAction
+from clawpatch_supervise.clawpatch_protocol import RepairAction, classify_clawpatch_failure
 from clawpatch_supervise.clawpatch_release import ClawpatchCommandFailure, ClawpatchStop
-from clawpatch_supervise.clawpatch_protocol import classify_clawpatch_failure
 from clawpatch_supervise.errors import SafetyError
 
 
@@ -22,7 +20,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.8")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.9")
 
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
@@ -75,10 +73,13 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         repo = Path("/tmp/example-repository")
         expected = Path("/tmp/example-state")
         output = StringIO()
-        with patch(
-            "clawpatch_supervise.clawpatch_external.external_state_root",
-            return_value=expected,
-        ) as state_root, redirect_stdout(output):
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external.external_state_root",
+                return_value=expected,
+            ) as state_root,
+            redirect_stdout(output),
+        ):
             result = main(["--repo", str(repo), "--print-state-path"])
 
         self.assertEqual(result, 0)
@@ -342,7 +343,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         output = StringIO()
         with redirect_stdout(output):
             code = main(
-                [],
+                ["--fresh"],
                 run_sweep=fake_sweep,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
@@ -396,8 +397,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         rendered = output.getvalue()
         self.assertEqual(code, 2)
         self.assertIn(
-            "[1/24] STOPPED - fix-validation-failed — "
-            "🛑💥🤬 FUCK. THIS SHIT ISN'T SAFE TO ADVANCE",
+            "[1/24] STOPPED - fix-validation-failed — 🛑💥🤬 FUCK. THIS SHIT ISN'T SAFE TO ADVANCE",
             rendered,
         )
         self.assertIn("source left in place: app.py", rendered)
@@ -477,6 +477,86 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(calls[0][1]["fresh"])
         self.assertEqual(calls[0][1]["integration_mode"], "external")
+
+    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean")
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_default_run_preserves_existing_open_queue_without_prompting(
+        self, _state_exists, queue_is_clean
+    ):
+        calls = []
+        queue_is_clean.return_value = False
+
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 4, "open_findings": 0, "git_head": "abc"}
+
+        with (
+            patch("builtins.input", side_effect=AssertionError("must not prompt")),
+            redirect_stdout(StringIO()),
+        ):
+            code = main(
+                ["--repo", "."],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertFalse(calls[0][1]["fresh"])
+
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_default_run_prompts_before_resetting_a_clean_completed_queue(
+        self, _state_exists, _queue_is_clean, _source
+    ):
+        calls = []
+
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with (
+            patch("sys.stdin.isatty", return_value=True),
+            patch("builtins.input", return_value="y") as prompt,
+            redirect_stdout(StringIO()),
+        ):
+            code = main(
+                ["--repo", "."],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        prompt.assert_called_once()
+        self.assertTrue(calls[0][1]["fresh"])
+
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
+    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_dirty_source_never_offers_or_performs_state_reset(
+        self, _state_exists, _queue_is_clean, _source
+    ):
+        calls = []
+
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with (
+            patch("builtins.input", side_effect=AssertionError("must not prompt")),
+            redirect_stdout(StringIO()),
+        ):
+            code = main(
+                ["--repo", "."],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertFalse(calls[0][1]["fresh"])
 
 
 if __name__ == "__main__":
