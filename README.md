@@ -12,13 +12,13 @@
 
 `clawpatch-supervise` runs the long job around [ClawPatch](https://www.npmjs.com/package/clawpatch). ClawPatch still reviews the code, selects the current finding, writes the repair, and revalidates it. This supervisor remembers exactly where the queue was, protects real source progress, prevents unchanged retry loops, commits only verified repair paths, optionally pushes them, and refuses to call the job complete until a fresh review generation proves there is nothing left.
 
-It is a standalone Python package, a command-line program, and a public [ClawHub skill](https://clawhub.ai/uncmatteth/skills/clawpatch-supervise). It runs on Linux and Windows and has no Python runtime dependencies outside the standard library.
+It is a standalone Python package, a command-line program, and a public [ClawHub skill](https://clawhub.ai/uncmatteth/skills/clawpatch-supervise). It runs on Linux, macOS, and Windows and has no Python runtime dependencies outside the standard library.
 
 ## Quick start
 
 You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, either installer below installs `clawpatch@latest` globally with npm and verifies the command. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 or newer is required.
 
-### Linux
+### Linux and macOS
 
 ```bash
 git clone https://github.com/uncmatteth/clawpatch-supervise.git
@@ -49,7 +49,7 @@ Configured Windows `.cmd` and `.bat` validation gates are launched with exact `c
 
 ### Run a queue
 
-Linux:
+Linux or macOS:
 
 ```bash
 clawpatch-supervise \
@@ -185,7 +185,7 @@ clawpatch-supervise --repo /absolute/path/to/repo --print-state-path
 
 Default state homes are:
 
-- Linux: `${XDG_STATE_HOME:-~/.local/state}/clawpatch-supervise`
+- Linux and macOS: `${XDG_STATE_HOME:-~/.local/state}/clawpatch-supervise`
 - Windows: `%LOCALAPPDATA%\ClawPatchSupervise\state`
 
 `--resume-stopped` accepts only an exact matching checkpoint. It does not mean “ignore the last error.”
@@ -329,7 +329,7 @@ Run the complete local suite:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The GitHub workflow runs the full suite, installed CLI smoke test, and native installer on Ubuntu and Windows with Python 3.11 and 3.12. A release is not described as cross-platform until those live jobs pass.
+The GitHub workflow runs the full suite, installed CLI smoke test, and native installer on Ubuntu, macOS, and Windows with Python 3.11 and 3.12. A release is not described as cross-platform until those live jobs pass.
 
 ## Project status
 

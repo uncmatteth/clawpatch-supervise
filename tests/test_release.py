@@ -1172,6 +1172,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             other = root / "other"
             subdir.mkdir(parents=True)
             other.mkdir()
+            repo = repo.resolve()
+            subdir = subdir.resolve()
+            other = other.resolve()
 
             def inspect(argv, **_kwargs):
                 if argv[0] == "ps":
@@ -1183,7 +1186,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         "404 clawpatch fix --finding fnd_one\n",
                     )
                 if argv[0] == "git":
-                    cwd = Path(_kwargs["cwd"])
+                    cwd = Path(_kwargs["cwd"]).resolve()
                     git_root = other if cwd == other else repo
                     return self.completed(argv, f"{git_root}\n")
                 pid = argv[argv.index("-p") + 1]
