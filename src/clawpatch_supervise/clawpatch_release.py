@@ -1808,6 +1808,32 @@ def _recover_interrupted_source_clean_fix(
     )
 
 
+def _attempt_base_preserves_owned_source(
+    repo: Path,
+    *,
+    attempt_base: Any,
+    current_head: str,
+    owned_paths: list[str],
+) -> bool:
+    if attempt_base == current_head:
+        return True
+    if not isinstance(attempt_base, str) or not re.fullmatch(r"[0-9a-f]{40,64}", attempt_base):
+        return False
+    ancestry = _run(
+        ["git", "merge-base", "--is-ancestor", attempt_base, current_head],
+        cwd=repo,
+        timeout=60,
+    )
+    if ancestry.returncode != 0:
+        return False
+    unchanged = _run(
+        ["git", "diff", "--quiet", attempt_base, current_head, "--", *owned_paths],
+        cwd=repo,
+        timeout=60,
+    )
+    return unchanged.returncode == 0
+
+
 def _checkpoint_later_applied_attempt(
     repo: Path,
     progress_record: dict[str, Any],
@@ -1870,7 +1896,12 @@ def _checkpoint_later_applied_attempt(
             and isinstance(files_changed, list)
             and sorted(files_changed) == source_paths
             and isinstance(git_record, dict)
-            and git_record.get("baseSha") == current_head
+            and _attempt_base_preserves_owned_source(
+                repo,
+                attempt_base=git_record.get("baseSha"),
+                current_head=current_head,
+                owned_paths=source_paths,
+            )
             and isinstance(patch_attempt_id, str)
             and patch_attempt_id
         ):
@@ -3558,7 +3589,12 @@ def _resume_stopped_attempt(
                 finding_id in attempt.get("findingIds", [])
                 and sorted(attempt.get("filesChanged", [])) == owned_paths
                 and isinstance(git_record, dict)
-                and git_record.get("baseSha") == current_head
+                and _attempt_base_preserves_owned_source(
+                    repo,
+                    attempt_base=git_record.get("baseSha"),
+                    current_head=current_head,
+                    owned_paths=owned_paths,
+                )
             ):
                 candidates.append(attempt)
         if len(candidates) != 1:

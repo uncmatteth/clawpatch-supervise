@@ -3473,6 +3473,10 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
             source.write_text("later validation-failed repair\n", encoding="utf-8")
+            attempt_base = current_head
+            (repo / "release.py").write_text("later supervisor release\n", encoding="utf-8")
+            subprocess.run(["git", "add", "release.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "release supervisor"], cwd=repo, check=True)
             inspected = {
                 "finding": {"id": "fnd_one", "status": "uncertain"},
                 "validation": [],
@@ -3482,7 +3486,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         "status": "failed",
                         "findingIds": ["fnd_one"],
                         "filesChanged": ["app.py"],
-                        "git": {"baseSha": current_head},
+                        "git": {"baseSha": attempt_base},
                         "createdAt": "2099-01-01T00:00:00.000Z",
                         "updatedAt": "2099-01-01T00:01:00.000Z",
                     }
