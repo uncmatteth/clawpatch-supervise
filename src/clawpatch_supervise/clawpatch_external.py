@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 import sys
 import threading
 import time
@@ -22,6 +21,7 @@ from .clawpatch_release import (
     require_external_clawpatch_preflight,
 )
 from .errors import SafetyError
+from .runner import CommandRunner
 from .validation_services import provision_disposable_validation_environment
 
 
@@ -31,19 +31,13 @@ def _clawpatch_state_exists(repo: Path) -> bool:
 
 
 def _run_state_query(repo: Path, argv: list[str]) -> dict[str, Any]:
-    try:
-        result = subprocess.run(
-            argv,
-            cwd=repo,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=120,
-            check=False,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise SafetyError(f"Could not inspect existing ClawPatch state: {exc}") from exc
-    if result.returncode != 0:
+    result = CommandRunner().run(
+        argv,
+        cwd=repo,
+        timeout_seconds=120,
+        kill_process_group=True,
+    )
+    if result.exit_code != 0:
         raise SafetyError(
             "Could not prove whether existing ClawPatch state is clean; preserving it.\n"
             f"stdout:\n{result.stdout[-4000:]}\n"

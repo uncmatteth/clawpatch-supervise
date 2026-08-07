@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-import subprocess
+import os
+import tempfile
 import tomllib
 import unittest
 from contextlib import contextmanager, redirect_stdout
 from io import StringIO
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_external import _render_event, _run_state_query, main
@@ -17,18 +19,37 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExternalClawpatchSupervisorTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "nt", "Windows command shim test")
+    def test_state_query_launches_clawpatch_cmd_from_path_with_spaces(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repository"
+            repo.mkdir()
+            tool_directory = Path(temp) / "tools with spaces"
+            tool_directory.mkdir()
+            shim = tool_directory / "clawpatch.cmd"
+            shim.write_text(
+                "@echo off\r\n"
+                'echo {"openFindings":45,"activeLocks":0,"lockFiles":0}\r\n',
+                encoding="ascii",
+            )
+            path = os.pathsep.join((str(tool_directory), os.environ.get("PATH", "")))
+
+            with patch.dict(os.environ, {"PATH": path}):
+                result = _run_state_query(repo, ["clawpatch", "status", "--json"])
+
+        self.assertEqual(result["openFindings"], 45)
+
     def test_state_query_parses_stdout_despite_stderr_diagnostics(self):
         repo = Path("/tmp/example-repository")
         argv = ["clawpatch", "status", "--json"]
-        completed = subprocess.CompletedProcess(
-            argv,
-            0,
-            '{"openFindings": 0}',
-            "warning: optional metadata unavailable\n",
+        completed = SimpleNamespace(
+            exit_code=0,
+            stdout='{"openFindings": 0}',
+            stderr="warning: optional metadata unavailable\n",
         )
 
         with patch(
-            "clawpatch_supervise.clawpatch_external.subprocess.run",
+            "clawpatch_supervise.clawpatch_external.CommandRunner.run",
             return_value=completed,
         ) as run:
             result = _run_state_query(repo, argv)
@@ -37,26 +58,22 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         run.assert_called_once_with(
             argv,
             cwd=repo,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=120,
-            check=False,
+            timeout_seconds=120,
+            kill_process_group=True,
         )
 
     def test_state_query_failure_reports_bounded_stdout_and_stderr(self):
         repo = Path("/tmp/example-repository")
         argv = ["clawpatch", "status", "--json"]
-        completed = subprocess.CompletedProcess(
-            argv,
-            2,
-            "discarded stdout\n" + ("o" * 4000),
-            "discarded stderr\n" + ("e" * 4000),
+        completed = SimpleNamespace(
+            exit_code=2,
+            stdout="discarded stdout\n" + ("o" * 4000),
+            stderr="discarded stderr\n" + ("e" * 4000),
         )
 
         with (
             patch(
-                "clawpatch_supervise.clawpatch_external.subprocess.run",
+                "clawpatch_supervise.clawpatch_external.CommandRunner.run",
                 return_value=completed,
             ),
             self.assertRaises(SafetyError) as raised,
@@ -75,7 +92,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.17")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.18")
 
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
