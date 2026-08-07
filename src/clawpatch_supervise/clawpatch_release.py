@@ -1654,9 +1654,8 @@ def _clean_descendant_retires_verified_checkpoint(
         not isinstance(finding_id, str)
         or not isinstance(original_head, str)
         or not isinstance(temporary_commit, str)
-        or not temporary_commit
         or not isinstance(owned_paths, list)
-        or not owned_paths
+        or bool(temporary_commit) != bool(owned_paths)
     ):
         return False
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
@@ -1669,19 +1668,22 @@ def _clean_descendant_retires_verified_checkpoint(
     )
     if ancestor.returncode:
         return False
-    try:
-        iteration_paths = _verify_iteration_commit(
-            repo,
-            finding_id=finding_id,
-            original_head=original_head,
-            temporary_commit=temporary_commit,
-            require_current=False,
-        )
-    except SafetyError:
-        return False
-    if not iteration_paths or not set(iteration_paths).issubset(set(owned_paths)):
-        return False
+    if owned_paths:
+        try:
+            iteration_paths = _verify_iteration_commit(
+                repo,
+                finding_id=finding_id,
+                original_head=original_head,
+                temporary_commit=temporary_commit,
+                require_current=False,
+            )
+        except SafetyError:
+            return False
+        if not iteration_paths or not set(iteration_paths).issubset(set(owned_paths)):
+            return False
     finding_path = repo / ".clawpatch" / "findings" / f"{finding_id}.json"
+    if finding_path.is_symlink() or not finding_path.is_file():
+        return False
     try:
         finding = json.loads(finding_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):

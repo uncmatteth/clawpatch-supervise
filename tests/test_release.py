@@ -3675,12 +3675,24 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             [["clawpatch", "status", "--json"], ["clawpatch", "map", "--json"]],
         )
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    def test_empty_checkpoint_is_preserved_when_old_finding_still_exists(
+    def test_clean_descendant_retires_empty_checkpoint_while_preserving_open_finding(
         self,
         _version,
         _processes,
+        _gates,
+        resume_stopped,
+        json_clawpatch,
+        review_all,
+        next_finding,
+        final_closure,
     ):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
@@ -3714,7 +3726,10 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            (state / "findings" / "fnd_still_present.json").write_text("{}\n", encoding="utf-8")
+            (state / "findings" / "fnd_still_present.json").write_text(
+                json.dumps({"findingId": "fnd_still_present", "status": "open"}) + "\n",
+                encoding="utf-8",
+            )
             source.write_text("committed change\n", encoding="utf-8")
             subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
             subprocess.run(
@@ -3730,12 +3745,32 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
             subprocess.run(["git", "commit", "-q", "-m", "later commit"], cwd=repo, check=True)
 
-            with self.assertRaisesRegex(SafetyError, "no longer matches the current Git HEAD"):
-                release_sweep(repo, apply=True, branch="current")
-            checkpoint = _load_release_progress(repo)
+            json_clawpatch.side_effect = [
+                {"activeLocks": 0, "lockFiles": 0, "openFindings": 1},
+                {"features": 1},
+            ]
+            review_all.return_value = {
+                "review": {"reviewed": 1, "findings": 0},
+                "completion": {"dryRun": True, "wouldReview": 0},
+            }
+            next_finding.return_value = (None, {"finding": None})
+            final_closure.return_value = {"pushed": False, "needs_fresh_review": False}
 
-        self.assertIsNotNone(checkpoint)
-        self.assertEqual(checkpoint["finding_id"], "fnd_still_present")
+            report = release_sweep(repo, apply=True, branch="current")
+            checkpoint = _load_release_progress(repo)
+            finding_preserved = (state / "findings" / "fnd_still_present.json").is_file()
+
+        self.assertIsNone(checkpoint)
+        self.assertTrue(finding_preserved)
+        self.assertEqual(
+            report["reset_recovery"],
+            {
+                "finding_id": "fnd_still_present",
+                "owned_paths": [],
+                "generation": "clean-descendant",
+            },
+        )
+        resume_stopped.assert_not_called()
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._next_finding")
