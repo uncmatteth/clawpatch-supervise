@@ -12,6 +12,85 @@ CLAWHUB_VERSION = "0.19.1"
 
 
 class InstallerContractTests(unittest.TestCase):
+    def test_linux_installer_passes_exact_versions_to_npm(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_directory:
+            root = Path(temporary_directory)
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            command_stub = root / "command-stub"
+            command_stub.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            command_stub.chmod(0o755)
+
+            python = fake_bin / "python3"
+            python.write_text(
+                "#!/bin/sh\n"
+                'if [ "$1" = "-c" ]; then exit 0; fi\n'
+                'if [ "$1" = "-m" ] && [ "$2" = "venv" ]; then\n'
+                '  mkdir -p "$3/bin"\n'
+                '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/python"\n'
+                '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/clawpatch-supervise"\n'
+                "fi\n"
+                "exit 0\n",
+                encoding="utf-8",
+            )
+            python.chmod(0o755)
+
+            npm = fake_bin / "npm"
+            npm.write_text(
+                "#!/bin/sh\n"
+                'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
+                'if [ "$1" = "prefix" ]; then\n'
+                '  printf "%s\\n" "$CLAWPATCH_TEST_NPM_PREFIX"\n'
+                "  exit 0\n"
+                "fi\n"
+                'if [ "$1" = "install" ] && [ "$2" = "--global" ]; then\n'
+                '  mkdir -p "$CLAWPATCH_TEST_NPM_PREFIX/bin"\n'
+                '  cp "$CLAWPATCH_TEST_COMMAND_STUB" '
+                '"$CLAWPATCH_TEST_NPM_PREFIX/bin/clawpatch"\n'
+                "  exit 0\n"
+                "fi\n"
+                "exit 23\n",
+                encoding="utf-8",
+            )
+            npm.chmod(0o755)
+
+            invocation_log = root / "npm-invocations.log"
+            install_root = root / "install"
+            npm_prefix = root / "npm-prefix"
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "CLAWPATCH_SUPERVISE_BIN_DIR": str(root / "installed-bin"),
+                    "CLAWPATCH_SUPERVISE_HOME": str(install_root),
+                    "CLAWPATCH_SUPERVISE_PYTHON": str(python),
+                    "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
+                    "CLAWPATCH_TEST_LOG": str(invocation_log),
+                    "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
+                    "PATH": f"{fake_bin}:/usr/bin:/bin",
+                }
+            )
+
+            result = subprocess.run(
+                [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+            )
+
+            self.assertEqual(result.returncode, 23)
+            self.assertEqual(
+                invocation_log.read_text(encoding="utf-8").splitlines(),
+                [
+                    f"install --global clawpatch@{CLAWPATCH_VERSION}",
+                    "prefix --global",
+                    (
+                        f"install --prefix {install_root}/clawhub --no-fund "
+                        f"--no-audit clawhub@{CLAWHUB_VERSION}"
+                    ),
+                ],
+            )
+
     def test_linux_installer_rejects_python_older_than_3_11_before_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
