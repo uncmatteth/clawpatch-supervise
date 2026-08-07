@@ -1667,6 +1667,39 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         )
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_uncertain_after_full_revalidation_ladder_reaches_transition_policy(
+        self, json_clawpatch
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            source.write_text("clawpatch repair\n", encoding="utf-8")
+            json_clawpatch.side_effect = [
+                {"finding": "fnd_one", "outcome": "uncertain"},
+                {"finding": "fnd_one", "outcome": "uncertain"},
+                {
+                    "finding": "fnd_one",
+                    "outcome": "uncertain",
+                    "reasoning": "repair works but stale assertions still fail",
+                },
+            ]
+
+            result = _revalidate(
+                repo,
+                "fnd_one",
+                env={"MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK": "1"},
+                expected_paths=["app.py"],
+            )
+
+        self.assertEqual(result["outcome"], "uncertain")
+        self.assertTrue(result["managerooHostSandboxBypassed"])
+        self.assertEqual(result["managerooWorkspaceWriteOutcome"], "uncertain")
+
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     def test_external_open_revalidation_uses_trusted_host_after_sandbox_block(self, json_clawpatch):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

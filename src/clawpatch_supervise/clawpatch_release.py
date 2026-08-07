@@ -1233,10 +1233,11 @@ def _revalidate(
             outcome="revalidation-mutated-source",
             failure=classify_clawpatch_failure("revalidation", 23),
         )
-    if outcome not in {"fixed", "open", "false-positive"}:
+    if outcome not in {"fixed", "open", "uncertain", "false-positive"}:
         raise _UnresolvedFinding(
             f"phase: revalidation\ncommand: {shlex.join(argv)}\nfinding ID: {finding_id}\n"
-            "exit code: 0\nfailed requirement: exact lowercase outcome fixed, open, or "
+            "exit code: 0\nfailed requirement: exact lowercase outcome fixed, open, "
+            "uncertain, or "
             f"false-positive; received {outcome}\n"
             f"changed source paths: {_source_paths(repo)}\n"
             f"output:\n{json.dumps(payload, sort_keys=True)}",
