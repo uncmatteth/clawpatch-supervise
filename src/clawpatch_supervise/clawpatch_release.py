@@ -157,10 +157,9 @@ def _release_clawpatch_env(
         raise SafetyError("Clawpatch child timeout must be at least 60 seconds.")
     child_env = dict(os.environ)
     overrides = child_env_overrides or {}
-    if "TEST_DATABASE_URL" in overrides:
-        for name in tuple(child_env):
-            if _DATABASE_CREDENTIAL_ENV.search(name):
-                child_env.pop(name, None)
+    for name in tuple(child_env):
+        if _DATABASE_CREDENTIAL_ENV.search(name):
+            child_env.pop(name, None)
     child_env["CLAWPATCH_CODEX_TIMEOUT_MS"] = str(child_timeout_seconds * 1_000)
     child_env["MANAGEROO_CLAWPATCH_CHILD_TIMEOUT_SECONDS"] = str(child_timeout_seconds)
     child_env.pop("MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK", None)

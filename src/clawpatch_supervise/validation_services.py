@@ -515,11 +515,6 @@ def _provision_postgres_test_environment(
     if contract is None:
         yield {}
         return
-    if os.environ.get(contract.url_env) and all(
-        os.environ.get(name) == "true" for name in contract.reset_envs
-    ):
-        yield {}
-        return
 
     if progress is not None:
         progress(

@@ -1078,6 +1078,22 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertNotIn("MYSQL_ROOT_PASSWORD", child)
         self.assertNotIn("PRODUCTION_ALLOW_DATABASE_RESET", child)
 
+    @patch.dict(
+        "clawpatch_supervise.clawpatch_release.os.environ",
+        {
+            "TEST_DATABASE_URL": "postgresql://external.invalid/live",
+            "BTT_ALLOW_DATABASE_RESET": "true",
+            "SAFE_VALUE": "keep",
+        },
+        clear=True,
+    )
+    def test_release_environment_removes_inherited_reset_capable_database(self):
+        child = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
+
+        self.assertEqual(child["SAFE_VALUE"], "keep")
+        self.assertNotIn("TEST_DATABASE_URL", child)
+        self.assertNotIn("BTT_ALLOW_DATABASE_RESET", child)
+
     def test_release_environment_rejects_validation_service_policy_overrides(self):
         for name in (
             "CLAWPATCH_CODEX_SANDBOX",

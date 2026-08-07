@@ -152,6 +152,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Repository ownership stays clear.** Fresh runs exclude Git submodules and their descendants from ClawPatch review, so the queue repairs code owned by the target repository instead of editing a dependency checkout.
 - **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
+- **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and inherited database credentials and reset guards are removed from ClawPatch child processes.
 - **New evidence gets another chance.** An open revalidation can inform up to two additional attempts on the same finding without skipping ahead.
 - **False positives clean themselves up.** Only the exact supervisor-owned repair paths are restored; unrelated work is left alone.
 - **Completion means completion.** The command exits successfully only after the queue is empty and a fresh review generation finds nothing else to repair.
