@@ -153,6 +153,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Repository ownership stays clear.** Fresh runs exclude Git submodules and their descendants from ClawPatch review, so the queue repairs code owned by the target repository instead of editing a dependency checkout.
 - **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
+- **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a stopped checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor retires only the obsolete recovery wrapper. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and inherited database credentials and reset guards are removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
 - **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder before another same-finding fix attempt. A genuinely open result can inform up to two additional attempts without skipping ahead.
 - **Existing queues do not get erased.** The default command resumes the current `.clawpatch` queue. A reset is offered only for a proven-clean queue with clean project source, and dirty source blocks reset.
@@ -196,6 +197,12 @@ mismatch remains a safety stop; migrated state never grants ownership to changed
 Repeated local iterations can create different temporary commit IDs for the same repair. Resume
 accepts an older attempt boundary only when its finding, parent, owned paths, and complete Git tree
 independently match the checkpoint; a merely similar or different repair remains a safety stop.
+
+If later committed release work leaves the source tree clean, a verified stopped checkpoint may
+become only a stale recovery wrapper. The supervisor retires that wrapper automatically only when
+the current HEAD descends from its recorded base, its temporary commit is still a valid iteration
+for the same finding, and the finding remains in `.clawpatch`. The queue itself is never deleted or
+advanced by this recovery.
 
 ## Manageroo and the standalone supervisor
 

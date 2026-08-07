@@ -1574,6 +1574,60 @@ def _checkpoint_completed_commit(
     return ""
 
 
+def _clean_descendant_retires_verified_checkpoint(
+    repo: Path,
+    progress: dict[str, Any],
+) -> bool:
+    """Retire only the recovery wrapper after its clean base has safely advanced.
+
+    The ClawPatch finding remains in ``.clawpatch`` and is selected normally on
+    the continuing run. This does not classify, skip, or otherwise advance it.
+    """
+    if progress.get("phase") != "stopped" or _source_paths(repo):
+        return False
+    finding_id = progress.get("finding_id")
+    original_head = progress.get("head_before")
+    temporary_commit = progress.get("temporary_commit")
+    owned_paths = progress.get("owned_paths")
+    if (
+        not isinstance(finding_id, str)
+        or not isinstance(original_head, str)
+        or not isinstance(temporary_commit, str)
+        or not temporary_commit
+        or not isinstance(owned_paths, list)
+        or not owned_paths
+    ):
+        return False
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    if current_head == original_head:
+        return False
+    ancestor = _run(
+        ["git", "merge-base", "--is-ancestor", original_head, current_head],
+        cwd=repo,
+        timeout=60,
+    )
+    if ancestor.returncode:
+        return False
+    try:
+        iteration_paths = _verify_iteration_commit(
+            repo,
+            finding_id=finding_id,
+            original_head=original_head,
+            temporary_commit=temporary_commit,
+            require_current=False,
+        )
+    except SafetyError:
+        return False
+    if not iteration_paths or not set(iteration_paths).issubset(set(owned_paths)):
+        return False
+    finding_path = repo / ".clawpatch" / "findings" / f"{finding_id}.json"
+    try:
+        finding = json.loads(finding_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return isinstance(finding, dict) and finding.get("findingId") == finding_id
+
+
 def _checkpoint_unapplied_attempt(
     repo: Path,
     progress_record: dict[str, Any],
@@ -4143,13 +4197,39 @@ def _release_sweep_locked(
                         state_root=state_root,
                     )
                 else:
-                    if not _checkpoint_completed_commit(root, durable_progress):
+                    if _clean_descendant_retires_verified_checkpoint(root, durable_progress):
+                        reset_finding = str(durable_progress["finding_id"])
+                        if progress is not None:
+                            progress(
+                                {
+                                    "phase": "reset-recovery",
+                                    "current": "?",
+                                    "total": "?",
+                                    "finding_id": reset_finding,
+                                    "command": (
+                                        "retire verified stale recovery wrapper; "
+                                        "preserve ClawPatch queue"
+                                    ),
+                                    "attempt": 1,
+                                    "max_attempts": 1,
+                                    "owned_paths": [],
+                                }
+                            )
+                        _clear_release_progress(root, state_root=state_root)
+                        report["reset_recovery"] = {
+                            "finding_id": reset_finding,
+                            "owned_paths": [],
+                            "generation": "clean-descendant",
+                        }
+                        durable_progress = None
+                    elif not _checkpoint_completed_commit(root, durable_progress):
                         raise SafetyError(
                             "Interrupted Clawpatch release progress no longer matches the "
                             "current Git HEAD."
                         )
-                    _clear_release_progress(root, state_root=state_root)
-                    durable_progress = None
+                    else:
+                        _clear_release_progress(root, state_root=state_root)
+                        durable_progress = None
     if durable_progress is not None and _rebuilt_generation_owns_checkpoint_source(
         root, durable_progress
     ):

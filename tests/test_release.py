@@ -3366,6 +3366,111 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_clean_descendant_retires_only_verified_stale_recovery_wrapper(
+        self,
+        _version,
+        _processes,
+        _gates,
+        resume_stopped,
+        json_clawpatch,
+        review_all,
+        next_finding,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            later_test = repo / "test_app.py"
+            readme = repo / "README.md"
+            source.write_text("before\n", encoding="utf-8")
+            readme.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py", "README.md"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            source.write_text("first verified repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "clawpatch-supervise iteration: fnd_one",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
+
+            later_test.write_text("later verified repair\n", encoding="utf-8")
+            _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=original_head,
+                phase="stopped",
+                owned_paths=["app.py", "test_app.py"],
+                temporary_commit=temporary_commit,
+                last_action=RepairAction.STOP_TERMINAL,
+            )
+            finding_path = repo / ".clawpatch" / "findings" / "fnd_one.json"
+            finding_path.parent.mkdir(parents=True)
+            finding_path.write_text(
+                json.dumps({"findingId": "fnd_one", "status": "fixed"}) + "\n",
+                encoding="utf-8",
+            )
+            readme.write_text("release work beyond the repair\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "app.py", "test_app.py", "README.md"], cwd=repo, check=True
+            )
+            subprocess.run(["git", "commit", "-q", "-m", "release"], cwd=repo, check=True)
+
+            json_clawpatch.side_effect = [
+                {"activeLocks": 0, "lockFiles": 0, "openFindings": 0},
+                {"features": 0},
+            ]
+            review_all.return_value = {
+                "review": {"reviewed": 0, "findings": 0},
+                "completion": {"dryRun": True, "wouldReview": 0},
+            }
+            next_finding.return_value = (None, {"finding": None})
+            final_closure.return_value = {"pushed": False}
+
+            report = release_sweep(repo, apply=True, branch="current")
+            checkpoint = _load_release_progress(repo)
+            finding_preserved = finding_path.is_file()
+
+        self.assertTrue(report["ok"])
+        self.assertIsNone(checkpoint)
+        self.assertEqual(
+            report["reset_recovery"],
+            {
+                "finding_id": "fnd_one",
+                "owned_paths": [],
+                "generation": "clean-descendant",
+            },
+        )
+        resume_stopped.assert_not_called()
+        self.assertTrue(finding_preserved)
+
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
     def test_one_command_clears_completed_stale_checkpoint_from_exact_git_history(
         self,
         _version,
