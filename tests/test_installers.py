@@ -1,10 +1,9 @@
 import os
-from pathlib import Path
 import subprocess
 import tempfile
 import tomllib
 import unittest
-
+from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CLAWPATCH_VERSION = "0.7.2"
@@ -12,6 +11,7 @@ CLAWHUB_VERSION = "0.19.1"
 
 
 class InstallerContractTests(unittest.TestCase):
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_requires_clawhub_prerequisite_before_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -28,9 +28,7 @@ class InstallerContractTests(unittest.TestCase):
             python = fake_bin / "python3"
             invocation_log = root / "python-invocations.log"
             python.write_text(
-                "#!/bin/sh\n"
-                'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
-                "exit 0\n",
+                '#!/bin/sh\nprintf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\nexit 0\n',
                 encoding="utf-8",
             )
             python.chmod(0o755)
@@ -64,9 +62,10 @@ class InstallerContractTests(unittest.TestCase):
             self.assertEqual(result.returncode, 2)
             self.assertIn("ClawHub is missing and npm is unavailable.", result.stderr)
             self.assertFalse(install_root.exists())
-            self.assertEqual(installed_command.resolve(), previous_command)
+            self.assertEqual(installed_command.resolve(), previous_command.resolve())
             self.assertNotIn("-m venv", invocation_log.read_text(encoding="utf-8"))
 
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_passes_exact_versions_to_npm(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -146,6 +145,7 @@ class InstallerContractTests(unittest.TestCase):
                 ],
             )
 
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_rejects_python_older_than_3_11_before_mutation(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             root = Path(temporary_directory)
@@ -183,14 +183,14 @@ class InstallerContractTests(unittest.TestCase):
             self.assertNotIn("-m venv", invocation_log.read_text(encoding="utf-8"))
 
     def test_installer_defaults_match_the_packaged_release(self) -> None:
-        project = tomllib.loads(
-            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-        )["project"]
+        project = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
+            "project"
+        ]
         version = project["version"]
         linux = (REPOSITORY_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
         windows = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
 
-        self.assertIn(f'CLAWPATCH_SUPERVISE_VERSION:-{version}', linux)
+        self.assertIn(f"CLAWPATCH_SUPERVISE_VERSION:-{version}", linux)
         self.assertIn(f'[string]$Version = "{version}"', windows)
 
     def test_linux_installer_bootstraps_pinned_clawpatch_only_when_missing(self) -> None:
@@ -204,7 +204,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(condition, script)
         self.assertEqual(script.count(install), 1)
         self.assertLess(script.index(condition), script.index(install))
-        self.assertIn('command -v npm >/dev/null 2>&1', script)
+        self.assertIn("command -v npm >/dev/null 2>&1", script)
         self.assertGreater(script.rindex("command -v clawpatch"), script.index(install))
 
     def test_windows_installer_bootstraps_pinned_clawpatch_only_when_missing(self) -> None:
@@ -228,8 +228,7 @@ class InstallerContractTests(unittest.TestCase):
 
         condition = "if command -v clawhub >/dev/null 2>&1; then"
         install = (
-            'npm install --prefix "$clawhub_root" --no-fund --no-audit '
-            '"clawhub@${clawhub_version}"'
+            'npm install --prefix "$clawhub_root" --no-fund --no-audit "clawhub@${clawhub_version}"'
         )
 
         self.assertIn(f'readonly clawhub_version="{CLAWHUB_VERSION}"', script)
@@ -237,7 +236,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(condition, script)
         self.assertEqual(script.count(install), 1)
         self.assertLess(script.index(condition), script.index(install))
-        self.assertIn('command -v npm >/dev/null 2>&1', script)
+        self.assertIn("command -v npm >/dev/null 2>&1", script)
         self.assertIn('"$clawhub_command" --cli-version', script)
 
     def test_windows_installer_bootstraps_pinned_clawhub_only_when_missing(self) -> None:
@@ -245,10 +244,7 @@ class InstallerContractTests(unittest.TestCase):
 
         lookup = "$clawHubCommand = Get-Command clawhub.cmd, clawhub.exe, clawhub"
         condition = "if ($null -eq $clawHubCommand)"
-        install = (
-            'install --prefix $clawHubRoot --no-fund --no-audit '
-            '"clawhub@$ClawHubVersion"'
-        )
+        install = 'install --prefix $clawHubRoot --no-fund --no-audit "clawhub@$ClawHubVersion"'
 
         self.assertIn(f'$ClawHubVersion = "{CLAWHUB_VERSION}"', script)
         self.assertNotIn("@latest", script)
