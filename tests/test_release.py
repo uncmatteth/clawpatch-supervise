@@ -116,26 +116,50 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
-            tracked_dependency = repo / "node_modules" / "vendored" / "source.js"
-            tracked_dependency.parent.mkdir(parents=True)
-            tracked_dependency.write_text("tracked v1\n", encoding="utf-8")
+            tracked_dependencies = [
+                repo / "node_modules" / "vendored" / "source.js",
+                repo / "packages" / "web" / "node_modules" / "vendored" / "source.js",
+            ]
+            for dependency in tracked_dependencies:
+                dependency.parent.mkdir(parents=True)
+                dependency.write_text("tracked v1\n", encoding="utf-8")
             subprocess.run(
-                ["git", "add", "node_modules/vendored/source.js"], cwd=repo, check=True
+                [
+                    "git",
+                    "add",
+                    "node_modules/vendored/source.js",
+                    "packages/web/node_modules/vendored/source.js",
+                ],
+                cwd=repo,
+                check=True,
             )
             subprocess.run(
                 ["git", "commit", "-q", "-m", "tracked dependency"], cwd=repo, check=True
             )
-            tracked_dependency.write_text("tracked v2\n", encoding="utf-8")
-            installed_dependency = repo / "node_modules" / "installed" / "runtime.js"
-            installed_dependency.parent.mkdir(parents=True)
-            installed_dependency.write_text("untracked runtime\n", encoding="utf-8")
+            for dependency in tracked_dependencies:
+                dependency.write_text("tracked v2\n", encoding="utf-8")
+            installed_dependencies = [
+                repo / "node_modules" / "installed" / "runtime.js",
+                repo / "packages" / "web" / "node_modules" / "installed" / "runtime.js",
+            ]
+            for dependency in installed_dependencies:
+                dependency.parent.mkdir(parents=True)
+                dependency.write_text("untracked runtime\n", encoding="utf-8")
+            near_match = repo / "packages" / "web" / "node_modules_backup" / "source.js"
+            near_match.parent.mkdir(parents=True)
+            near_match.write_text("untracked source\n", encoding="utf-8")
             (repo / "notes.txt").write_text("untracked source\n", encoding="utf-8")
 
             source_paths = _source_paths(repo)
 
         self.assertEqual(
             source_paths,
-            ["node_modules/vendored/source.js", "notes.txt"],
+            [
+                "node_modules/vendored/source.js",
+                "notes.txt",
+                "packages/web/node_modules/vendored/source.js",
+                "packages/web/node_modules_backup/source.js",
+            ],
         )
 
     @staticmethod

@@ -351,7 +351,7 @@ def _status_paths(repo: Path) -> list[str]:
 
 
 def _is_untracked_dependency_path(status: str, path: str) -> bool:
-    return status == "??" and PurePosixPath(path).parts[:1] == ("node_modules",)
+    return status == "??" and "node_modules" in PurePosixPath(path).parts
 
 
 def _source_paths(repo: Path) -> list[str]:
