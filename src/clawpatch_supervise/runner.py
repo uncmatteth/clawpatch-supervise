@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from .errors import SafetyError
-from .util import atomic_write_json, redact_argv, redact_text, utc_now
+from .util import atomic_write_json, ensure_within, redact_argv, redact_text, utc_now
 
 
 _CMD_ARGUMENT_METACHARACTERS = frozenset('&|<>()^%!"\r\n')
@@ -126,6 +126,19 @@ def _platform_argv(argv: Sequence[str], env: Mapping[str, str]) -> list[str] | s
     return resolved
 
 
+def _command_log_path(log_root: Path, log_name: str) -> Path:
+    if (
+        not isinstance(log_name, str)
+        or not log_name
+        or log_name in {".", ".."}
+        or "/" in log_name
+        or "\\" in log_name
+        or "\x00" in log_name
+    ):
+        raise SafetyError("Command log names must be single filename components.")
+    return ensure_within(log_root, log_root / f"{log_name}.json")
+
+
 class CommandRunner:
     """Executes argv directly without a command shell."""
 
@@ -152,6 +165,12 @@ class CommandRunner:
         """
         if not argv or not all(isinstance(item, str) and item for item in argv):
             raise SafetyError("Commands must be non-empty argv arrays.")
+        log_path = None
+        if log_name is not None:
+            if self.log_root is not None:
+                log_path = _command_log_path(self.log_root, log_name)
+            elif not isinstance(log_name, str) or not log_name:
+                raise SafetyError("Command log names must be single filename components.")
         safe_argv = redact_argv(argv)
         started_at = utc_now()
         process_env = (
@@ -217,8 +236,8 @@ class CommandRunner:
                 stderr=redact_text(f"Could not launch command: {exc}"),
                 timed_out=False,
             )
-        if self.log_root and log_name:
-            atomic_write_json(self.log_root / f"{log_name}.json", result.to_dict())
+        if log_path is not None:
+            atomic_write_json(log_path, result.to_dict())
         if check and not result.passed:
             raise subprocess.CalledProcessError(
                 result.exit_code, result.argv, result.stdout, result.stderr

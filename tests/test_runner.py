@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_release import _release_clawpatch_env
+from clawpatch_supervise.errors import SafetyError
 from clawpatch_supervise.runner import CommandRunner
 
 
@@ -42,6 +43,53 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
             json.loads(result.stdout),
             {"DATABASE_URL": False, "BTT_ALLOW_DATABASE_RESET": False},
         )
+
+
+class CommandRunnerLoggingTests(unittest.TestCase):
+    def test_log_name_must_be_a_nonempty_single_filename_component(self) -> None:
+        invalid_names = (
+            "",
+            ".",
+            "..",
+            "../escape",
+            "parent/escape",
+            r"parent\escape",
+            "/tmp/escape",
+            r"C:\escape",
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            runner = CommandRunner(log_root=root / "logs")
+
+            for log_name in invalid_names:
+                with self.subTest(log_name=log_name):
+                    with self.assertRaisesRegex(
+                        SafetyError,
+                        "single filename components",
+                    ):
+                        runner.run(
+                            [sys.executable, "-c", "raise SystemExit(0)"],
+                            cwd=root,
+                            log_name=log_name,
+                        )
+
+            self.assertEqual(list((root / "logs").iterdir()), [])
+
+    def test_valid_log_name_writes_one_json_file_beneath_log_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_root = root / "logs"
+
+            result = CommandRunner(log_root=log_root).run(
+                [sys.executable, "-c", "print('logged')"],
+                cwd=root,
+                log_name="valid-slug",
+            )
+
+            self.assertEqual(result.exit_code, 0, result.stderr)
+            self.assertEqual([path.name for path in log_root.iterdir()], ["valid-slug.json"])
+            payload = json.loads((log_root / "valid-slug.json").read_text(encoding="utf-8"))
+            self.assertEqual(payload["stdout"].strip(), "logged")
 
 
 @unittest.skipUnless(os.name == "nt", "Windows command runner only")
