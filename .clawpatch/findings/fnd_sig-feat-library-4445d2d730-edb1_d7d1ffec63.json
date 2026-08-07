@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-4445d2d730-edb1_d7d1ffec63",
+  "featureId": "feat_library_4445d2d730",
+  "title": "Package and CLI versions have independent sources of truth",
+  "category": "build-release",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/__init__.py",
+      "startLine": 3,
+      "endLine": 3,
+      "symbol": "__version__",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 11,
+      "endLine": 11,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 328,
+      "endLine": 329,
+      "symbol": "main",
+      "quote": null
+    },
+    {
+      "path": "pyproject.toml",
+      "startLine": 5,
+      "endLine": 10,
+      "symbol": "project.version",
+      "quote": null
+    }
+  ],
+  "reasoning": "Distribution metadata is versioned in pyproject.toml while the --version command reads a separate literal from __init__.py. They currently match, but either can be updated independently, allowing a published wheel and its executable to report different versions.",
+  "reproduction": "Change only project.version, build/install the package, and compare package metadata with clawpatch-supervise --version.",
+  "recommendation": "Use one authoritative version source, such as importlib.metadata for the CLI or setuptools dynamic versioning from the package attribute.",
+  "whyTestsDoNotAlreadyCoverThis": "None of the included tests compare project metadata, the package attribute, and CLI output.",
+  "suggestedRegressionTest": "Assert that importlib.metadata.version('clawpatch-supervise'), clawpatch_supervise.__version__, and --version agree in an installed-package test.",
+  "minimumFixScope": "Consolidate version lookup in __init__.py or clawpatch_external.py and add one release-version consistency test.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-4445d2d730_edb1a898fa",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:44:15.694Z",
+  "updatedAt": "2026-08-07T18:44:15.694Z"
+}

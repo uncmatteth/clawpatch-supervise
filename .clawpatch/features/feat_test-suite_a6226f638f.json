@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_test-suite_a6226f638f",
+  "title": "Python test suite tests",
+  "summary": "Python pytest files in tests.",
+  "kind": "test-suite",
+  "source": "python-test-suite",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "tests",
+      "symbol": "tests",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "tests/test_cleanup.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_cli.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_installers.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_partial_progress.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_protocol.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_release.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_runner.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_validation_services.py",
+      "reason": "pytest file"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "pyproject.toml",
+      "reason": "python target runtime metadata"
+    },
+    {
+      "path": "tests/test_cleanup.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_cli.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_installers.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_partial_progress.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_protocol.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_release.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_runner.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_validation_services.py",
+      "reason": "nearby test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_cleanup.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_cli.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_installers.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_partial_progress.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_protocol.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_release.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_runner.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_validation_services.py",
+      "command": "pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "test"
+  ],
+  "trustBoundaries": [],
+  "status": "needs-fix",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-test-suite-a6226f638f-e_bd0704282d"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260807T184035-c7b1f2",
+      "kind": "review",
+      "summary": "1 finding(s); prompt=142258 bytes; approxTokens=35548; includedFiles=9; omittedFiles=0",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-08-07T18:41:49.141Z"
+    }
+  ],
+  "createdAt": "2026-08-07T18:40:35.513Z",
+  "updatedAt": "2026-08-07T18:41:49.141Z"
+}

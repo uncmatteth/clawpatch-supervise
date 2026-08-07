@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_cli-command_5181306ec0",
+  "title": "Python CLI command clawpatch-supervise",
+  "summary": "Python console script 'clawpatch-supervise' targets clawpatch_supervise.clawpatch_external:main, source src/clawpatch_supervise/clawpatch_external.py.",
+  "kind": "cli-command",
+  "source": "python-console-script",
+  "confidence": "high",
+  "entrypoints": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "symbol": "main",
+      "route": null,
+      "command": "clawpatch-supervise"
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "reason": "console script source"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "pyproject.toml",
+      "reason": "python target runtime metadata"
+    }
+  ],
+  "tests": [],
+  "tags": [
+    "python",
+    "cli"
+  ],
+  "trustBoundaries": [
+    "user-input",
+    "filesystem",
+    "process-exec"
+  ],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-cli-command-5181306ec0-_5ff7b40b3c",
+    "fnd_sig-feat-cli-command-5181306ec0-_84251f8fbb",
+    "fnd_sig-feat-cli-command-5181306ec0-_06a2a45a04",
+    "fnd_sig-feat-cli-command-5181306ec0-_a880b33eb5"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260807T184035-c7b1f2",
+      "kind": "review",
+      "summary": "4 finding(s); prompt=30710 bytes; approxTokens=7621; includedFiles=2; omittedFiles=0",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-08-07T18:43:41.085Z"
+    }
+  ],
+  "createdAt": "2026-08-07T18:40:35.513Z",
+  "updatedAt": "2026-08-07T19:41:27.741Z"
+}

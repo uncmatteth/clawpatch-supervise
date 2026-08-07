@@ -1,0 +1,80 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-4445d2d730-135c_e4ea36dea2",
+  "featureId": "feat_library_4445d2d730",
+  "title": "Docker cleanup is not armed while container startup is in flight",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/validation_services.py",
+      "startLine": 534,
+      "endLine": 580,
+      "symbol": "_provision_postgres_test_environment",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/validation_services.py",
+      "startLine": 625,
+      "endLine": 634,
+      "symbol": "_provision_postgres_test_environment",
+      "quote": null
+    },
+    {
+      "path": "tests/test_validation_services.py",
+      "startLine": 84,
+      "endLine": 113,
+      "symbol": "test_malformed_container_id_output_still_removes_exact_container_name",
+      "quote": null
+    }
+  ],
+  "reasoning": "The cleanup try/finally begins only after docker run has returned successfully. If startup times out or raises after the Docker daemon accepted the request, _checked raises before the cleanup block is entered, potentially leaving the named container running indefinitely. The exact randomized container name is already known and could be used for best-effort cleanup.",
+  "reproduction": "Provide a run stub that raises subprocess.TimeoutExpired for docker run and records later calls. _provision_postgres_test_environment raises without issuing docker rm -f for the generated container name.",
+  "recommendation": "Arm cleanup before invoking docker run. Track whether startup was attempted and perform best-effort removal by the exact generated name for timeout, launch-error, nonzero-exit, and malformed-output paths while preserving the primary exception.",
+  "whyTestsDoNotAlreadyCoverThis": "The malformed-ID test covers cleanup after docker run returns success; it does not exercise timeout, exception, or nonzero startup paths.",
+  "suggestedRegressionTest": "Make docker run raise TimeoutExpired after recording its --name argument and assert that docker rm -f is attempted for that exact name.",
+  "minimumFixScope": "Restructure _provision_postgres_test_environment startup cleanup and extend tests/test_validation_services.py.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260807T192944-750e13",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The evidence files still exist, but the relevant code moved. Current source now wraps Docker startup in _start_postgres_container at validation_services.py:497-511, which attempts exact-name removal when timeout, launch error, or nonzero exit occurs; malformed successful output remains covered by the outer cleanup. The regression test now exists at test_validation_services.py:120-149. A direct current-source probe passed for timeout, launch-error, and nonzero startup paths. However, the exact regression test and required full suite could not execute because Python found no writable temporary directory (the inherited TMPDIR points to a deleted supervisor run and the sandbox makes fallback locations unwritable). Because targeted validation did not complete successfully, fixed cannot be confirmed.",
+      "commands": [
+        "rg -n --hidden --glob '!\\.git/**' 'pat_fnd-sig-feat-library-4445d2d730-_1978bda872|fnd_sig-feat-library-4445d2d730-135c_e4ea36dea2|_start_postgres_container|test_startup_timeout_removes_exact_container_name' .",
+        "git show --format=fuller --no-ext-diff -- src/clawpatch_supervise/validation_services.py tests/test_validation_services.py",
+        "PYTHONPATH=src python3 -m unittest tests.test_validation_services.DisposablePostgresValidationTests.test_startup_timeout_removes_exact_container_name -v",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 - <<'PY' ... _start_postgres_container timeout/launch-error/nonzero exact-name cleanup probes ... PY",
+        "git diff --check HEAD^"
+      ],
+      "createdAt": "2026-08-07T19:31:14.968Z"
+    },
+    {
+      "runId": "20260807T193115-cdd197",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original files and malformed-output test still exist, but source lines shifted. Current validation_services.py:497-511 wraps Docker startup in _start_postgres_container and attempts docker rm -f using the exact generated container name whenever startup raises, while preserving the primary exception; _provision_postgres_test_environment invokes it at lines 562-592. The regression test now exists at tests/test_validation_services.py:120-149. The linked failed attempt exercised a stale installed site-packages copy, as shown by its traceback, rather than current src. With PYTHONPATH=src, the import resolved to the repository source, the targeted timeout regression passed, and the required full suite passed: 196 tests, 9 skipped.",
+      "commands": [
+        "rg -n --hidden --glob '!.git/**' 'pat_fnd-sig-feat-library-4445d2d730-_1978bda872|fnd_sig-feat-library-4445d2d730-135c_e4ea36dea2|def _start_postgres_container|test_startup_timeout_removes_exact_container_name' .",
+        "git show --format=fuller --no-ext-diff -- src/clawpatch_supervise/validation_services.py tests/test_validation_services.py",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'import clawpatch_supervise.validation_services as module; print(module.__file__)'",
+        "TMPDIR=/tmp/clawpatch-revalidate.3zWrG5 TMP=/tmp/clawpatch-revalidate.3zWrG5 TEMP=/tmp/clawpatch-revalidate.3zWrG5 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_validation_services.DisposablePostgresValidationTests.test_startup_timeout_removes_exact_container_name -v",
+        "TMPDIR=/tmp/clawpatch-revalidate.3zWrG5 TMP=/tmp/clawpatch-revalidate.3zWrG5 TEMP=/tmp/clawpatch-revalidate.3zWrG5 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-07T19:33:03.162Z"
+    }
+  ],
+  "signature": "sig_feat-library-4445d2d730_135c645729",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-4445d2d730-_1978bda872"
+  ],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:44:15.694Z",
+  "updatedAt": "2026-08-07T19:33:03.162Z"
+}

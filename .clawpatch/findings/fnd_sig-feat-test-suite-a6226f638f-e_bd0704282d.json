@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-test-suite-a6226f638f-e_bd0704282d",
+  "featureId": "feat_test-suite_a6226f638f",
+  "title": "Windows installer lacks compatibility and pre-mutation regression coverage",
+  "category": "test-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "tests/test_installers.py",
+      "startLine": 260,
+      "endLine": 292,
+      "symbol": "InstallerContractTests",
+      "quote": null
+    },
+    {
+      "path": "tests/test_installers.py",
+      "startLine": 370,
+      "endLine": 405,
+      "symbol": "InstallerContractTests",
+      "quote": null
+    },
+    {
+      "path": "tests/test_installers.py",
+      "startLine": 418,
+      "endLine": 507,
+      "symbol": "InstallerContractTests",
+      "quote": null
+    }
+  ],
+  "reasoning": "The POSIX tests verify rejection of mismatched ClawPatch and ClawHub versions and prove that unsupported Python is rejected before the installation directory is created. The complete Windows test section covers dependency presence, missing npm, and npm failures, but has no equivalent version-mismatch or unsupported-Python cases. A Windows installer regression that accepts protocol-incompatible dependencies or mutates the installation before validating Python could therefore pass the suite and ship.",
+  "reproduction": null,
+  "recommendation": "Extend the Windows installer harness so command stubs return configurable ClawPatch and ClawHub versions and the Python stub can fail the minimum-version probe. Add Windows tests asserting rejection, diagnostic text, and absence of the installation root for both dependency-version mismatches and Python older than 3.11.",
+  "whyTestsDoNotAlreadyCoverThis": "The Windows helper does not accept dependency-version parameters or a Python-version failure mode, and every Windows test in the file exercises only presence, absence, or npm installation failure.",
+  "suggestedRegressionTest": "Add Windows-only counterparts to test_linux_installer_rejects_mismatched_clawhub_version, test_linux_installer_rejects_mismatched_clawpatch_version, and test_linux_installer_rejects_python_older_than_3_11_before_mutation.",
+  "minimumFixScope": "tests/test_installers.py only: enhance _run_windows_installer and its stubs, then add the three missing contract tests.",
+  "status": "open",
+  "history": [
+    {
+      "runId": "20260807T195149-5e9cd2",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The original file and InstallerContractTests still exist, but the evidence moved. The Windows harness is now at tests/test_installers.py:151-283, and commit 3a1cf57451995002cc0aa8cd57fce362572b0637 added configurable dependency versions, a Python-failure mode, and the three requested Windows tests at lines 591-636. This does not validate the repair: the linked patch attempt is failed, its Linux pytest run skipped the Windows tests, and current targeted validation exited 1 while also skipping all nine Windows tests. More decisively, current scripts/install.ps1 does not support the new assertions: lines 56-63 invoke venv creation without a minimum-version probe, while ClawHub and ClawPatch version commands run only after installation at lines 107-111 and their outputs are never compared with the required versions. The added tests would therefore fail on Windows, so the finding remains open.",
+      "commands": [
+        "git status --short && git rev-parse HEAD && git log --oneline --decorate -12 -- tests/test_installers.py scripts/install.ps1",
+        "rg -n \"def test_windows_installer_(rejects_mismatched_clawhub_version|rejects_mismatched_clawpatch_version|rejects_python_older_than_3_11_before_mutation)|def _run_windows_installer|clawpatch_version:|clawhub_version:|python_version_fails:\" tests/test_installers.py",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -v"
+      ],
+      "createdAt": "2026-08-07T19:53:16.627Z"
+    },
+    {
+      "runId": "20260807T195316-0b13ca",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The original file and InstallerContractTests still exist, but the evidence moved: the Windows harness is now at tests/test_installers.py:151-283 and the three requested tests are at lines 591-636, added by current HEAD 3a1cf57451995002cc0aa8cd57fce362572b0637. The linked repair changed only tests/test_installers.py, not scripts/install.ps1. Current install.ps1 still creates the venv at lines 56-61 without probing for Python 3.11+, and it runs dependency version commands only after installation at lines 107-111 without comparing their output to the required versions. Thus the new assertions do not match current installer behavior and would fail on Windows. Current targeted validation exited 0 only because all nine Windows tests, including the three regressions, were skipped; it does not validate the repair. The finding remains open.",
+      "commands": [
+        "git status --short && git rev-parse HEAD && git log --oneline --decorate -15 -- tests/test_installers.py scripts/install.ps1",
+        "rg -n \"def _run_windows_installer|test_windows_installer_(rejects_mismatched_clawhub_version|rejects_mismatched_clawpatch_version|rejects_python_older_than_3_11_before_mutation)|Python 3\\.11|ClawHub .*required|ClawPatch .*required|--cli-version|--version|New-Item|venv\" tests/test_installers.py scripts/install.ps1",
+        "nl -ba tests/test_installers.py | sed -n '140,305p;545,675p'",
+        "nl -ba scripts/install.ps1 | sed -n '1,190p'",
+        "git show --stat --oneline 3a1cf57451995002cc0aa8cd57fce362572b0637 && git show --format=fuller --no-ext-diff -- tests/test_installers.py scripts/install.ps1 3a1cf57451995002cc0aa8cd57fce362572b0637",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -v"
+      ],
+      "createdAt": "2026-08-07T19:54:20.087Z"
+    },
+    {
+      "runId": "20260807T195420-9e0ff1",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The file and InstallerContractTests still exist, but the original evidence moved. Current HEAD 3a1cf57451995002cc0aa8cd57fce362572b0637 added configurable Windows stubs at tests/test_installers.py:151-283 and the three requested tests at lines 591-636, changing only tests/test_installers.py. The repair is not supported by current scripts/install.ps1: lines 56-63 create the venv without probing Python 3.11+, while lines 107-111 run ClawHub and ClawPatch version commands only after installation and never compare their output with required versions. Therefore all three new Windows assertions conflict with current installer behavior. Targeted validation exited 0 but skipped all nine Windows tests, including these three, so it does not validate the repair. The linked patch attempt also remains failed. The finding is still open.",
+      "commands": [
+        "git status --short && git rev-parse HEAD && git log --oneline --decorate -20 -- tests/test_installers.py scripts/install.ps1",
+        "rg -n \"def _run_windows_installer|test_windows_installer_(rejects_mismatched_clawhub_version|rejects_mismatched_clawpatch_version|rejects_python_older_than_3_11_before_mutation)|Python 3\\.11|ClawHub .*required|ClawPatch .*required|--cli-version|--version|New-Item|venv\" tests/test_installers.py scripts/install.ps1",
+        "nl -ba tests/test_installers.py | sed -n '135,300p;560,670p' && nl -ba scripts/install.ps1 | sed -n '1,220p'",
+        "git show --stat --oneline --decorate HEAD && git diff HEAD^ HEAD -- tests/test_installers.py scripts/install.ps1",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -v"
+      ],
+      "createdAt": "2026-08-07T19:55:28.568Z"
+    }
+  ],
+  "signature": "sig_feat-test-suite-a6226f638f_ec00bde80a",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-test-suite-a6226f63_04e3c05cd5",
+    "pat_fnd-sig-feat-test-suite-a6226f63_4dc9d5b24e"
+  ],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:41:49.141Z",
+  "updatedAt": "2026-08-07T19:57:04.883Z"
+}

@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_config_cf96aef71d",
+  "title": "Shell/workflow config install.sh",
+  "summary": "Shell or workflow automation in scripts/install.sh, including command substitutions and machine-readable command output.",
+  "kind": "config",
+  "source": "shell-workflow-heuristic",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "scripts/install.sh",
+      "symbol": null,
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "scripts/install.sh",
+      "reason": "entrypoint"
+    }
+  ],
+  "contextFiles": [],
+  "tests": [],
+  "tags": [
+    "config",
+    "shell",
+    "workflow"
+  ],
+  "trustBoundaries": [
+    "process-exec",
+    "filesystem",
+    "network"
+  ],
+  "status": "fixed",
+  "lock": null,
+  "findingIds": [
+    "fnd_sig-feat-config-cf96aef71d-27cac_fc893f49e9",
+    "fnd_sig-feat-config-cf96aef71d-6e5c4_e059abb82c",
+    "fnd_sig-feat-config-cf96aef71d-614ad_2223de7625"
+  ],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260807T184035-c7b1f2",
+      "kind": "review",
+      "summary": "3 finding(s); prompt=8780 bytes; approxTokens=2195; includedFiles=1; omittedFiles=0",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-08-07T18:42:33.227Z"
+    }
+  ],
+  "createdAt": "2026-08-07T18:40:35.513Z",
+  "updatedAt": "2026-08-07T19:48:31.623Z"
+}

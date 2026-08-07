@@ -153,13 +153,24 @@ class InstallerContractTests(unittest.TestCase):
         *,
         clawpatch_present: bool,
         clawhub_present: bool,
+        clawpatch_version: str = CLAWPATCH_VERSION,
+        clawhub_version: str = CLAWHUB_VERSION,
         npm_mode: str = "success",
+        python_version_fails: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
         fake_bin = root / "bin with spaces"
         fake_bin.mkdir()
         command_stub = root / "command-stub.cmd"
-        self._write_batch(command_stub, "@echo off\nexit /b 0\n")
+        self._write_batch(
+            command_stub,
+            "@echo off\n"
+            'if /I "%~n0"=="clawpatch" if "%1"=="--version" '
+            "echo %CLAWPATCH_TEST_CLAWPATCH_VERSION%\n"
+            'if /I "%~n0"=="clawhub" if "%1"=="--cli-version" '
+            "echo %CLAWPATCH_TEST_CLAWHUB_VERSION%\n"
+            "exit /b 0\n",
+        )
         if clawpatch_present:
             shutil.copyfile(command_stub, fake_bin / "clawpatch.cmd")
         if clawhub_present:
@@ -169,6 +180,10 @@ class InstallerContractTests(unittest.TestCase):
             fake_bin / "py.cmd",
             "@echo off\n"
             'if not "%1"=="-3" exit /b 91\n'
+            'if "%2"=="-c" (\n'
+            '  if /I "%CLAWPATCH_TEST_PYTHON_VERSION_FAILS%"=="true" exit /b 1\n'
+            "  exit /b 0\n"
+            ")\n"
             'if not "%2"=="-m" exit /b 92\n'
             'if not "%3"=="venv" exit /b 93\n'
             'mkdir "%~4\\Scripts"\n'
@@ -223,11 +238,14 @@ class InstallerContractTests(unittest.TestCase):
         environment.update(
             {
                 "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
+                "CLAWPATCH_TEST_CLAWPATCH_VERSION": clawpatch_version,
+                "CLAWPATCH_TEST_CLAWHUB_VERSION": clawhub_version,
                 "CLAWPATCH_TEST_INSTALLER": str(REPOSITORY_ROOT / "scripts" / "install.ps1"),
                 "CLAWPATCH_TEST_LOG": str(invocation_log),
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
                 "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
                 "CLAWPATCH_TEST_NATIVE_STUB": str(system_root / "System32" / "where.exe"),
+                "CLAWPATCH_TEST_PYTHON_VERSION_FAILS": str(python_version_fails).lower(),
                 "CLAWPATCH_TEST_SOURCE": str(REPOSITORY_ROOT),
                 "CLAWPATCH_TEST_INSTALL_ROOT": str(install_root),
                 "CLAWPATCH_TEST_BIN_DIR": str(root / "installed-bin"),
@@ -568,6 +586,54 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(invocations, [])
+
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_rejects_mismatched_clawhub_version(self) -> None:
+        result, invocations, install_root = self._run_windows_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            clawhub_version="0.18.0",
+            npm_mode="missing",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"ClawHub {CLAWHUB_VERSION} is required; found 0.18.0.",
+            result.stderr,
+        )
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_rejects_mismatched_clawpatch_version(self) -> None:
+        result, invocations, install_root = self._run_windows_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            clawpatch_version="0.7.1",
+            npm_mode="missing",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"ClawPatch {CLAWPATCH_VERSION} is required; found 0.7.1.",
+            result.stderr,
+        )
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_rejects_python_older_than_3_11_before_mutation(self) -> None:
+        result, invocations, install_root = self._run_windows_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            python_version_fails=True,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Python 3.11 or newer is required.", result.stderr)
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
 
     @unittest.skipUnless(os.name == "nt", "Windows installer test")
     def test_windows_installer_installs_missing_dependencies_and_finds_them(self) -> None:

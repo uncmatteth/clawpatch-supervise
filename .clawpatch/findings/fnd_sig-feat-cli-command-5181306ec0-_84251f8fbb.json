@@ -1,0 +1,65 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-cli-command-5181306ec0-_84251f8fbb",
+  "featureId": "feat_cli-command_5181306ec0",
+  "title": "Filesystem-controlled event fields allow terminal escape and output-spoofing injection",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 103,
+      "endLine": 139,
+      "symbol": "_render_inspection",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 193,
+      "endLine": 196,
+      "symbol": "_render_event",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 279,
+      "endLine": 280,
+      "symbol": "_render_event",
+      "quote": null
+    }
+  ],
+  "reasoning": "Finding titles, evidence paths, commands, recommendations, and generic details are printed without filtering control characters. Repository filenames can contain escape, carriage-return, and newline characters, so an untrusted repository can emit ANSI or OSC sequences, overwrite displayed status, forge COMPLETE/STOPPED lines, or trigger terminal features such as clipboard operations.",
+  "reproduction": "Render a finding whose evidence path contains an ESC-prefixed ANSI or OSC sequence, or a newline followed by a forged COMPLETE line. The raw control characters are returned and printed unchanged.",
+  "recommendation": "Centralize terminal-safe rendering for all externally derived event fields. Escape C0/C1 terminal controls and safely indent or annotate embedded line breaks while preserving newlines introduced by the renderer itself.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were supplied, and there is no visible adversarial rendering coverage for control characters or hostile filenames.",
+  "suggestedRegressionTest": "Pass events containing ESC, BEL, carriage return, and embedded newlines in titles, paths, commands, and details; assert no raw terminal-control sequence or unindented forged status line reaches the rendered output.",
+  "minimumFixScope": "Add one terminal-sanitization helper and apply it to all event-derived values in _render_inspection and _render_event.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260807T185909-ee4008",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The evidence file still exists, but the symbols moved: _render_inspection is now lines 116-158 and _render_event starts at line 161. Current HEAD 74848355 adds _terminal_safe at lines 92-107 and applies it to counters, finding metadata, evidence paths/symbols, commands, details, commits, and other event-derived rendered values. ESC, BEL, CR, LF, TAB, DEL, and C1 controls are escaped, preventing injected terminal sequences and forged output lines. Dedicated adversarial tests exist at tests/test_cli.py:144 and :181. Both targeted unittest and pytest validation passed. The linked attempt's earlier failures are stale validation evidence: ruff was unavailable and pytest failed then, while current targeted pytest passes with capture/cache disabled. The full suite could not execute meaningfully in this read-only environment because no writable temporary directory was available; its errors were environmental rather than failures of the targeted repair.",
+      "commands": [
+        "git status --short --branch && git rev-parse HEAD && git log -8 --oneline --decorate -- src/clawpatch_supervise/clawpatch_external.py tests/test_cli.py && git diff -- src/clawpatch_supervise/clawpatch_external.py tests/test_cli.py",
+        "rg -n \"def _terminal_safe|def _render_inspection|def _render_event|test_finding_rendering_escapes_terminal_controls|test_general_event_rendering_escapes_controls\" src/clawpatch_supervise/clawpatch_external.py tests/test_cli.py",
+        "git show --format=fuller --no-ext-diff -- src/clawpatch_supervise/clawpatch_external.py tests/test_cli.py",
+        "PYTHONPATH=src python3 -m unittest tests.test_cli.ExternalClawpatchSupervisorTests.test_finding_rendering_escapes_terminal_controls tests.test_cli.ExternalClawpatchSupervisorTests.test_general_event_rendering_escapes_controls_in_all_field_shapes -v",
+        "PYTHONPATH=src pytest -s -p no:cacheprovider -q tests/test_cli.py -k 'terminal_controls or escapes_controls'",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-07T19:01:05.436Z"
+    }
+  ],
+  "signature": "sig_feat-cli-command-5181306ec0_50ddc3d06c",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-cli-command-5181306_a35bdc52f4"
+  ],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:43:41.083Z",
+  "updatedAt": "2026-08-07T19:01:05.436Z"
+}

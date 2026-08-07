@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-cli-command-5181306ec0-_5ff7b40b3c",
+  "featureId": "feat_cli-command_5181306ec0",
+  "title": "Repository path can be retargeted after display or preflight, causing changes in a different repository",
+  "category": "concurrency",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 415,
+      "endLine": 423,
+      "symbol": "main",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 434,
+      "endLine": 460,
+      "symbol": "main",
+      "quote": null
+    }
+  ],
+  "reasoning": "The path is resolved only while constructing the banner, then recreated as an unresolved Path and passed separately through preflight, environment provisioning, and an apply-enabled sweep. If --repo is a symlink that is retargeted after the banner or preflight, the command can inspect one repository and subsequently modify, commit, or push another. This is a filesystem TOCTOU issue with potentially destructive consequences.",
+  "reproduction": "Point --repo at a symlink to repository A. After ensure_repository_idle returns, retarget the symlink to repository B. The banner names A, while run_sweep receives the unresolved symlink and can operate on B with apply=True.",
+  "recommendation": "Resolve and validate the repository path exactly once, before starting work, and pass that canonical Path to every preflight, state, cleanup, validation, and sweep operation. Convert resolution failures into a controlled CLI error.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are linked for this feature, and the supplied files contain no test proving path identity remains stable across preflight and execution.",
+  "suggestedRegressionTest": "Create repositories A and B plus a symlink initially targeting A. Use the injected preflight callback to retarget it to B, then assert the sweep still receives the canonical path for A.",
+  "minimumFixScope": "Update main to establish one canonical repo Path and consistently use it throughout the command.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260807T184723-1135f9",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence locations still exist but no longer contain the vulnerable path construction. Current main resolves --repo once at lines 361-365, returns a controlled exit 2 on resolution failure, and passes that same canonical Path to state lookup, preflight, fresh-mode resolution, owned-run setup, validation provisioning, and run_sweep at lines 366-464. The linked pytest failure used an unqualified src-layout test command and observed the old unresolved-path behavior; ruff was unavailable. Fresh validation against the current source passed: the symlink-retargeting regression passed, and the required full suite passed all 187 tests with 9 platform-specific skips.",
+      "commands": [
+        "git show --format=fuller --stat HEAD",
+        "git diff HEAD^ -- README.md src/clawpatch_supervise/clawpatch_external.py tests/test_cli.py",
+        "nl -ba src/clawpatch_supervise/clawpatch_external.py | sed -n '340,470p'",
+        "sed -n '1,260p' .clawpatch/patches/pat_fnd-sig-feat-cli-command-5181306_7cb486e130.json",
+        "TMPDIR=/dev/shm PYTHONPATH=src python3 -m unittest tests.test_cli.ExternalClawpatchSupervisorTests.test_repository_path_stays_canonical_after_preflight_retargets_symlink -v",
+        "TMPDIR=/dev/shm PYTHONPATH=src python3 -m unittest discover -s tests -v",
+        "git diff --check HEAD^ HEAD"
+      ],
+      "createdAt": "2026-08-07T18:49:28.565Z"
+    }
+  ],
+  "signature": "sig_feat-cli-command-5181306ec0_c2636ae21f",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-cli-command-5181306_7cb486e130"
+  ],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:43:41.083Z",
+  "updatedAt": "2026-08-07T18:49:28.565Z"
+}

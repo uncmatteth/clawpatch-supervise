@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "projectId": "prj_https-github-com-uncmatteth-claw_efac6f8a69",
+  "name": "clawpatch-supervise",
+  "rootPath": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+  "git": {
+    "remoteUrl": "https://github.com/uncmatteth/clawpatch-supervise.git",
+    "defaultBranch": null,
+    "currentBranch": "main",
+    "headSha": "9d3c13a216450f846481f69dfcc69ee531b88b78"
+  },
+  "detected": {
+    "languages": [
+      "python"
+    ],
+    "frameworks": [],
+    "packageManagers": [
+      "python"
+    ],
+    "commands": {
+      "typecheck": "ruff check .",
+      "lint": "ruff check .",
+      "format": "ruff format --check .",
+      "test": "pytest"
+    }
+  },
+  "createdAt": "2026-08-07T18:40:34.720Z",
+  "updatedAt": "2026-08-07T18:40:34.720Z"
+}

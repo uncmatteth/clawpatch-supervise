@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-cf96aef71d-6e5c4_e059abb82c",
+  "featureId": "feat_config_cf96aef71d",
+  "title": "Updating the live virtual environment can break a previously working installation",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "scripts/install.sh",
+      "startLine": 71,
+      "endLine": 72,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "scripts/install.sh",
+      "startLine": 87,
+      "endLine": 92,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The installer creates or updates the fixed `install_root/venv` in place before validating the newly installed executable. On upgrades, the existing public symlink already points into that environment. If pip succeeds but the new command fails its version check, or the process is interrupted while files are being replaced, the installer exits while leaving the formerly working command altered or unusable.",
+  "reproduction": "Install once, keep the public symlink, then rerun using a wheel whose installation succeeds but whose `clawpatch-supervise --version` exits nonzero. The installer aborts after replacing the package in the live environment, and the old linked command is no longer available.",
+  "recommendation": "Build and verify a staging virtual environment outside the live path, then atomically switch the public symlink or versioned installation pointer only after every validation passes. Preserve the previous environment for rollback until the switch succeeds.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked installer tests exercise failed upgrades or interruption while an existing installation is active.",
+  "suggestedRegressionTest": "Install a known-good fixture, attempt an upgrade using a fixture whose version command fails, and assert that the original linked command still executes and reports its original version.",
+  "minimumFixScope": "Stage the virtual environment at a unique sibling path, validate it there, and defer replacement of the active target until validation succeeds.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260807T191523-236140",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original path still exists, but lines 71-72 and 87-92 no longer contain the vulnerable live-venv update. Current lines 127-161 create a unique staging environment, validate its executable, and atomically replace the public symlink while retaining the previous environment; the regression test at tests/test_installers.py:458-491 asserts that a failed candidate leaves the old command working. However, the linked patch attempt is recorded as failed because its overall pytest run failed, the ClawPatch revalidation receipt remains stale at status running with no completed result, and fresh targeted validation errored because this read-only session had no writable temporary directory. The current code supports the repair, but completed targeted validation is unavailable, so fixed cannot be confirmed.",
+      "commands": [
+        "git status --short --branch",
+        "git show --format=fuller --find-renames -- scripts/install.sh tests/test_installers.py README.md",
+        "nl -ba scripts/install.sh | sed -n '60,170p'",
+        "bash -n scripts/install.sh",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -k preserves_working_command_when_upgrade_validation_fails -v",
+        "jq '{runId,command,status,headSha,startedAt,finishedAt,errors}' .clawpatch/runs/20260807T191523-236140.json"
+      ],
+      "createdAt": "2026-08-07T19:17:20.062Z"
+    },
+    {
+      "runId": "20260807T191720-13978a",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original paths still exist, but the cited lines no longer contain the vulnerable live-environment update. The pre-fix parent modified install_root/venv in place at lines 118-139. Current scripts/install.sh:127-161 instead creates a unique staging environment, installs and validates the candidate there, then atomically replaces the public symlink; cleanup removes a failed candidate while retaining the prior environment. The regression at tests/test_installers.py:458-491 recreates a failing candidate version check and proves the old linked command still runs as version 0.1.20 with no failed candidate left behind. Fresh bash syntax validation, the targeted regression, all 20 installer tests, and the required full 193-test suite passed. The linked patch attempt's earlier failure is superseded by this current-tree validation; its bare pytest command did not use the repository's required PYTHONPATH=src invocation.",
+      "commands": [
+        "git status --short --branch",
+        "nl -ba scripts/install.sh | sed -n '60,175p'",
+        "nl -ba tests/test_installers.py | sed -n '430,515p'",
+        "git show --format=fuller --no-ext-diff HEAD -- scripts/install.sh tests/test_installers.py README.md",
+        "git show HEAD^:scripts/install.sh | nl -ba | sed -n '60,155p'",
+        "jq '.' .clawpatch/patches/pat_fnd-sig-feat-config-cf96aef71d-6_955e29b721.json",
+        "bash -n scripts/install.sh",
+        "PYTHONPATH=src python3 -m unittest tests.test_installers.InstallerContractTests.test_linux_installer_preserves_working_command_when_upgrade_validation_fails -v",
+        "PYTHONPATH=src python3 -m unittest tests.test_installers -v",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-07T19:18:46.656Z"
+    }
+  ],
+  "signature": "sig_feat-config-cf96aef71d_6e5c432998",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-config-cf96aef71d-6_955e29b721"
+  ],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:42:33.225Z",
+  "updatedAt": "2026-08-07T19:18:46.656Z"
+}

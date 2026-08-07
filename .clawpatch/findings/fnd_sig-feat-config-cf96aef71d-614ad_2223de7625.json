@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-cf96aef71d-614ad_2223de7625",
+  "featureId": "feat_config_cf96aef71d",
+  "title": "Downloaded release wheel is executed without artifact-integrity verification",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "scripts/install.sh",
+      "startLine": 4,
+      "endLine": 5,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "scripts/install.sh",
+      "startLine": 71,
+      "endLine": 72,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "scripts/install.sh",
+      "startLine": 87,
+      "endLine": 87,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The version constrains the artifact name but does not authenticate its contents. The installer downloads the wheel from the network, installs it, and executes its entry point without checking a pinned digest or signature. A replaced release asset or compromised delivery path therefore becomes code execution as the installer user.",
+  "reproduction": "Serve a modified wheel at an overridden source URL or replace the bytes returned for the expected asset; the script accepts and executes it without detecting that its contents differ from the intended release.",
+  "recommendation": "Publish a SHA-256 digest for each supported wheel and verify the downloaded artifact before installation, or use pip hash-checking mode with a pinned artifact hash. Reject custom sources unless they have an explicitly supplied digest.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are linked to the installer, and the current flow has no expected digest against which a tampered artifact could be tested.",
+  "suggestedRegressionTest": "Provide a wheel whose bytes do not match the configured digest and assert that installation stops before pip installation or entry-point execution.",
+  "minimumFixScope": "Add a release-specific digest, download the wheel to a temporary file, verify its SHA-256 value, and install only the verified file.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260807T190557-7f2e72",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original source/version lines 4-5 remain, but the vulnerable install flow changed. Current lines 72-115 download/copy non-directory artifacts to a temporary wheel and verify a required SHA-256 before current lines 118-119 create the venv and invoke pip; custom sources without a digest and unpinned versions fail closed. The former entry-point execution at line 87 moved to line 134 and occurs after verification. The repair commit adds matching-, mismatched-, and missing-digest regression tests, and a live custom-source check exited 2 before installation. However, the linked patch remains status=failed, the finding remains open, and fresh targeted unit validation could not run because the restricted environment had no writable temporary directory. Therefore fixed cannot be confirmed until those tests pass in a writable environment; the pinned release digest also was not independently compared with the published wheel during this run.",
+      "commands": [
+        "git status --short --branch && git log --oneline --decorate -12",
+        "nl -ba scripts/install.sh | sed -n '1,145p'",
+        "git show HEAD -- scripts/install.sh tests/test_installers.py README.md && git show HEAD^:scripts/install.sh",
+        "bash -n scripts/install.sh && PYTHONPATH=src python3 -m unittest tests.test_installers.InstallerContractTests.test_linux_installer_accepts_wheel_with_matching_digest tests.test_installers.InstallerContractTests.test_linux_installer_rejects_wheel_with_mismatched_digest_before_installation tests.test_installers.InstallerContractTests.test_linux_installer_requires_digest_for_custom_remote_source -v",
+        "env -u CLAWPATCH_SUPERVISE_SHA256 CLAWPATCH_SUPERVISE_SOURCE=https://example.invalid/tampered.whl ./scripts/install.sh"
+      ],
+      "createdAt": "2026-08-07T19:07:33.474Z"
+    },
+    {
+      "runId": "20260807T190733-db5055",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original path still exists, but the vulnerable lines moved and changed. scripts/install.sh:72-115 now requires a pinned or explicitly supplied SHA-256, downloads/copies the wheel into a temporary file, validates the digest, and exits 2 on mismatch. Virtual-environment creation and pip installation occur only afterward at lines 118-119, and entry-point execution occurs at line 134. Custom wheel sources without a digest and unsupported unpinned versions fail closed. The historical patch attempt failed validation, but fresh validation succeeded: shell syntax passed, all three integrity regression tests passed, and the full suite passed 192 tests with 9 platform skips. The worktree retained only the pre-existing untracked .clawpatch state.",
+      "commands": [
+        "git status --short --branch && git log --oneline --decorate -12",
+        "nl -ba scripts/install.sh | sed -n '1,150p'",
+        "rg -n \"7444e56bb1987f694f58c8df4146cfabaa2646b440fad3f32e1971781a7c5f42|test_linux_installer_(accepts_wheel_with_matching_digest|rejects_wheel_with_mismatched_digest_before_installation|requires_digest_for_custom_remote_source)|CLAWPATCH_SUPERVISE_SHA256\" scripts tests README.md pyproject.toml",
+        "bash -n scripts/install.sh",
+        "TMPDIR=/tmp PYTHONPATH=src python3 -m unittest tests.test_installers.InstallerContractTests.test_linux_installer_accepts_wheel_with_matching_digest tests.test_installers.InstallerContractTests.test_linux_installer_rejects_wheel_with_mismatched_digest_before_installation tests.test_installers.InstallerContractTests.test_linux_installer_requires_digest_for_custom_remote_source -v",
+        "git show --stat --oneline HEAD && git show --format=fuller --no-ext-diff -- scripts/install.sh tests/test_installers.py README.md",
+        "TMPDIR=/tmp PYTHONPATH=src python3 -m unittest discover -s tests -v",
+        "git status --short --branch && git diff --check HEAD^ HEAD -- scripts/install.sh tests/test_installers.py README.md"
+      ],
+      "createdAt": "2026-08-07T19:08:39.692Z"
+    }
+  ],
+  "signature": "sig_feat-config-cf96aef71d_614ad1199f",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-config-cf96aef71d-6_3a22f46b0a"
+  ],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:42:33.225Z",
+  "updatedAt": "2026-08-07T19:08:39.692Z"
+}

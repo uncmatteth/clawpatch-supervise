@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-cf96aef71d-27cac_fc893f49e9",
+  "featureId": "feat_config_cf96aef71d",
+  "title": "Fresh installs require a globally writable npm prefix",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "scripts/install.sh",
+      "startLine": 52,
+      "endLine": 66,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "When ClawPatch is absent, the installer uses `npm install --global`. On common system Node.js installations, the global prefix is owned by root, so an ordinary user cannot complete installation even though the script otherwise defaults to user-owned locations under `$HOME`. This also makes an installer run with elevated privileges modify system-wide state.",
+  "reproduction": "Run the installer as a non-root user with distro-provided npm, a root-owned global npm prefix, and no existing `clawpatch` command; npm exits with a permissions error.",
+  "recommendation": "Install the pinned ClawPatch package under `install_root`, as is already done for ClawHub, validate its local executable, and link it into `bin_dir`.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are linked to this feature, and this failure requires exercising the installer with a root-owned npm global prefix.",
+  "suggestedRegressionTest": "Run the installer with a fake npm whose global installation fails as unwritable but whose prefix-local installation succeeds, then assert that the resulting ClawPatch command is user-local and reports version 0.7.2.",
+  "minimumFixScope": "Change the ClawPatch installation branch in scripts/install.sh to use a prefix below install_root and update PATH or command resolution accordingly.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260807T194441-26fced",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original evidence moved from scripts/install.sh:52-66 to lines 63-77. Current HEAD 846c20d replaces `npm install --global` with a prefix-local install under `$install_root/clawpatch`, validates its executable, and links it into `$bin_dir`; no Linux global ClawPatch install remains. A matching regression test exists, and shell syntax plus diff checks pass. However, the linked patch attempt is marked failed: ruff was unavailable and its full pytest run failed. Fresh targeted and full unittest validation also exited 1 because this read-only session had no usable temporary directory, so the tests failed before exercising the repair. The current finding record remains open. The code supports the repair, but successful targeted validation is missing, so fixed cannot be returned.",
+      "commands": [
+        "git show 846c20d^:scripts/install.sh | nl -ba | sed -n '60,80p'",
+        "nl -ba scripts/install.sh | sed -n '63,80p;155,170p'",
+        "rg -n 'npm install --global|npm install -g|clawpatch_root|global-unwritable|uses_user_local_clawpatch' scripts README.md tests",
+        "bash -n scripts/install.sh",
+        "git diff --check 846c20d^ 846c20d -- README.md scripts/install.sh tests/test_installers.py",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -k user_local_clawpatch -v",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-07T19:46:43.411Z"
+    },
+    {
+      "runId": "20260807T194643-b24855",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence at scripts/install.sh:52-66 moved to lines 63-77. At current HEAD 846c20d, the missing-ClawPatch branch installs clawpatch@0.7.2 with a user-local prefix under $install_root/clawpatch, validates the local executable, and links it into $bin_dir; scripts/install.sh no longer uses npm's global prefix. The regression test specifically simulating an unwritable global prefix passed, all POSIX installer tests passed, shell syntax and diff checks passed, and the required full unittest suite passed with 199 tests and 9 platform skips when run serially with an isolated writable temporary directory. The linked attempt's earlier failures are superseded by this fresh targeted and full validation.",
+      "commands": [
+        "git rev-parse HEAD",
+        "git show 846c20d^:scripts/install.sh | nl -ba | sed -n '45,85p;140,175p'",
+        "nl -ba scripts/install.sh | sed -n '45,90p;145,180p'",
+        "rg -n \"npm install (--global|-g)|npm install --prefix|clawpatch_root|uses_user_local_clawpatch|global-unwritable\" scripts README.md tests pyproject.toml",
+        "bash -n scripts/install.sh",
+        "git diff --check 846c20d^ 846c20d -- README.md scripts/install.sh tests/test_installers.py",
+        "TMPDIR=/tmp PYTHONPATH=src python3 -m unittest tests.test_installers.InstallerContractTests.test_linux_installer_uses_user_local_clawpatch_when_global_prefix_is_unwritable -v",
+        "TMPDIR=/tmp PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -v",
+        "set -o pipefail; task_tmp=\"$(mktemp -d /tmp/clawpatch-revalidate.XXXXXX)\"; TMPDIR=\"$task_tmp\" PYTHONPATH=src python3 -m unittest discover -s tests -v 2>&1 | tail -n 40"
+      ],
+      "createdAt": "2026-08-07T19:48:31.622Z"
+    }
+  ],
+  "signature": "sig_feat-config-cf96aef71d_27cac48a01",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-config-cf96aef71d-2_8097059784"
+  ],
+  "createdByRunId": "20260807T184035-c7b1f2",
+  "createdAt": "2026-08-07T18:42:33.225Z",
+  "updatedAt": "2026-08-07T19:48:31.622Z"
+}
