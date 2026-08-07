@@ -16,7 +16,7 @@ It is a standalone Python package, a command-line program, and a public [ClawHub
 
 ## Quick start
 
-You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, the Linux/macOS installer installs the reviewed `clawpatch@0.7.2` release under its isolated install root, exposes it from the configured bin directory, and verifies the command. The Windows installer installs the same reviewed release with npm and verifies it. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 or newer is required.
+You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, the Linux/macOS installer installs the reviewed `clawpatch@0.7.2` release under its isolated install root, exposes it from the configured bin directory, and verifies the command. The Windows installer installs the same reviewed release with npm and verifies it. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 is required.
 
 ### Linux and macOS
 
@@ -43,7 +43,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 clawpatch-supervise --version
 ```
 
-The Windows installer creates an isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. If ClawHub is missing, it also installs the reviewed `clawhub@0.19.1` CLI into that isolated root and creates `clawhub.cmd`; an existing installation is preserved. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` paths immediately.
+The Windows installer verifies Python 3.11 or newer and rejects existing ClawPatch or ClawHub commands that do not report the required versions before creating its isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. If ClawHub is missing, it also installs the reviewed `clawhub@0.19.1` CLI into that isolated root and creates `clawhub.cmd`; an existing installation is preserved. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` paths immediately.
 
 Configured Windows `.cmd` and `.bat` validation gates are launched with exact `cmd.exe` quoting, including when the executable is installed under a path containing spaces. Gate arguments containing `cmd.exe` metacharacters remain rejected.
 The initial existing-queue inspection uses the same Windows shim resolution, so a PATH-installed `clawpatch.cmd` works before any repair begins.

@@ -22,17 +22,68 @@ function Find-PathApplication {
     }
     return $null
 }
+function Assert-CommandVersion {
+    param(
+        [string]$Name,
+        [string]$ExpectedVersion,
+        [string]$CommandPath,
+        [string[]]$Arguments
+    )
+    $versionOutput = & $CommandPath @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "The $Name command failed its version check."
+    }
+    $actualVersion = [string]($versionOutput | Select-Object -Last 1)
+    $actualVersion = $actualVersion.Trim()
+    if ([string]::IsNullOrWhiteSpace($actualVersion)) {
+        $actualVersion = "unknown"
+    }
+    if ($actualVersion -ne $ExpectedVersion) {
+        throw "$Name $ExpectedVersion is required; found $actualVersion."
+    }
+    return $actualVersion
+}
 if ([string]::IsNullOrWhiteSpace($Source)) {
     $Source = "https://github.com/uncmatteth/clawpatch-supervise/releases/download/v$Version/clawpatch_supervise-$Version-py3-none-any.whl"
 }
 
+$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+$python = Get-Command python -ErrorAction SilentlyContinue
+if ($null -ne $pyLauncher) {
+    & $pyLauncher.Source -3 -c "import sys; raise SystemExit(sys.version_info < (3, 11))"
+} elseif ($null -ne $python) {
+    & $python.Source -c "import sys; raise SystemExit(sys.version_info < (3, 11))"
+} else {
+    throw "Python 3.11 or newer is required."
+}
+if ($LASTEXITCODE -ne 0) {
+    throw "Python 3.11 or newer is required."
+}
+
 $clawpatch = Get-Command clawpatch -ErrorAction SilentlyContinue
-if ($null -eq $clawpatch) {
+$npmPath = $null
+if ($null -ne $clawpatch) {
+    $clawpatchInstalledVersion = Assert-CommandVersion "ClawPatch" $ClawPatchVersion $clawpatch.Source @("--version")
+} else {
     $npmPath = Find-PathApplication @("npm.cmd", "npm.exe")
     if ($null -eq $npmPath) {
         throw "npm is required to install ClawPatch."
     }
+}
 
+$clawHubPath = Find-PathApplication @("clawhub.cmd", "clawhub.exe")
+if ($null -ne $clawHubPath) {
+    $clawHubInstalledVersion = Assert-CommandVersion "ClawHub" $ClawHubVersion $clawHubPath @("--cli-version")
+} else {
+    if ($null -eq $npmPath) {
+        $npmPath = Find-PathApplication @("npm.cmd", "npm.exe")
+    }
+    if ($null -eq $npmPath) {
+        throw "ClawHub is missing and npm is unavailable. Install Node.js 22 or newer, then rerun this installer."
+    }
+}
+
+if ($null -eq $clawpatch) {
     & $npmPath install --global "clawpatch@$ClawPatchVersion"
     if ($LASTEXITCODE -ne 0) {
         throw "npm could not install ClawPatch."
@@ -51,16 +102,13 @@ if ($null -eq $clawpatch) {
     if ($null -eq $clawpatch) {
         throw "ClawPatch was installed but its command is not on PATH."
     }
+    $clawpatchInstalledVersion = Assert-CommandVersion "ClawPatch" $ClawPatchVersion $clawpatch.Source @("--version")
 }
 
-$pyLauncher = Get-Command py -ErrorAction SilentlyContinue
-$python = Get-Command python -ErrorAction SilentlyContinue
 if ($null -ne $pyLauncher) {
     & $pyLauncher.Source -3 -m venv (Join-Path $InstallRoot "venv")
-} elseif ($null -ne $python) {
-    & $python.Source -m venv (Join-Path $InstallRoot "venv")
 } else {
-    throw "Python 3.11 or newer is required."
+    & $python.Source -m venv (Join-Path $InstallRoot "venv")
 }
 
 $venvPython = Join-Path $InstallRoot "venv\Scripts\python.exe"
@@ -73,12 +121,7 @@ $wrapperText = "@echo off`r`n`"$supervisor`" %*`r`n"
 Set-Content -Path $wrapper -Value $wrapperText -Encoding Ascii -NoNewline
 $env:Path = "$BinDir;$env:Path"
 
-$clawHubPath = Find-PathApplication @("clawhub.cmd", "clawhub.exe")
 if ($null -eq $clawHubPath) {
-    $npmPath = Find-PathApplication @("npm.cmd", "npm.exe")
-    if ($null -eq $npmPath) {
-        throw "ClawHub is missing and npm is unavailable. Install Node.js 22 or newer, then rerun this installer."
-    }
     $clawHubRoot = Join-Path $InstallRoot "clawhub"
     Write-Host "ClawHub is missing; installing clawhub@$ClawHubVersion into $clawHubRoot"
     & $npmPath install --prefix $clawHubRoot --no-fund --no-audit "clawhub@$ClawHubVersion"
@@ -93,6 +136,7 @@ if ($null -eq $clawHubPath) {
     $clawHubWrapperText = "@echo off`r`ncall `"$installedClawHub`" %*`r`nexit /b %ERRORLEVEL%`r`n"
     Set-Content -Path $clawHubWrapper -Value $clawHubWrapperText -Encoding Ascii -NoNewline
     $clawHubPath = $clawHubWrapper
+    $clawHubInstalledVersion = Assert-CommandVersion "ClawHub" $ClawHubVersion $clawHubPath @("--cli-version")
 }
 
 if ($AddToPath) {
@@ -105,9 +149,7 @@ if ($AddToPath) {
 }
 
 & $supervisor --version
-& $clawHubPath --cli-version
-if ($LASTEXITCODE -ne 0) { throw "The ClawHub command failed its startup check." }
-& $clawpatch.Source --version
-if ($LASTEXITCODE -ne 0) { throw "The ClawPatch command failed its startup check." }
+Write-Output $clawHubInstalledVersion
+Write-Output $clawpatchInstalledVersion
 Write-Host "Installed command: $wrapper"
 Write-Host "ClawHub command: $clawHubPath"
