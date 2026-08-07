@@ -26,6 +26,7 @@ from clawpatch_supervise.clawpatch_release import (
     _fix_command,
     _is_clawpatch_argv,
     _load_release_progress,
+    _map_repository,
     _migrate_legacy_external_progress,
     _MissingFinding,
     _must_clawpatch,
@@ -710,6 +711,43 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
         self.assertEqual(payload["features"], 35)
         self.assertEqual(payload["next"], "clawpatch review --limit 3")
+
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_zero_feature_heuristic_map_escalates_to_clawpatch_agent_mapper(self, json_clawpatch):
+        progress_events = []
+        json_clawpatch.side_effect = [
+            {
+                "features": 0,
+                "new": 0,
+                "changed": 0,
+                "stale": 0,
+                "source": "heuristic",
+                "usedAgent": False,
+                "reason": "heuristic mapper selected",
+            },
+            {
+                "features": 7,
+                "new": 7,
+                "changed": 0,
+                "stale": 0,
+                "source": "agent",
+                "usedAgent": True,
+                "reason": "heuristic mapper produced no features",
+            },
+        ]
+
+        mapped = _map_repository(Path("/repo"), env={}, progress=progress_events.append)
+
+        self.assertEqual(mapped["features"], 7)
+        self.assertEqual(
+            [call.args[1] for call in json_clawpatch.call_args_list],
+            [
+                ["clawpatch", "map", "--json"],
+                ["clawpatch", "map", "--source", "agent", "--json"],
+            ],
+        )
+        self.assertEqual(json_clawpatch.call_args_list[1].kwargs["phase"], "map-agent")
+        self.assertEqual(progress_events, [])
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")

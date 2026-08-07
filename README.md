@@ -117,6 +117,7 @@ COMPLETE only at zero remaining work
 The supervisor provides:
 
 - complete map/review waves with a decreasing-pending proof;
+- automatic ClawPatch agent mapping when the heuristic mapper reports zero features, so unsupported languages such as Solidity are not falsely declared empty;
 - one-current-finding `next → show → fix → revalidate` ordering;
 - exact-path temporary commits for genuine partial progress;
 - same-finding continuation only when ClawPatch produced a new source tree;
@@ -155,6 +156,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and inherited database credentials and reset guards are removed from ClawPatch child processes.
 - **New evidence gets another chance.** An open revalidation can inform up to two additional attempts on the same finding without skipping ahead.
 - **Existing queues do not get erased.** The default command resumes the current `.clawpatch` queue. A reset is offered only for a proven-clean queue with clean project source, and dirty source blocks reset.
+- **Zero heuristic features are not completion.** The supervisor asks ClawPatch's own agent mapper to inspect the repository before accepting an empty map, which keeps Solidity and other unsupported heuristic languages in the real review flow.
 - **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary.
 - **False positives clean themselves up.** Only the exact supervisor-owned repair paths are restored; unrelated work is left alone.
 - **Completion stays inspectable.** The command exits successfully only after the queue is empty and a fresh review generation finds nothing else to repair, and it keeps `.clawpatch` so the result can still be checked with `clawpatch status --json`.
@@ -324,7 +326,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.9 alpha**.
+Current release: **0.1.10 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

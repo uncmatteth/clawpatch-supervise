@@ -13,6 +13,7 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 
 - ClawPatch owns review, finding selection, repair, revalidation, and finding status.
 - The supervisor owns ordering, watchdogs, exact checkpoints, commits, optional pushes, and completion proof.
+- A zero-feature heuristic map is not completion; the supervisor must run ClawPatch's agent mapper before accepting an empty repository.
 - Run the supervisor outside the target repository's implementation environment, even when the target is Manageroo itself.
 - Never skip, triage, hide, or manually repair an unresolved ClawPatch finding.
 - Never discard dirty source unless an exact supervisor checkpoint proves ownership.

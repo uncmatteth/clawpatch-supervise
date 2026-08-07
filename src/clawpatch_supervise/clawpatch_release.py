@@ -3387,6 +3387,31 @@ def _required_int(payload: dict[str, Any], field: str) -> int:
     return value
 
 
+def _map_repository(
+    repo: Path,
+    *,
+    env: dict[str, str],
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any]:
+    mapped = _json_clawpatch(
+        repo,
+        ["clawpatch", "map", "--json"],
+        env=env,
+        progress=progress,
+    )
+    mapped_features = _required_int(mapped, "features")
+    if mapped_features == 0 and mapped.get("source") == "heuristic":
+        mapped = _json_clawpatch(
+            repo,
+            ["clawpatch", "map", "--source", "agent", "--json"],
+            env=env,
+            progress=progress,
+            phase="map-agent",
+        )
+        _required_int(mapped, "features")
+    return mapped
+
+
 def _review_probe(
     repo: Path,
     *,
@@ -4579,12 +4604,7 @@ def _release_sweep_locked(
             "completion": {"skipped": f"resumed {resumed_checkpoint_kind}"},
         }
     else:
-        mapped = _json_clawpatch(
-            root,
-            ["clawpatch", "map", "--json"],
-            env=env,
-            progress=progress,
-        )
+        mapped = _map_repository(root, env=env, progress=progress)
         mapped_features = _required_int(mapped, "features")
         review = _review_all_features(
             root,
