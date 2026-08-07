@@ -16,7 +16,7 @@ It is a standalone Python package, a command-line program, and a public [ClawHub
 
 ## Quick start
 
-You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, either installer below installs the reviewed `clawpatch@0.7.2` release globally with npm and verifies the command. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 or newer is required.
+You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, the Linux/macOS installer installs the reviewed `clawpatch@0.7.2` release under its isolated install root, exposes it from the configured bin directory, and verifies the command. The Windows installer installs the same reviewed release with npm and verifies it. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 or newer is required.
 
 ### Linux and macOS
 

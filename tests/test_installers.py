@@ -81,7 +81,7 @@ class InstallerContractTests(unittest.TestCase):
                 "#!/bin/sh\n"
                 'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
                 'if [ "$1" = "install" ] && [ "$2" = "--global" ]; then\n'
-                '  [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawpatch" ] || exit 23\n'
+                '  [ "$CLAWPATCH_TEST_NPM_MODE" != "global-unwritable" ] || exit 23\n'
                 '  mkdir -p "$CLAWPATCH_TEST_NPM_PREFIX/bin"\n'
                 '  cp "$CLAWPATCH_TEST_COMMAND_STUB" '
                 '"$CLAWPATCH_TEST_NPM_PREFIX/bin/clawpatch"\n'
@@ -92,6 +92,12 @@ class InstallerContractTests(unittest.TestCase):
                 "  exit 0\n"
                 "fi\n"
                 'if [ "$1" = "install" ] && [ "$2" = "--prefix" ]; then\n'
+                '  if [ "${6%%@*}" = "clawpatch" ]; then\n'
+                '    [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawpatch" ] || exit 23\n'
+                '    mkdir -p "$3/node_modules/.bin"\n'
+                '    cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/node_modules/.bin/clawpatch"\n'
+                "    exit 0\n"
+                "  fi\n"
                 '  [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawhub" ] || exit 24\n'
                 '  mkdir -p "$3/node_modules/.bin"\n'
                 '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/node_modules/.bin/clawhub"\n'
@@ -320,14 +326,44 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(
             invocations,
             [
-                f"install --global clawpatch@{CLAWPATCH_VERSION}",
-                "prefix --global",
+                (
+                    f"install --prefix {install_root}/clawpatch --no-fund "
+                    f"--no-audit clawpatch@{CLAWPATCH_VERSION}"
+                ),
                 (
                     f"install --prefix {install_root}/clawhub --no-fund "
                     f"--no-audit clawhub@{CLAWHUB_VERSION}"
                 ),
             ],
         )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_uses_user_local_clawpatch_when_global_prefix_is_unwritable(
+        self,
+    ) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=True,
+            npm_mode="global-unwritable",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(
+            invocations,
+            [
+                (
+                    f"install --prefix {install_root}/clawpatch --no-fund "
+                    f"--no-audit clawpatch@{CLAWPATCH_VERSION}"
+                )
+            ],
+        )
+        installed_command = install_root.parent / "installed-bin" / "clawpatch"
+        self.assertTrue(installed_command.is_symlink())
+        self.assertEqual(
+            installed_command.resolve(),
+            (install_root / "clawpatch/node_modules/.bin/clawpatch").resolve(),
+        )
+        self.assertIn(CLAWPATCH_VERSION, result.stdout.splitlines())
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_requires_npm_when_clawpatch_is_missing(self) -> None:
@@ -357,14 +393,22 @@ class InstallerContractTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_propagates_clawpatch_install_failure(self) -> None:
-        result, invocations, _install_root = self._run_linux_installer(
+        result, invocations, install_root = self._run_linux_installer(
             clawpatch_present=False,
             clawhub_present=True,
             npm_mode="fail-clawpatch",
         )
 
         self.assertEqual(result.returncode, 23)
-        self.assertEqual(invocations, [f"install --global clawpatch@{CLAWPATCH_VERSION}"])
+        self.assertEqual(
+            invocations,
+            [
+                (
+                    f"install --prefix {install_root}/clawpatch --no-fund "
+                    f"--no-audit clawpatch@{CLAWPATCH_VERSION}"
+                )
+            ],
+        )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_propagates_clawhub_install_failure(self) -> None:

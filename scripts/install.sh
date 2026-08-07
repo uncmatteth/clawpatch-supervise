@@ -67,14 +67,13 @@ else
     echo "npm is required to install ClawPatch." >&2
     exit 2
   }
-  npm install --global "clawpatch@${clawpatch_version}"
-  npm_global_prefix="$(npm prefix --global)"
-  export PATH="$npm_global_prefix/bin:$PATH"
-  command -v clawpatch >/dev/null 2>&1 || {
-    echo "ClawPatch was installed but its command is not on PATH." >&2
+  clawpatch_root="$install_root/clawpatch"
+  npm install --prefix "$clawpatch_root" --no-fund --no-audit "clawpatch@${clawpatch_version}"
+  clawpatch_command="$clawpatch_root/node_modules/.bin/clawpatch"
+  test -x "$clawpatch_command" || {
+    echo "ClawPatch installation did not create its command." >&2
     exit 2
   }
-  clawpatch_command="$(command -v clawpatch)"
 fi
 check_command_version "ClawPatch" "$clawpatch_version" "$clawpatch_command" --version
 clawpatch_installed_version="$checked_version"
@@ -159,6 +158,10 @@ mv -f "$pending_supervisor_link" "$bin_dir/clawpatch-supervise" || {
   exit "$move_status"
 }
 pending_supervisor_link=""
+if [[ "$clawpatch_command" == "$install_root/clawpatch/"* ]]; then
+  ln -sfn "$clawpatch_command" "$bin_dir/clawpatch"
+  clawpatch_command="$bin_dir/clawpatch"
+fi
 if [[ "$clawhub_command" == "$install_root/clawhub/"* ]]; then
   ln -sfn "$clawhub_command" "$bin_dir/clawhub"
   clawhub_command="$bin_dir/clawhub"
