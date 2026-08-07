@@ -52,7 +52,7 @@ from clawpatch_supervise.clawpatch_release import (
     _write_release_progress,
     release_sweep,
 )
-from clawpatch_supervise.errors import SafetyError
+from clawpatch_supervise.errors import GateFailure, SafetyError
 
 
 def _hold_clawpatch_release_lock(repo: str, acquired, release) -> None:
@@ -1907,6 +1907,140 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertFalse(pushed)
         revalidate.assert_called_once()
         push_and_verify.assert_not_called()
+
+    @patch("clawpatch_supervise.clawpatch_release._revalidate")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    def test_stopped_open_gate_failure_reenters_same_finding_with_exact_evidence(
+        self,
+        show_finding,
+        run_project_gates,
+        revalidate,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("checkpointed repair\n", encoding="utf-8")
+            checkpoint = {
+                "finding_id": "fnd_one",
+                "branch": branch,
+                "head_before": head,
+                "phase": "stopped",
+                "owned_paths": ["app.py"],
+            }
+            show_finding.return_value = {
+                "finding": {"id": "fnd_one", "status": "open"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_one",
+                        "status": "applied",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": head},
+                    }
+                ],
+            }
+            run_project_gates.side_effect = GateFailure(
+                "gate: manageroo-release\n"
+                "failed requirement: complete repository validation must pass\n"
+                "github-actions-workflows-are-bounded: false"
+            )
+
+            record, pushed = _resume_stopped_attempt(
+                repo,
+                checkpoint,
+                env={},
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+            )
+
+            status = subprocess.check_output(
+                ["git", "status", "--porcelain"], cwd=repo, text=True
+            )
+
+        self.assertFalse(pushed)
+        self.assertEqual(record["revalidation"]["outcome"], "open")
+        self.assertTrue(
+            record["revalidation"]["managerooProjectGateFailureContinuation"]
+        )
+        self.assertIn(
+            "github-actions-workflows-are-bounded: false",
+            record["revalidation"]["managerooProjectGateFailure"],
+        )
+        self.assertEqual(record["gate_runs"], [])
+        self.assertIn("app.py", status)
+        revalidate.assert_not_called()
+
+    @patch("clawpatch_supervise.clawpatch_release._revalidate")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    def test_stopped_open_invalid_gate_configuration_stays_stopped(
+        self,
+        show_finding,
+        run_project_gates,
+        revalidate,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("checkpointed repair\n", encoding="utf-8")
+            checkpoint = {
+                "finding_id": "fnd_one",
+                "branch": branch,
+                "head_before": head,
+                "phase": "stopped",
+                "owned_paths": ["app.py"],
+            }
+            show_finding.return_value = {
+                "finding": {"id": "fnd_one", "status": "open"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_one",
+                        "status": "applied",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": head},
+                    }
+                ],
+            }
+            run_project_gates.side_effect = SafetyError(
+                "Validation gate manageroo-release uses unapproved executable 'python3'."
+            )
+
+            with self.assertRaisesRegex(SafetyError, "unapproved executable"):
+                _resume_stopped_attempt(
+                    repo,
+                    checkpoint,
+                    env={},
+                    push_mode="none",
+                    branch=branch,
+                    pushed=False,
+                )
+
+        revalidate.assert_not_called()
 
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._revalidate")

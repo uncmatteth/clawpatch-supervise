@@ -24,7 +24,7 @@ from .clawpatch_protocol import (
     decide_repair_transition,
     failure_from_legacy_outcome,
 )
-from .errors import SafetyError
+from .errors import GateFailure, SafetyError
 from .runner import CommandRunner
 from .util import atomic_write_json, utc_now
 
@@ -40,7 +40,8 @@ LIFECYCLE = (
     "pending feature in bounded ClawPatch worker waves with an exact decreasing-pending proof -> "
     "clawpatch next/show -> same-finding fix iterations while each produces a new "
     "source tree -> local-only exact-path temporary commit for partial progress -> configured project "
-    "gates when present -> exact fixed revalidation "
+    "gates when present; a red gate on a provenance-verified stopped open or uncertain repair "
+    "reenters only that finding with the exact gate evidence -> exact fixed revalidation "
     "(with bounded read-only, workspace-write, and external trusted-host validation transitions) -> "
     "one combined exact-path final commit/push when authorized -> an open revalidation with source "
     "progress amends the local iteration and reenters the same finding without a cap; an open "
@@ -1006,7 +1007,7 @@ def _run_project_gates(
                 f"gate: {gate['id']}\ncommand: {shlex.join(gate['argv'])}\n"
                 f"exit code: {result.get('exit_code')}\noutput:\n{output[-6000:]}"
             )
-        raise SafetyError(
+        raise GateFailure(
             f"phase: project validation\ncommand: configured gates\nfinding ID: {finding_id}\n"
             "exit code: nonzero\nfailed requirement: complete repository validation must pass\n"
             f"changed source paths: {_source_paths(repo)}\noutput:\n" + "\n\n".join(details)
@@ -3381,12 +3382,25 @@ def _resume_stopped_attempt(
             )
         patch = candidates[0]
     _validate_attempt_paths(repo, owned_paths)
-    gate_runs = _run_project_gates(
-        repo,
-        finding_id=finding_id,
-        required=require_project_gates,
-    )
-    if finding_status == "uncertain":
+    project_gate_failure = ""
+    try:
+        gate_runs = _run_project_gates(
+            repo,
+            finding_id=finding_id,
+            required=require_project_gates,
+        )
+    except GateFailure as exc:
+        gate_runs = []
+        project_gate_failure = str(exc)
+
+    if project_gate_failure:
+        validation = {
+            "finding": finding_id,
+            "outcome": finding_status,
+            "managerooProjectGateFailureContinuation": True,
+            "managerooProjectGateFailure": project_gate_failure,
+        }
+    elif finding_status == "uncertain":
         try:
             validation = _revalidate(
                 repo,

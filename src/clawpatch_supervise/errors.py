@@ -30,5 +30,5 @@ class BlockingDecisionError(ClawpatchSuperviseError):
     """A product decision must be made before implementation can proceed."""
 
 
-class GateFailure(ClawpatchSuperviseError):
+class GateFailure(SafetyError):
     """A deterministic verification gate failed."""

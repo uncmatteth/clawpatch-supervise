@@ -19,6 +19,7 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 - Never discard dirty source unless an exact supervisor checkpoint proves ownership.
 - Treat both open and uncertain sandbox-limited revalidation as candidates for the bounded workspace-write and authorized trusted-host retry ladder before another fix call.
 - Preserve every genuinely new exact repair tree and let the next same-finding fix use the validator's concrete evidence. When an open or uncertain revalidation adds evidence but no file edit on top of an already checkpointed repair, retry that same finding within the supervisor's two-attempt evidence budget without saving the identical tree or advancing the queue.
+- When configured project gates fail while resuming a provenance-verified stopped `open` or `uncertain` repair, preserve the exact checkpoint and re-enter only that finding with the gate failure as evidence. Keep fixed, false-positive, ownership-mismatched, and ambiguous states fail-closed.
 - Do not call an active queue complete. Require the final `COMPLETE` line and proof file.
 
 ## Workflow

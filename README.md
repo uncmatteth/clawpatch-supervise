@@ -139,6 +139,7 @@ The supervisor provides:
 | `open` or `uncertain` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
 | `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with new `open` or `uncertain` evidence. |
 | Other validation/provider failure after new source progress | Preserve the exact progress and continue the same finding. |
+| Configured project gate is red while resuming an exact stopped `open` or `uncertain` repair | Preserve the checkpoint and re-enter only that finding with the exact gate failure as repair evidence. |
 | `false-positive` | Restore only the exact supervisor-owned repair paths to the finding's starting tree, retire the checkpoint, continue. |
 | Open or uncertain revalidation with no new source changes, including after a checkpointed repair | Feed the new evidence into up to two more same-finding attempts; never advance the queue or try to save the identical tree again. |
 | Same finding still returns the same tree after bounded recovery | Preserve the checkpoint and stop without losing source. |
@@ -333,7 +334,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.14 alpha**.
+Current release: **0.1.15 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 
