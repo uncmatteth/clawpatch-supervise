@@ -2989,6 +2989,13 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 owned_paths=[],
                 source_states=[source_tree],
             )
+            (repo / "supervisor-upgrade.py").write_text("upgrade\n", encoding="utf-8")
+            subprocess.run(["git", "add", "supervisor-upgrade.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "supervisor upgrade"],
+                cwd=repo,
+                check=True,
+            )
             interrupted = {
                 "finding": {"id": "fnd_one", "status": "open"},
                 "validation": [],

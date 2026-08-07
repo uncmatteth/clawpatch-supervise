@@ -1766,13 +1766,22 @@ def _recover_interrupted_source_clean_fix(
     ):
         return None
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    checkpoint_head = str(progress_record["head_before"])
+    if checkpoint_head != current_head:
+        ancestry = _run(
+            ["git", "merge-base", "--is-ancestor", checkpoint_head, current_head],
+            cwd=repo,
+            timeout=60,
+        )
+        if ancestry.returncode != 0:
+            return None
+    checkpoint_tree = _git_text(repo, ["git", "rev-parse", f"{checkpoint_head}^{{tree}}"])
     current_tree = _git_text(repo, ["git", "rev-parse", "HEAD^{tree}"])
     source_states = progress_record.get("source_states")
     if (
-        progress_record.get("head_before") != current_head
-        or not isinstance(source_states, list)
+        not isinstance(source_states, list)
         or not source_states
-        or set(source_states) != {current_tree}
+        or set(source_states) != {checkpoint_tree}
     ):
         return None
     return _write_release_progress(
@@ -1782,7 +1791,7 @@ def _recover_interrupted_source_clean_fix(
         head_before=current_head,
         phase="stopped",
         owned_paths=[],
-        source_states=source_states,
+        source_states=[current_tree],
         last_action=RepairAction.STOP_TRANSIENT,
         state_root=state_root,
     )
@@ -4278,6 +4287,34 @@ def _release_sweep_locked(
                 "generation": "rebuilt",
             }
             durable_progress = None
+        if durable_progress is not None:
+            interrupted_phase = str(durable_progress["phase"])
+            recovered_progress = _recover_interrupted_source_clean_fix(
+                root,
+                durable_progress,
+                state_root=state_root,
+            )
+            if recovered_progress is not None:
+                durable_progress = recovered_progress
+                report["interrupted_phase_recovery"] = {
+                    "finding_id": str(durable_progress["finding_id"]),
+                    "prior_phase": interrupted_phase,
+                    "owned_paths": [],
+                }
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "resume",
+                            "current": 1,
+                            "total": "?",
+                            "finding_id": str(durable_progress["finding_id"]),
+                            "detail": (
+                                "interrupted source-clean fix had no repair content; "
+                                "resuming the same finding"
+                            ),
+                            "owned_paths": [],
+                        }
+                    )
         if durable_progress is not None and durable_progress["head_before"] != head_before:
             if _checkpoint_can_follow_supervisor_upgrade(root, durable_progress):
                 if preexisting_source and not _checkpoint_proves_exact_source(
@@ -4397,34 +4434,6 @@ def _release_sweep_locked(
         raise SafetyError(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."
         )
-    if durable_progress is not None:
-        interrupted_phase = str(durable_progress["phase"])
-        recovered_progress = _recover_interrupted_source_clean_fix(
-            root,
-            durable_progress,
-            state_root=state_root,
-        )
-        if recovered_progress is not None:
-            durable_progress = recovered_progress
-            report["interrupted_phase_recovery"] = {
-                "finding_id": str(durable_progress["finding_id"]),
-                "prior_phase": interrupted_phase,
-                "owned_paths": [],
-            }
-            if progress is not None:
-                progress(
-                    {
-                        "phase": "resume",
-                        "current": 1,
-                        "total": "?",
-                        "finding_id": str(durable_progress["finding_id"]),
-                        "detail": (
-                            "interrupted source-clean fix had no repair content; "
-                            "resuming the same finding"
-                        ),
-                        "owned_paths": [],
-                    }
-                )
     if push_mode != "none":
         _require_synchronized_remote_branch(root, current_branch)
     if durable_progress is not None:

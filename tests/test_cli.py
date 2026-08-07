@@ -92,7 +92,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.20")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.21")
 
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
