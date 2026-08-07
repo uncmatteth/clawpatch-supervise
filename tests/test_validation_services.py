@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import tempfile
 import unittest
@@ -37,10 +38,20 @@ class DisposablePostgresValidationTests(unittest.TestCase):
             reset_envs=("BTT_ALLOW_DATABASE_RESET",),
         )
         calls: list[list[str]] = []
+        env_files: list[Path] = []
 
         def run(argv: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
             calls.append(argv)
             if argv[:2] == ["docker", "run"]:
+                self.assertFalse(any("disposable-password" in argument for argument in argv))
+                env_file = Path(argv[argv.index("--env-file") + 1])
+                env_files.append(env_file)
+                if os.name != "nt":
+                    self.assertEqual(env_file.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(
+                    env_file.read_text(encoding="utf-8"),
+                    "POSTGRES_PASSWORD=disposable-password\n",
+                )
                 return subprocess.CompletedProcess(argv, 0, "a" * 64 + "\n", "")
             if argv[:2] == ["docker", "port"]:
                 return subprocess.CompletedProcess(argv, 0, "127.0.0.1:49152\n", "")
@@ -62,6 +73,8 @@ class DisposablePostgresValidationTests(unittest.TestCase):
 
         self.assertTrue(any(argv[:2] == ["docker", "run"] for argv in calls))
         self.assertTrue(any(argv[:3] == ["docker", "rm", "-f"] for argv in calls))
+        self.assertEqual(len(env_files), 1)
+        self.assertFalse(env_files[0].exists())
 
     @patch(
         "clawpatch_supervise.validation_services._verified_postgres_image",

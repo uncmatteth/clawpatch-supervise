@@ -519,45 +519,53 @@ def _provision_postgres_test_environment(
         )
     image = _verified_postgres_image(root, contract, run=run)
     password = password_factory()
-    if not password or "\x00" in password:
+    if not password or any(character in password for character in ("\x00", "\n", "\r")):
         raise SafetyError("Disposable PostgreSQL generated an invalid password.")
     repository_identity = _repository_identity(root)
     validation_run_identity = secrets.token_hex(16)
     container_name = (
         f"manageroo-validation-postgres-{repository_identity[:16]}-{validation_run_identity}"
     )
-    result = _checked(
-        run,
-        [
-            "docker",
-            "run",
-            "--detach",
-            "--rm",
-            "--name",
-            container_name,
-            "--label",
-            "manageroo.validation-service=postgresql",
-            "--label",
-            f"manageroo.repository={repository_identity}",
-            "--label",
-            f"manageroo.validation-run={validation_run_identity}",
-            "--mount",
-            "type=tmpfs,destination=/var/lib/postgresql/data",
-            "--publish",
-            "127.0.0.1::5432",
-            "--env",
-            "POSTGRES_DB=manageroo_test",
-            "--env",
-            "POSTGRES_USER=manageroo",
-            "--env",
-            f"POSTGRES_PASSWORD={password}",
-            "--pull=missing",
-            image,
-        ],
-        repo=root,
-        timeout=180,
-        action="startup",
-    )
+    with tempfile.TemporaryDirectory(prefix="manageroo-validation-postgres-") as temp:
+        env_file = Path(temp) / "postgres.env"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        descriptor = os.open(env_file, flags, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+            if os.name != "nt":
+                os.fchmod(handle.fileno(), 0o600)
+            handle.write(f"POSTGRES_PASSWORD={password}\n")
+        result = _checked(
+            run,
+            [
+                "docker",
+                "run",
+                "--detach",
+                "--rm",
+                "--name",
+                container_name,
+                "--label",
+                "manageroo.validation-service=postgresql",
+                "--label",
+                f"manageroo.repository={repository_identity}",
+                "--label",
+                f"manageroo.validation-run={validation_run_identity}",
+                "--mount",
+                "type=tmpfs,destination=/var/lib/postgresql/data",
+                "--publish",
+                "127.0.0.1::5432",
+                "--env",
+                "POSTGRES_DB=manageroo_test",
+                "--env",
+                "POSTGRES_USER=manageroo",
+                "--env-file",
+                str(env_file),
+                "--pull=missing",
+                image,
+            ],
+            repo=root,
+            timeout=180,
+            action="startup",
+        )
     container_id = result.stdout.strip()
     body_error: BaseException | None = None
     try:
