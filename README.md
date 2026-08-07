@@ -27,7 +27,7 @@ CLAWPATCH_SUPERVISE_SOURCE=. ./scripts/install.sh
 clawpatch-supervise --version
 ```
 
-The installer verifies that the selected Python interpreter is 3.11 or newer and that ClawHub is available or installable before creating any installation files. It then creates an isolated virtual environment under `~/.local/share/clawpatch-supervise`, verifies the installed commands, and exposes them from `~/.local/bin`. If ClawHub is missing, it also installs the reviewed `clawhub@0.19.1` CLI into that isolated root. An existing ClawHub installation is preserved. If that directory is not already on `PATH`, reopen your terminal or run:
+The installer verifies that the selected Python interpreter is 3.11 or newer and that ClawHub is available or installable before creating any installation files. It then creates an isolated virtual environment under `~/.local/share/clawpatch-supervise`, verifies the installed commands, and exposes them from `~/.local/bin`. If ClawHub is missing, it also installs the reviewed `clawhub@0.19.1` CLI into that isolated root. Existing ClawPatch and ClawHub commands are preserved only when they report the required versions 0.7.2 and 0.19.1. If that directory is not already on `PATH`, reopen your terminal or run:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"

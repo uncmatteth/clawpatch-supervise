@@ -9,6 +9,20 @@ python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 readonly clawpatch_version="0.7.2"
 readonly clawhub_version="0.19.1"
 
+check_command_version() {
+  local command_name="$1"
+  local expected_version="$2"
+  shift 2
+  if ! checked_version="$("$@")"; then
+    echo "The $command_name command failed its version check." >&2
+    exit 2
+  fi
+  if [[ "$checked_version" != "$expected_version" ]]; then
+    echo "$command_name $expected_version is required; found ${checked_version:-unknown}." >&2
+    exit 2
+  fi
+}
+
 command -v "$python_command" >/dev/null 2>&1 || {
   echo "Python 3.11 or newer is required." >&2
   exit 2
@@ -24,15 +38,20 @@ command -v git >/dev/null 2>&1 || {
 
 if command -v clawhub >/dev/null 2>&1; then
   clawhub_command="$(command -v clawhub)"
+  check_command_version "ClawHub" "$clawhub_version" "$clawhub_command" --cli-version
+  clawhub_installed_version="$checked_version"
 else
   command -v npm >/dev/null 2>&1 || {
     echo "ClawHub is missing and npm is unavailable. Install Node.js 22 or newer, then rerun this installer." >&2
     exit 2
   }
   clawhub_command=""
+  clawhub_installed_version=""
 fi
 
-if ! command -v clawpatch >/dev/null 2>&1; then
+if command -v clawpatch >/dev/null 2>&1; then
+  clawpatch_command="$(command -v clawpatch)"
+else
   command -v npm >/dev/null 2>&1 || {
     echo "npm is required to install ClawPatch." >&2
     exit 2
@@ -44,7 +63,10 @@ if ! command -v clawpatch >/dev/null 2>&1; then
     echo "ClawPatch was installed but its command is not on PATH." >&2
     exit 2
   }
+  clawpatch_command="$(command -v clawpatch)"
 fi
+check_command_version "ClawPatch" "$clawpatch_version" "$clawpatch_command" --version
+clawpatch_installed_version="$checked_version"
 
 "$python_command" -m venv "$install_root/venv"
 "$install_root/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$source_package"
@@ -58,11 +80,13 @@ if [[ -z "$clawhub_command" ]]; then
     echo "ClawHub installation did not create its command." >&2
     exit 2
   }
+  check_command_version "ClawHub" "$clawhub_version" "$clawhub_command" --cli-version
+  clawhub_installed_version="$checked_version"
 fi
 
 "$install_root/venv/bin/clawpatch-supervise" --version
-"$clawhub_command" --cli-version
-clawpatch --version
+printf '%s\n' "$clawhub_installed_version"
+printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$bin_dir"
 ln -sfn "$install_root/venv/bin/clawpatch-supervise" "$bin_dir/clawpatch-supervise"

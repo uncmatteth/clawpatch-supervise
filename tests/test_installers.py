@@ -22,13 +22,23 @@ class InstallerContractTests(unittest.TestCase):
         *,
         clawpatch_present: bool,
         clawhub_present: bool,
+        clawpatch_version: str = CLAWPATCH_VERSION,
+        clawhub_version: str = CLAWHUB_VERSION,
         npm_mode: str = "success",
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
         fake_bin = root / "bin"
         fake_bin.mkdir()
         command_stub = root / "command-stub"
-        self._write_executable(command_stub, "#!/bin/sh\nexit 0\n")
+        self._write_executable(
+            command_stub,
+            "#!/bin/sh\n"
+            'case "${0##*/}:$1" in\n'
+            '  clawpatch:--version) printf "%s\\n" "$CLAWPATCH_TEST_CLAWPATCH_VERSION" ;;\n'
+            '  clawhub:--cli-version) printf "%s\\n" "$CLAWPATCH_TEST_CLAWHUB_VERSION" ;;\n'
+            "esac\n"
+            "exit 0\n",
+        )
 
         for command in ("bash", "cp", "ln", "mkdir"):
             command_path = shutil.which(command)
@@ -88,6 +98,8 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_SUPERVISE_HOME": str(install_root),
                 "CLAWPATCH_SUPERVISE_PYTHON": str(python),
                 "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
+                "CLAWPATCH_TEST_CLAWPATCH_VERSION": clawpatch_version,
+                "CLAWPATCH_TEST_CLAWHUB_VERSION": clawhub_version,
                 "CLAWPATCH_TEST_LOG": str(invocation_log),
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
                 "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
@@ -244,6 +256,40 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(invocations, [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_mismatched_clawhub_version(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            clawhub_version="0.18.0",
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            f"ClawHub {CLAWHUB_VERSION} is required; found 0.18.0.",
+            result.stderr,
+        )
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_mismatched_clawpatch_version(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            clawpatch_version="0.7.1",
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            f"ClawPatch {CLAWPATCH_VERSION} is required; found 0.7.1.",
+            result.stderr,
+        )
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_installs_missing_dependencies_and_finds_them(self) -> None:
