@@ -358,8 +358,13 @@ def main(
     args = parser.parse_args(raw_argv)
     if args.timeout_minutes < 1:
         parser.error("--timeout-minutes must be at least 1")
+    try:
+        repo = Path(args.repo).resolve()
+    except (OSError, RuntimeError) as exc:
+        print(f"STOPPED: Could not resolve repository path {args.repo!r}: {exc}")
+        return 2
     if args.print_state_path:
-        print(external_state_root(Path(args.repo)))
+        print(external_state_root(repo))
         return 0
     watchdog_seconds = args.timeout_minutes * 60
 
@@ -414,13 +419,12 @@ def main(
 
     print("🤬🦶💥 NEW AND FUCKING IMPROVED — NOW WITH MORE CURSING", flush=True)
     print(
-        f"ClawPatch external supervisor: repo={Path(args.repo).resolve()} "
+        f"ClawPatch external supervisor: repo={repo} "
         f"branch={args.branch} push={args.push} fresh={'auto' if args.fresh is None else args.fresh} "
         f"timeout={args.timeout_minutes}m",
         flush=True,
     )
     try:
-        repo = Path(args.repo)
         display(
             {
                 "phase": "preflight",

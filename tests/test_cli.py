@@ -247,6 +247,53 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         )
         self.assertEqual(output.getvalue().count("PROCESS PREFLIGHT"), 1)
 
+    def test_repository_path_stays_canonical_after_preflight_retargets_symlink(self):
+        received_paths = []
+
+        @contextmanager
+        def fake_provision(repo: Path, *, progress, temporary_root: Path):
+            received_paths.append(repo)
+            yield {}
+
+        def fake_sweep(repo: Path, **_kwargs):
+            received_paths.append(repo)
+            return {
+                "ok": True,
+                "finding_count": 0,
+                "open_findings": 0,
+                "git_head": "abc123",
+            }
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo_a = root / "repository-a"
+            repo_b = root / "repository-b"
+            repo_a.mkdir()
+            repo_b.mkdir()
+            repo_link = root / "repository"
+            try:
+                repo_link.symlink_to(repo_a, target_is_directory=True)
+            except OSError as exc:
+                self.skipTest(f"directory symlinks are unavailable: {exc}")
+
+            def retarget_after_preflight(repo: Path):
+                received_paths.append(repo)
+                repo_link.unlink()
+                repo_link.symlink_to(repo_b, target_is_directory=True)
+
+            with redirect_stdout(StringIO()):
+                code = main(
+                    ["--repo", str(repo_link)],
+                    run_sweep=fake_sweep,
+                    provision_validation_environment=fake_provision,
+                    ensure_repository_idle=retarget_after_preflight,
+                    heartbeat_seconds=0,
+                    cleanup_root=root / "cleanup",
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(received_paths, [repo_a, repo_a, repo_a])
+
     def test_resume_phase_explains_source_clean_planned_attempt(self):
         self.assertEqual(
             _render_event(

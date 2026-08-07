@@ -72,6 +72,8 @@ clawpatch-supervise `
 
 Use `--push none` if you want verified local commits without publishing them. The normal command preserves and processes an existing `.clawpatch` queue instead of deleting it. When an existing queue is proven clean and project source is clean, an interactive run asks whether to remove that state and start a new full review. `--fresh` is the explicit non-interactive reset choice, but it still requires proof that the existing queue has no open findings, locks, lock files, or uncertain findings and that no project source is retained. Use `--resume-stopped` for an exact stopped supervisor checkpoint.
 
+The supervisor resolves `--repo` to one canonical path before preflight and uses that same path for the entire run, so retargeting a repository symlink cannot redirect later repair work.
+
 ### Clean up transient run data without deleting receipts
 
 Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
