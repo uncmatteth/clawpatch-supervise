@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import shutil
+import subprocess
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -18,6 +19,7 @@ from .errors import SafetyError
 OWNERSHIP_MARKER = ".clawpatch-supervise-owned.json"
 OWNERSHIP_SCHEMA = 1
 DEFAULT_STALE_AFTER_SECONDS = 60 * 60
+_PROC_ROOT = Path("/proc")
 _CURRENT_TEMPORARY_ROOT: ContextVar[Path | None] = ContextVar(
     "clawpatch_supervise_temporary_root", default=None
 )
@@ -112,13 +114,39 @@ def _directory_bytes(path: Path) -> int:
     return total
 
 
-def _path_has_live_reference(candidate: Path) -> bool:
-    proc_root = Path("/proc")
-    if os.name != "posix" or not proc_root.is_dir():
+def _lsof_path_has_live_reference(candidate: Path) -> bool | None:
+    lsof = shutil.which("lsof")
+    if lsof is None:
+        return None
+    try:
+        result = subprocess.run(
+            [lsof, "-nP", "-Fp", "+D", str(candidate.resolve())],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=30,
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if any(line[1:].isdigit() for line in result.stdout.splitlines() if line.startswith("p")):
+        return True
+    if result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
         return False
+    return None
+
+
+def _path_has_live_reference(candidate: Path) -> bool | None:
+    if os.name != "posix":
+        return False
+    if not _PROC_ROOT.is_dir():
+        return _lsof_path_has_live_reference(candidate)
     candidate_text = str(candidate.resolve())
     prefix = candidate_text + os.sep
-    for process in proc_root.iterdir():
+    for process in _PROC_ROOT.iterdir():
         if not process.name.isdigit():
             continue
         links = [process / "cwd", process / "root", process / "exe"]
@@ -195,7 +223,14 @@ def cleanup_owned_runs(
         if isinstance(created, bool) or not isinstance(created, (int, float)):
             entries.append(CleanupEntry(candidate, "UNSAFE", size))
             continue
-        if _pid_is_running(pid) or _path_has_live_reference(candidate):
+        if _pid_is_running(pid):
+            entries.append(CleanupEntry(candidate, "ACTIVE", size))
+            continue
+        live_reference = _path_has_live_reference(candidate)
+        if live_reference is None:
+            entries.append(CleanupEntry(candidate, "UNSAFE", size))
+            continue
+        if live_reference:
             entries.append(CleanupEntry(candidate, "ACTIVE", size))
             continue
         if now() - float(created) < stale_after_seconds:
@@ -214,7 +249,12 @@ def _remove_exact_owned_run(candidate: Path, cleanup_root: Path) -> None:
         raise SafetyError("The supervisor-owned run directory is no longer a safe directory.")
     if candidate.resolve().parent != cleanup_root.resolve() or _owned_marker(candidate) is None:
         raise SafetyError("The supervisor-owned run directory failed its ownership check.")
-    if _path_has_live_reference(candidate):
+    live_reference = _path_has_live_reference(candidate)
+    if live_reference is None:
+        raise SafetyError(
+            "Could not prove that no live process references the supervisor-owned run directory."
+        )
+    if live_reference:
         raise SafetyError("A live process still references the supervisor-owned run directory.")
     shutil.rmtree(candidate)
 

@@ -179,6 +179,60 @@ class CleanupCommandTests(unittest.TestCase):
                 child.terminate()
                 child.wait(timeout=5)
 
+    def test_cleanup_without_proc_preserves_directory_referenced_by_live_process(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-live-reference"
+            self._mark(candidate, pid=999_999_999, created_unix=0)
+            output = StringIO()
+
+            with (
+                patch("clawpatch_supervise.cleanup._PROC_ROOT", Path(temp) / "missing-proc"),
+                patch(
+                    "clawpatch_supervise.cleanup._lsof_path_has_live_reference",
+                    return_value=True,
+                ) as lsof_probe,
+                redirect_stdout(output),
+            ):
+                code = main(
+                    ["cleanup", "--apply"],
+                    cleanup_root=cleanup_root,
+                    heartbeat_seconds=0,
+                )
+
+            self.assertEqual(code, 0)
+            self.assertTrue(candidate.is_dir())
+            self.assertIn("ACTIVE", output.getvalue())
+            self.assertIn("removed=0", output.getvalue())
+            lsof_probe.assert_called_once_with(candidate)
+
+    def test_cleanup_without_proc_fails_closed_when_lsof_is_inconclusive(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-unproven"
+            self._mark(candidate, pid=999_999_999, created_unix=0)
+            output = StringIO()
+
+            with (
+                patch("clawpatch_supervise.cleanup._PROC_ROOT", Path(temp) / "missing-proc"),
+                patch(
+                    "clawpatch_supervise.cleanup._lsof_path_has_live_reference",
+                    return_value=None,
+                ) as lsof_probe,
+                redirect_stdout(output),
+            ):
+                code = main(
+                    ["cleanup", "--apply"],
+                    cleanup_root=cleanup_root,
+                    heartbeat_seconds=0,
+                )
+
+            self.assertEqual(code, 0)
+            self.assertTrue(candidate.is_dir())
+            self.assertIn("UNSAFE", output.getvalue())
+            self.assertIn("removed=0", output.getvalue())
+            lsof_probe.assert_called_once_with(candidate)
+
     def test_cleanup_refuses_symlinked_root_without_touching_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

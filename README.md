@@ -78,7 +78,7 @@ The supervisor resolves `--repo` to one canonical path before preflight and uses
 
 Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. Release children inherit only a small cross-platform operational environment plus validated supervisor-owned overrides, so host provider, cloud, package-registry, and SSH credentials are not forwarded implicitly. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
 
-An abrupt process kill or machine crash can prevent `finally` cleanup. The next launch automatically removes a marked run directory only after it is at least one hour old, its recorded process is gone, and—on Linux—no live process has a working directory or open file inside it. Inspect the same decision without changing anything:
+An abrupt process kill or machine crash can prevent `finally` cleanup. The next launch automatically removes a marked run directory only after it is at least one hour old, its recorded process is gone, and no live process has a working directory or open file inside it. Linux uses `/proc`; other POSIX systems use a scoped `lsof` probe and retain the directory as `UNSAFE` when that inspection is unavailable or inconclusive. Inspect the same decision without changing anything:
 
 ```bash
 clawpatch-supervise cleanup --dry-run
