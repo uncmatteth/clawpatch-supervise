@@ -6,6 +6,8 @@ source_package="${CLAWPATCH_SUPERVISE_SOURCE:-https://github.com/uncmatteth/claw
 install_root="${CLAWPATCH_SUPERVISE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/clawpatch-supervise}"
 bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
+readonly clawpatch_version="0.7.2"
+readonly clawhub_version="0.19.1"
 
 command -v "$python_command" >/dev/null 2>&1 || {
   echo "Python 3.11 or newer is required." >&2
@@ -21,7 +23,7 @@ if ! command -v clawpatch >/dev/null 2>&1; then
     echo "npm is required to install ClawPatch." >&2
     exit 2
   }
-  npm install --global clawpatch@latest
+  npm install --global "clawpatch@${clawpatch_version}"
   npm_global_prefix="$(npm prefix --global)"
   export PATH="$npm_global_prefix/bin:$PATH"
   command -v clawpatch >/dev/null 2>&1 || {
@@ -43,8 +45,8 @@ else
     exit 2
   }
   clawhub_root="$install_root/clawhub"
-  echo "ClawHub is missing; installing clawhub@latest into $clawhub_root"
-  npm install --prefix "$clawhub_root" --no-fund --no-audit clawhub@latest
+  echo "ClawHub is missing; installing clawhub@${clawhub_version} into $clawhub_root"
+  npm install --prefix "$clawhub_root" --no-fund --no-audit "clawhub@${clawhub_version}"
   clawhub_command="$clawhub_root/node_modules/.bin/clawhub"
   test -x "$clawhub_command" || {
     echo "ClawHub installation did not create its command." >&2

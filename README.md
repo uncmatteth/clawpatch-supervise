@@ -16,7 +16,7 @@ It is a standalone Python package, a command-line program, and a public [ClawHub
 
 ## Quick start
 
-You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, either installer below installs `clawpatch@latest` globally with npm and verifies the command. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 or newer is required.
+You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, either installer below installs the reviewed `clawpatch@0.7.2` release globally with npm and verifies the command. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 or newer is required.
 
 ### Linux and macOS
 
@@ -27,7 +27,7 @@ cd clawpatch-supervise
 clawpatch-supervise --version
 ```
 
-The installer creates an isolated virtual environment under `~/.local/share/clawpatch-supervise` and puts the command in `~/.local/bin`. If ClawHub is missing, it also installs the latest ClawHub CLI into that isolated root and exposes `clawhub` from the same bin directory. An existing ClawHub installation is preserved. If that directory is not already on `PATH`, reopen your terminal or run:
+The installer creates an isolated virtual environment under `~/.local/share/clawpatch-supervise` and puts the command in `~/.local/bin`. If ClawHub is missing, it also installs the reviewed `clawhub@0.19.1` CLI into that isolated root and exposes `clawhub` from the same bin directory. An existing ClawHub installation is preserved. If that directory is not already on `PATH`, reopen your terminal or run:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
@@ -43,7 +43,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 clawpatch-supervise --version
 ```
 
-The Windows installer creates an isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. If ClawHub is missing, it also installs the latest ClawHub CLI into that isolated root and creates `clawhub.cmd`; an existing installation is preserved. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` paths immediately.
+The Windows installer creates an isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. If ClawHub is missing, it also installs the reviewed `clawhub@0.19.1` CLI into that isolated root and creates `clawhub.cmd`; an existing installation is preserved. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` paths immediately.
 
 Configured Windows `.cmd` and `.bat` validation gates are launched with exact `cmd.exe` quoting, including when the executable is installed under a path containing spaces. Gate arguments containing `cmd.exe` metacharacters remain rejected.
 

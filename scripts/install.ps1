@@ -8,6 +8,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+$ClawPatchVersion = "0.7.2"
+$ClawHubVersion = "0.19.1"
 if ([string]::IsNullOrWhiteSpace($Source)) {
     $Source = "https://github.com/uncmatteth/clawpatch-supervise/releases/download/v$Version/clawpatch_supervise-$Version-py3-none-any.whl"
 }
@@ -19,7 +21,7 @@ if ($null -eq $clawpatch) {
         throw "npm is required to install ClawPatch."
     }
 
-    & $npm.Source install --global clawpatch@latest
+    & $npm.Source install --global "clawpatch@$ClawPatchVersion"
     if ($LASTEXITCODE -ne 0) {
         throw "npm could not install ClawPatch."
     }
@@ -75,10 +77,10 @@ if ($null -eq $clawHubCommand) {
         $npmPath = $npmCommand.Source
     }
     $clawHubRoot = Join-Path $InstallRoot "clawhub"
-    Write-Host "ClawHub is missing; installing clawhub@latest into $clawHubRoot"
-    & $npmPath install --prefix $clawHubRoot --no-fund --no-audit clawhub@latest
+    Write-Host "ClawHub is missing; installing clawhub@$ClawHubVersion into $clawHubRoot"
+    & $npmPath install --prefix $clawHubRoot --no-fund --no-audit "clawhub@$ClawHubVersion"
     if ($LASTEXITCODE -ne 0) {
-        throw "npm could not install clawhub@latest (exit $LASTEXITCODE)."
+        throw "npm could not install clawhub@$ClawHubVersion (exit $LASTEXITCODE)."
     }
     $installedClawHub = Join-Path $clawHubRoot "node_modules\.bin\clawhub.cmd"
     if (-not (Test-Path -LiteralPath $installedClawHub -PathType Leaf)) {
