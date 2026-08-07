@@ -29,6 +29,7 @@ class InstallerContractTests(unittest.TestCase):
         npm_mode: str = "success",
         source_package: Path | str = REPOSITORY_ROOT,
         source_sha256: str | None = None,
+        supervisor_version_fails: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
         fake_bin = root / "bin"
@@ -40,11 +41,14 @@ class InstallerContractTests(unittest.TestCase):
             'case "${0##*/}:$1" in\n'
             '  clawpatch:--version) printf "%s\\n" "$CLAWPATCH_TEST_CLAWPATCH_VERSION" ;;\n'
             '  clawhub:--cli-version) printf "%s\\n" "$CLAWPATCH_TEST_CLAWHUB_VERSION" ;;\n'
+            '  clawpatch-supervise:--version)\n'
+            '    [ "$CLAWPATCH_TEST_SUPERVISOR_VERSION_FAILS" != "true" ] || exit 26\n'
+            '    printf "0.1.21\\n" ;;\n'
             "esac\n"
             "exit 0\n",
         )
 
-        for command in ("bash", "cp", "ln", "mkdir", "mktemp", "rm"):
+        for command in ("bash", "cp", "ln", "mkdir", "mktemp", "mv", "rm"):
             command_path = shutil.which(command)
             self.assertIsNotNone(command_path)
             (fake_bin / command).symlink_to(command_path)
@@ -111,6 +115,9 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
                 "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
                 "CLAWPATCH_TEST_REAL_PYTHON": sys.executable,
+                "CLAWPATCH_TEST_SUPERVISOR_VERSION_FAILS": str(
+                    supervisor_version_fails
+                ).lower(),
                 "PATH": str(fake_bin),
             }
         )
@@ -446,6 +453,42 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("Artifact SHA-256 mismatch", result.stderr)
         self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_preserves_working_command_when_upgrade_validation_fails(
+        self,
+    ) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "install"
+        previous_supervisor = install_root / "venv.previous" / "bin" / "clawpatch-supervise"
+        previous_supervisor.parent.mkdir(parents=True)
+        self._write_executable(
+            previous_supervisor,
+            "#!/bin/sh\nprintf '0.1.20\\n'\n",
+        )
+        installed_command = root / "installed-bin" / "clawpatch-supervise"
+        installed_command.parent.mkdir()
+        installed_command.symlink_to(previous_supervisor)
+
+        result, _invocations, actual_install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            supervisor_version_fails=True,
+        )
+
+        self.assertEqual(result.returncode, 26)
+        self.assertEqual(actual_install_root, install_root)
+        self.assertEqual(installed_command.resolve(), previous_supervisor)
+        previous_result = subprocess.run(
+            [str(installed_command), "--version"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(previous_result.returncode, 0, previous_result.stderr)
+        self.assertEqual(previous_result.stdout.strip(), "0.1.20")
+        self.assertEqual(list(install_root.iterdir()), [install_root / "venv.previous"])
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_requires_digest_for_custom_remote_source(self) -> None:

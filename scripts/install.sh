@@ -9,6 +9,16 @@ python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 readonly clawpatch_version="0.7.2"
 readonly clawhub_version="0.19.1"
 readonly release_sha256_0_1_21="7444e56bb1987f694f58c8df4146cfabaa2646b440fad3f32e1971781a7c5f42"
+download_root=""
+staging_venv=""
+pending_supervisor_link=""
+
+cleanup() {
+  [[ -z "$pending_supervisor_link" ]] || rm -f "$pending_supervisor_link"
+  [[ -z "$staging_venv" ]] || rm -rf "$staging_venv"
+  [[ -z "$download_root" ]] || rm -rf "$download_root"
+}
+trap cleanup EXIT
 
 check_command_version() {
   local command_name="$1"
@@ -85,7 +95,6 @@ if [[ ! -d "$source_package" ]]; then
   fi
 
   download_root="$(mktemp -d)"
-  trap 'rm -rf "$download_root"' EXIT
   package_to_install="$download_root/clawpatch_supervise-${version}-py3-none-any.whl"
   "$python_command" - "$source_package" "$package_to_install" "$expected_sha256" <<'PY'
 import hashlib
@@ -115,8 +124,10 @@ if not hmac.compare_digest(actual, expected.lower()):
 PY
 fi
 
-"$python_command" -m venv "$install_root/venv"
-"$install_root/venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$package_to_install"
+mkdir -p "$install_root"
+staging_venv="$(mktemp -d "$install_root/venv.${version}.XXXXXX")"
+"$python_command" -m venv "$staging_venv"
+"$staging_venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$package_to_install"
 
 if [[ -z "$clawhub_command" ]]; then
   clawhub_root="$install_root/clawhub"
@@ -131,12 +142,23 @@ if [[ -z "$clawhub_command" ]]; then
   clawhub_installed_version="$checked_version"
 fi
 
-"$install_root/venv/bin/clawpatch-supervise" --version
+"$staging_venv/bin/clawpatch-supervise" --version
 printf '%s\n' "$clawhub_installed_version"
 printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$bin_dir"
-ln -sfn "$install_root/venv/bin/clawpatch-supervise" "$bin_dir/clawpatch-supervise"
+pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
+rm -f "$pending_supervisor_link"
+ln -s "$staging_venv/bin/clawpatch-supervise" "$pending_supervisor_link"
+# Stop EXIT cleanup from removing either valid target once activation begins.
+activated_venv="$staging_venv"
+staging_venv=""
+mv -f "$pending_supervisor_link" "$bin_dir/clawpatch-supervise" || {
+  move_status=$?
+  staging_venv="$activated_venv"
+  exit "$move_status"
+}
+pending_supervisor_link=""
 if [[ "$clawhub_command" == "$install_root/clawhub/"* ]]; then
   ln -sfn "$clawhub_command" "$bin_dir/clawhub"
   clawhub_command="$bin_dir/clawhub"
