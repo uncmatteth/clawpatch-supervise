@@ -154,9 +154,11 @@ class CommandRunner:
             raise SafetyError("Commands must be non-empty argv arrays.")
         safe_argv = redact_argv(argv)
         started_at = utc_now()
-        process_env = os.environ.copy()
-        if env:
-            process_env.update({str(k): str(v) for k, v in env.items()})
+        process_env = (
+            os.environ.copy()
+            if env is None
+            else {str(k): str(v) for k, v in env.items()}
+        )
         launch_argv = _platform_argv(argv, process_env)
         try:
             if kill_process_group:

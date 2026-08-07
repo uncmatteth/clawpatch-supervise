@@ -1,9 +1,47 @@
+import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
+from clawpatch_supervise.clawpatch_release import _release_clawpatch_env
 from clawpatch_supervise.runner import CommandRunner
+
+
+class CommandRunnerEnvironmentTests(unittest.TestCase):
+    @patch.dict(
+        os.environ,
+        {
+            "DATABASE_URL": "postgresql://production.invalid/live",
+            "BTT_ALLOW_DATABASE_RESET": "true",
+        },
+    )
+    def test_process_group_uses_exact_sanitized_release_environment(self) -> None:
+        child_env = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
+
+        result = CommandRunner().run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import json, os; "
+                    "print(json.dumps({name: name in os.environ for name in "
+                    "('DATABASE_URL', 'BTT_ALLOW_DATABASE_RESET')}))"
+                ),
+            ],
+            cwd=Path.cwd(),
+            timeout_seconds=30,
+            env=child_env,
+            kill_process_group=True,
+        )
+
+        self.assertEqual(result.exit_code, 0, result.stderr)
+        self.assertEqual(
+            json.loads(result.stdout),
+            {"DATABASE_URL": False, "BTT_ALLOW_DATABASE_RESET": False},
+        )
 
 
 @unittest.skipUnless(os.name == "nt", "Windows command runner only")
