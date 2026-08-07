@@ -366,6 +366,9 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertIn("[1/88] FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED", rendered)
         self.assertIn("🤬🦶💥 NEW AND FUCKING IMPROVED", rendered)
         self.assertIn("fresh_review_generations=2", rendered)
+        self.assertIn("COMPLETE", rendered)
+        self.assertIn("QUEUE'S CLEAN", rendered)
+        self.assertNotIn("STOPPED", rendered)
         self.assertEqual(calls[0][1]["branch"], "current")
         self.assertEqual(calls[0][1]["push_mode"], "each")
         self.assertEqual(calls[0][1]["integration_mode"], "external")
@@ -402,6 +405,33 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         )
         self.assertIn("source left in place: app.py", rendered)
         self.assertNotIn("RETRY", rendered)
+
+    def test_failed_sweep_reports_stopped_with_open_findings(self):
+        def fake_sweep(_repo: Path, **_kwargs):
+            return {
+                "ok": False,
+                "finding_count": 1,
+                "open_findings": 1,
+                "git_head": "abc123",
+                "review_generations": [{"clean": False}],
+            }
+
+        output = StringIO()
+        with redirect_stdout(output):
+            code = main(
+                ["--repo", ".", "--fresh"],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 2)
+        self.assertIn("STOPPED: fixed=1 open=1", rendered)
+        self.assertIn("SWEEP FAILED. QUEUE ISN'T CLEAN", rendered)
+        self.assertIn("open=1", rendered)
+        self.assertNotIn("COMPLETE", rendered)
+        self.assertNotIn("QUEUE'S CLEAN", rendered)
 
     def test_transient_stop_has_a_distinct_service_retry_exit(self):
         def fake_sweep(_repo: Path, **_kwargs):

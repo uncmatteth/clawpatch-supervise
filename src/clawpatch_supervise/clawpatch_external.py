@@ -454,6 +454,18 @@ def main(
         if thread is not None:
             thread.join(timeout=1)
 
+    if not report.get("ok"):
+        print(
+            "\nSTOPPED: "
+            f"fixed={report.get('finding_count', 0)} "
+            f"open={report.get('open_findings', '?')} "
+            f"fresh_review_generations={len(report.get('review_generations', []))} "
+            f"head={report.get('git_head', '')} "
+            "— 🛑💥🤬 SWEEP FAILED. QUEUE ISN'T CLEAN.",
+            flush=True,
+        )
+        return 2
+
     print(
         "\nCOMPLETE: "
         f"fixed={report.get('finding_count', 0)} "
@@ -463,7 +475,7 @@ def main(
         "— 🏁🔥🤘 FUCK YES. QUEUE'S CLEAN.",
         flush=True,
     )
-    return 0 if report.get("ok") else 2
+    return 0
 
 
 if __name__ == "__main__":
