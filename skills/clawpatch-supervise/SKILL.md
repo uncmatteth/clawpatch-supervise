@@ -22,6 +22,8 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 - When configured project gates fail while resuming a provenance-verified stopped `open` or `uncertain` repair, preserve the exact checkpoint and re-enter only that finding with the gate failure as evidence. Keep fixed, false-positive, ownership-mismatched, and ambiguous states fail-closed.
 - Treat untracked `node_modules/**` package-install output as runtime noise, while retaining tracked files there as source. Resume a legacy dependency-heavy checkpoint only when its full fingerprint still matches and the remaining paths exactly match one applied repair.
 - Do not call an active queue complete. Require the final `COMPLETE` line and proof file.
+- Every normal run owns one marked temporary root and removes it on ordinary exit. Startup and manual cleanup may remove only marked runs that are old, whose parent PID is gone, and that have no proven live reference.
+- Preserve `.clawpatch`, standalone checkpoints and proofs, dirty repairs, Git worktrees, and npm/Cargo/Hardhat/uv/GitNexus caches that the supervisor cannot prove it owns.
 
 ## Workflow
 
@@ -36,6 +38,7 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 5. Run one repository at a time with an explicit absolute path, branch policy, push policy, and watchdog.
 6. If it stops, preserve the printed finding, paths, checkpoint, and source exactly. Relaunch normally or with `--resume-stopped`; the supervisor can adopt a later applied ClawPatch repair only when its finding, base SHA, and complete source-path set match the stopped checkpoint boundary. If later committed work cleanly advances HEAD, it may retire only a verified obsolete recovery wrapper while preserving `.clawpatch` and continuing the queue.
 7. On completion, verify the proof file, clean Git state, local HEAD, and remote SHA when pushes were enabled.
+8. When disk cleanup is requested, run `clawpatch-supervise cleanup --dry-run` first. Use `cleanup --apply` only for entries the command classifies as `STALE`; `ACTIVE`, `RECENT`, `UNOWNED`, and `UNSAFE` entries stay preserved.
 
 Linux or macOS:
 
@@ -63,6 +66,18 @@ Find the external checkpoint and proof directory:
 clawpatch-supervise --repo <absolute-path> --print-state-path
 ```
 
+Inspect supervisor-owned transient leftovers without changing them:
+
+```text
+clawpatch-supervise cleanup --dry-run
+```
+
+Remove only ownership-proven stale run directories:
+
+```text
+clawpatch-supervise cleanup --apply
+```
+
 ## Output
 
 Human-facing phase banners are intentionally blunt, profane, and emoji-heavy. Exact commands,
@@ -87,6 +102,7 @@ Return:
 - Do not commit unrelated or pre-existing changes.
 - Do not run ClawPatch against Git submodule contents owned by third parties; fresh supervisor runs exclude Gitlinks automatically.
 - Do not claim Windows or Linux support from source inspection alone; use the repository's cross-platform test results.
+- Do not use broad `/tmp/clawpatch-*`, `.clawpatch`, cache, or worktree deletion as a substitute for the ownership-gated cleanup command.
 
 ## Proof
 
