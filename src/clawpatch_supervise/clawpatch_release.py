@@ -2794,6 +2794,7 @@ def _process_finding_until_fixed(
                 )
                 raise
             continuations += 1
+            zero_source_retries = 0
             if failure is not None and failure.kind.value == "validation-failed":
                 try:
                     gate_runs = _run_project_gates(
@@ -2902,8 +2903,7 @@ def _process_finding_until_fixed(
             raise SafetyError("Clawpatch returned an unsupported revalidation outcome.") from exc
         if revalidation_decision.action is RepairAction.PRESERVE_AND_CONTINUE:
             if (
-                not temporary_commit
-                and not _source_paths(repo)
+                not _source_paths(repo)
                 and zero_source_retries < CLAWPATCH_ZERO_SOURCE_RETRY_LIMIT
             ):
                 zero_source_retries += 1
@@ -2915,10 +2915,10 @@ def _process_finding_until_fixed(
                             "current": current,
                             "total": total,
                             "finding_id": finding_id,
-                            "commit": "",
+                            "commit": temporary_commit,
                             "detail": (
-                                "open revalidation supplied new evidence; retrying the same "
-                                "finding without advancing the queue"
+                                f"{revalidation_outcome} revalidation supplied new evidence; "
+                                "retrying the same finding without advancing the queue"
                             ),
                             "evidence_retry": zero_source_retries,
                             "max_evidence_retries": CLAWPATCH_ZERO_SOURCE_RETRY_LIMIT,
@@ -2947,6 +2947,7 @@ def _process_finding_until_fixed(
                 )
                 raise
             continuations += 1
+            zero_source_retries = 0
             if progress is not None:
                 progress(
                     {

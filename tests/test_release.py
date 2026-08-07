@@ -4945,6 +4945,72 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         final_closure.assert_called_once()
 
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    def test_open_zero_source_revalidation_retries_after_checkpointed_repair(
+        self, execute_fix
+    ):
+        progress_events = []
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            def fix_side_effect(*_args, **_kwargs):
+                if execute_fix.call_count == 1:
+                    (repo / "repair.py").write_text("partial\n", encoding="utf-8")
+                    paths = ["repair.py"]
+                    outcome = "open"
+                elif execute_fix.call_count == 2:
+                    paths = []
+                    outcome = "open"
+                else:
+                    (repo / "repair.py").write_text("fixed\n", encoding="utf-8")
+                    paths = ["repair.py"]
+                    outcome = "fixed"
+                return (
+                    {
+                        "finding_id": "fnd_one",
+                        "files_changed": paths,
+                        "revalidation": {"finding": "fnd_one", "outcome": outcome},
+                        "commit": "",
+                    },
+                    False,
+                )
+
+            execute_fix.side_effect = fix_side_effect
+
+            record, pushed, continuations = _process_finding_until_fixed(
+                repo,
+                "fnd_one",
+                inspected={
+                    "finding": {"id": "fnd_one", "status": "open"},
+                    "validation": [],
+                    "patchAttempts": [],
+                },
+                env={},
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                state_root=repo / ".manageroo" / "cache",
+                progress=progress_events.append,
+                require_project_gates=False,
+            )
+
+        self.assertFalse(pushed)
+        self.assertEqual(execute_fix.call_count, 3)
+        self.assertEqual(continuations, 1)
+        self.assertEqual(record["revalidation"]["outcome"], "fixed")
+        self.assertEqual(record["files_changed"], ["repair.py"])
+        self.assertTrue(
+            any(
+                event.get("evidence_retry") == 1
+                for event in progress_events
+                if event["phase"] == "continuing"
+            )
+        )
+
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
     def test_open_zero_source_revalidation_has_bounded_evidence_retries(self, execute_fix):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
