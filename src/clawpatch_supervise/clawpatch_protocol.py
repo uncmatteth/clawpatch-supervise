@@ -18,6 +18,7 @@ class ClawpatchFailureKind(str, Enum):
 class RepairAction(str, Enum):
     FINALIZE = "finalize"
     PRESERVE_AND_CONTINUE = "preserve-and-continue"
+    COMMIT_AND_ADVANCE = "commit-and-advance"
     DISCARD_AND_CONTINUE = "discard-and-continue"
     STOP_TRANSIENT = "stop-transient"
     STOP_TERMINAL = "stop-terminal"
@@ -99,6 +100,7 @@ def decide_repair_transition(
     failure: ClawpatchFailure | None = None,
     revalidation_outcome: str | None = None,
     has_source_progress: bool = False,
+    advance_uncertain: bool = False,
 ) -> RepairDecision:
     if (failure is None) == (revalidation_outcome is None):
         raise ValueError("A repair transition requires exactly one ClawPatch event.")
@@ -117,6 +119,8 @@ def decide_repair_transition(
         return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "open")
     if revalidation_outcome == "false-positive":
         return RepairDecision(RepairAction.DISCARD_AND_CONTINUE, "false-positive")
+    if revalidation_outcome == "uncertain" and advance_uncertain:
+        return RepairDecision(RepairAction.COMMIT_AND_ADVANCE, "uncertain-recorded")
     if revalidation_outcome == "uncertain" and has_source_progress:
         return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "uncertain-with-source-progress")
     if revalidation_outcome == "uncertain":

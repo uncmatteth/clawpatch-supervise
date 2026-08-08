@@ -83,6 +83,18 @@ class ClawpatchProtocolTests(unittest.TestCase):
             RepairAction.DISCARD_AND_CONTINUE,
         )
 
+    def test_external_manual_loop_policy_records_uncertain_and_advances(self):
+        for has_source_progress in (False, True):
+            with self.subTest(has_source_progress=has_source_progress):
+                self.assertEqual(
+                    decide_repair_transition(
+                        revalidation_outcome="uncertain",
+                        has_source_progress=has_source_progress,
+                        advance_uncertain=True,
+                    ).action,
+                    RepairAction.COMMIT_AND_ADVANCE,
+                )
+
     def test_policy_rejects_ambiguous_or_unknown_events(self):
         with self.assertRaises(ValueError):
             decide_repair_transition()

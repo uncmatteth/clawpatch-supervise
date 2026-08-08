@@ -116,7 +116,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.24")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.25")
 
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
@@ -557,6 +557,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 "ok": True,
                 "finding_count": 1,
                 "open_findings": 0,
+                "uncertain_findings": 0,
                 "git_head": "abc123",
                 "review_generations": [{"clean": False}, {"clean": True}],
             }
@@ -594,13 +595,14 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertIn("🤬🦶💥 NEW AND FUCKING IMPROVED", rendered)
         self.assertIn("fresh_review_generations=2", rendered)
         self.assertIn("COMPLETE", rendered)
-        self.assertIn("QUEUE'S CLEAN", rendered)
+        self.assertIn("EVERY OPEN FINDING WAS PROCESSED", rendered)
         self.assertNotIn("STOPPED", rendered)
         self.assertNotIn("SWEEP FAILED", rendered)
         self.assertNotIn("QUEUE ISN'T CLEAN", rendered)
         self.assertEqual(calls[0][1]["branch"], "current")
         self.assertEqual(calls[0][1]["push_mode"], "each")
         self.assertEqual(calls[0][1]["integration_mode"], "external")
+        self.assertTrue(calls[0][1]["advance_uncertain"])
         self.assertTrue(calls[0][1]["fresh"])
 
     def test_terminal_command_renders_stopped_state_without_retrying(self):

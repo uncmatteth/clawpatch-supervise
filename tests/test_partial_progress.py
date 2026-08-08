@@ -130,6 +130,118 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    def test_external_manual_loop_commits_uncertain_patch_and_advances_once(
+        self,
+        execute_fix,
+        _processes,
+        push_and_verify,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            branch, original_head = self.init_repo(repo)
+            state_root = root / "state"
+
+            def fix_side_effect(*_args, **_kwargs):
+                (repo / "app.py").write_text("before\nvalidated uncertain repair\n", encoding="utf-8")
+                return (
+                    {
+                        "finding_id": "fnd_uncertain",
+                        "files_changed": ["app.py"],
+                        "revalidation": {
+                            "finding": "fnd_uncertain",
+                            "outcome": "uncertain",
+                        },
+                        "commit": "",
+                    },
+                    False,
+                )
+
+            execute_fix.side_effect = fix_side_effect
+            record, pushed, continuations = _process_finding_until_fixed(
+                repo,
+                "fnd_uncertain",
+                inspected={"finding": {"id": "fnd_uncertain", "status": "open"}},
+                env={},
+                push_mode="each",
+                branch=branch,
+                pushed=False,
+                state_root=state_root,
+                require_project_gates=False,
+                advance_uncertain=True,
+            )
+
+            final_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            commit_count = subprocess.check_output(
+                ["git", "rev-list", "--count", f"{original_head}..{final_head}"],
+                cwd=repo,
+                text=True,
+            ).strip()
+
+        self.assertEqual(execute_fix.call_count, 1)
+        self.assertEqual(commit_count, "1")
+        self.assertEqual(record["commit"], final_head)
+        self.assertTrue(record["deferred_uncertain"])
+        self.assertTrue(pushed)
+        self.assertEqual(continuations, 0)
+        push_and_verify.assert_called_once_with(repo, branch, first=True)
+
+    @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
+    def test_external_manual_loop_advances_zero_file_uncertain_without_empty_commit(
+        self,
+        execute_fix,
+        _processes,
+        push_and_verify,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            branch, original_head = self.init_repo(repo)
+            state_root = root / "state"
+            execute_fix.return_value = (
+                {
+                    "finding_id": "fnd_overlap",
+                    "files_changed": [],
+                    "revalidation": {"finding": "fnd_overlap", "outcome": "uncertain"},
+                    "commit": "",
+                },
+                False,
+            )
+
+            record, pushed, continuations = _process_finding_until_fixed(
+                repo,
+                "fnd_overlap",
+                inspected={"finding": {"id": "fnd_overlap", "status": "open"}},
+                env={},
+                push_mode="each",
+                branch=branch,
+                pushed=False,
+                state_root=state_root,
+                require_project_gates=False,
+                advance_uncertain=True,
+            )
+            final_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+        self.assertEqual(execute_fix.call_count, 1)
+        self.assertEqual(final_head, original_head)
+        self.assertEqual(record["commit"], "")
+        self.assertTrue(record["deferred_uncertain"])
+        self.assertFalse(pushed)
+        self.assertEqual(continuations, 0)
+        self.assertIsNone(_load_release_progress(repo, state_root=state_root))
+        push_and_verify.assert_not_called()
+
+    @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._execute_fix")
     def test_overlapping_finding_fixed_by_prior_commit_needs_no_second_commit(
         self,
         execute_fix,
@@ -697,6 +809,90 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 progress=None,
                 current_offset=9,
             )
+
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._resolve_uncertain_findings")
+    @patch("clawpatch_supervise.clawpatch_release._review_completion", return_value={"done": True})
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_external_manual_loop_finishes_open_queue_with_uncertain_report_retained(
+        self,
+        json_clawpatch,
+        _review,
+        resolve_uncertain,
+        _gates,
+        _processes,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            branch, _head = self.init_repo(repo)
+            uncertain_report = {"total": 1, "items": [{"id": "fnd_uncertain"}]}
+            json_clawpatch.side_effect = [
+                {"revalidated": 0},
+                {"total": 0, "items": []},
+                uncertain_report,
+                {"openFindings": 0, "activeLocks": 0, "lockFiles": 0},
+            ]
+
+            closure = _final_closure(
+                repo,
+                env={},
+                state_root=root / "state",
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                publish_clawpatch_state=False,
+                review_limit=1,
+                require_project_gates=False,
+                require_fresh_review=True,
+                resolve_uncertain=False,
+            )
+
+        self.assertEqual(closure["uncertain_report"], uncertain_report)
+        self.assertEqual(closure["recovered_findings"], [])
+        self.assertFalse(closure["needs_fresh_review"])
+        resolve_uncertain.assert_not_called()
+
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._review_completion", return_value={"done": True})
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_external_manual_loop_still_requires_fresh_review_when_nothing_is_uncertain(
+        self,
+        json_clawpatch,
+        _review,
+        _gates,
+        _processes,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            branch, _head = self.init_repo(repo)
+            json_clawpatch.side_effect = [
+                {"revalidated": 0},
+                {"total": 0, "items": []},
+                {"total": 0, "items": []},
+                {"openFindings": 0, "activeLocks": 0, "lockFiles": 0},
+            ]
+
+            closure = _final_closure(
+                repo,
+                env={},
+                state_root=root / "state",
+                push_mode="none",
+                branch=branch,
+                pushed=False,
+                publish_clawpatch_state=False,
+                review_limit=1,
+                require_project_gates=False,
+                require_fresh_review=True,
+                resolve_uncertain=False,
+            )
+
+        self.assertTrue(closure["needs_fresh_review"])
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])

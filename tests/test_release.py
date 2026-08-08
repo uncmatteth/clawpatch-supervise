@@ -2071,6 +2071,70 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._revalidate")
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates")
     @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    def test_stopped_uncertain_gate_failure_does_not_commit_or_advance(
+        self,
+        show_finding,
+        run_project_gates,
+        revalidate,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("checkpointed repair\n", encoding="utf-8")
+            checkpoint = {
+                "finding_id": "fnd_one",
+                "branch": branch,
+                "head_before": head,
+                "phase": "stopped",
+                "owned_paths": ["app.py"],
+            }
+            show_finding.return_value = {
+                "finding": {"id": "fnd_one", "status": "uncertain"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_one",
+                        "status": "applied",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": ["app.py"],
+                        "git": {"baseSha": head},
+                    }
+                ],
+            }
+            run_project_gates.side_effect = GateFailure("configured project gate failed")
+
+            record, pushed = _resume_stopped_attempt(
+                repo,
+                checkpoint,
+                env={},
+                push_mode="each",
+                branch=branch,
+                pushed=False,
+                advance_uncertain=True,
+            )
+
+            status = subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True)
+
+        self.assertFalse(pushed)
+        self.assertEqual(record["revalidation"]["outcome"], "uncertain")
+        self.assertNotIn("deferred_uncertain", record)
+        self.assertEqual(record["commit"], "")
+        self.assertIn("app.py", status)
+        revalidate.assert_not_called()
+
+    @patch("clawpatch_supervise.clawpatch_release._revalidate")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
     def test_stopped_open_invalid_gate_configuration_stays_stopped(
         self,
         show_finding,

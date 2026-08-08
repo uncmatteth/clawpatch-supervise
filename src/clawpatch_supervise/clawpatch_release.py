@@ -48,8 +48,9 @@ LIFECYCLE = (
     "one combined exact-path final commit/push when authorized -> an open revalidation with source "
     "progress amends the local iteration and reenters the same finding without a cap; an open "
     "revalidation without source progress informs up to two additional fix attempts; no-progress, "
-    "unsupported, failed, "
-    "uncertain transitions stop with source changes intact; a ClawPatch-owned false-positive "
+    "unsupported or failed transitions stop with source changes intact; strict mode keeps uncertain "
+    "repairs in the same-finding loop, while external unattended mode commits any exact applied repair, "
+    "retains the uncertain classification, and continues the open queue; a ClawPatch-owned false-positive "
     "restores only its exact supervisor-owned repair paths to the finding start tree, retires "
     "the checkpoint, and advances; any ownership mismatch stops unchanged -> "
     "final open/uncertain closure -> rebuild generated ClawPatch state and repeat map plus complete "
@@ -2970,6 +2971,7 @@ def _process_finding_until_fixed(
     resume_seen_states: set[str] | None = None,
     resume_attempt: int = 1,
     resume_continuations: int = 0,
+    advance_uncertain: bool = False,
 ) -> tuple[dict[str, Any], bool, int]:
     original_head = resume_original_head or _git_text(repo, ["git", "rev-parse", "HEAD"])
     temporary_commit = resume_temporary_commit
@@ -3206,7 +3208,9 @@ def _process_finding_until_fixed(
                     "revalidation": validation,
                     "commit": "",
                 }
-                if validation.get("outcome") in {"open", "uncertain"}:
+                if validation.get("outcome") == "open" or (
+                    validation.get("outcome") == "uncertain" and not advance_uncertain
+                ):
                     validation_outcome = str(validation["outcome"])
                     if progress is not None:
                         progress(
@@ -3264,6 +3268,7 @@ def _process_finding_until_fixed(
             revalidation_decision = decide_repair_transition(
                 revalidation_outcome=revalidation_outcome,
                 has_source_progress=bool(temporary_commit or _source_paths(repo)),
+                advance_uncertain=advance_uncertain,
             )
         except ValueError as exc:
             _stop_finding_iteration(
@@ -3276,6 +3281,24 @@ def _process_finding_until_fixed(
                 state_root=state_root,
             )
             raise SafetyError("Clawpatch returned an unsupported revalidation outcome.") from exc
+        if revalidation_decision.action is RepairAction.COMMIT_AND_ADVANCE:
+            record["deferred_uncertain"] = True
+            return _complete_fixed_finding(
+                repo,
+                finding_id,
+                record=record,
+                branch=branch,
+                original_head=original_head,
+                temporary_commit=temporary_commit,
+                seen_states=seen_states,
+                state_root=state_root,
+                push_mode=push_mode,
+                pushed=pushed,
+                continuations=continuations,
+                progress=progress,
+                current=current,
+                total=total,
+            )
         if revalidation_decision.action is RepairAction.PRESERVE_AND_CONTINUE:
             if (
                 not _source_paths(repo)
@@ -3572,6 +3595,7 @@ def _resume_stopped_attempt(
     pushed: bool,
     progress: Callable[[dict[str, Any]], None] | None = None,
     require_project_gates: bool = True,
+    advance_uncertain: bool = False,
 ) -> tuple[dict[str, Any], bool]:
     finding_id = str(checkpoint["finding_id"])
     recorded_owned_paths = sorted(str(path) for path in checkpoint["owned_paths"])
@@ -3759,8 +3783,11 @@ def _resume_stopped_attempt(
             "managerooResumedRecordedOutcome": True,
         }
     outcome = str(validation["outcome"])
+    can_advance_uncertain = bool(
+        outcome == "uncertain" and advance_uncertain and not project_gate_failure
+    )
     commit = ""
-    if outcome == "fixed":
+    if outcome == "fixed" or can_advance_uncertain:
         commit = _commit_attempt(
             repo,
             finding_id,
@@ -3771,7 +3798,7 @@ def _resume_stopped_attempt(
     if push_mode == "each" and commit:
         _push_and_verify(repo, branch, first=not pushed)
         pushed = True
-    return {
+    record = {
         "finding_id": finding_id,
         "inspection": inspected,
         "head_before": current_head,
@@ -3781,7 +3808,10 @@ def _resume_stopped_attempt(
         "revalidation": validation,
         "commit": commit,
         "resumed": True,
-    }, pushed
+    }
+    if can_advance_uncertain:
+        record["deferred_uncertain"] = True
+    return record, pushed
 
 
 def _required_int(payload: dict[str, Any], field: str) -> int:
@@ -4088,6 +4118,7 @@ def _final_closure(
     total: int | str = "?",
     require_project_gates: bool = True,
     require_fresh_review: bool = False,
+    resolve_uncertain: bool = True,
 ) -> dict[str, Any]:
     _require_no_process(repo)
     review_completion = _review_completion(
@@ -4128,7 +4159,7 @@ def _final_closure(
         raise SafetyError("Final Clawpatch uncertain report has inconsistent items and total.")
     recovered_findings: list[dict[str, Any]] = []
     recovered_continuations: list[dict[str, Any]] = []
-    if uncertain_total:
+    if uncertain_total and resolve_uncertain:
         current_offset = (
             current if isinstance(current, int) and not isinstance(current, bool) else 0
         )
@@ -4272,7 +4303,10 @@ def _final_closure(
     )
     if _source_paths(repo):
         raise SafetyError(f"Final closure found uncommitted source changes: {_source_paths(repo)}")
-    needs_fresh_review = require_fresh_review or bool(recovered_findings)
+    retains_uncertain_without_resolution = bool(uncertain_total and not resolve_uncertain)
+    needs_fresh_review = (
+        require_fresh_review and not retains_uncertain_without_resolution
+    ) or bool(recovered_findings)
     state_commit = ""
     if not needs_fresh_review:
         state_paths = [
@@ -4342,6 +4376,7 @@ def release_sweep(
     progress: Callable[[dict[str, Any]], None] | None = None,
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
+    advance_uncertain: bool = False,
 ) -> dict[str, Any]:
     """Automate Clawpatch's documented one-finding workflow without automatic triage."""
     root = _git_root(repo)
@@ -4358,6 +4393,7 @@ def release_sweep(
             progress=progress,
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
+            advance_uncertain=advance_uncertain,
         )
     with _release_sweep_lock(root):
         return _release_sweep_locked(
@@ -4372,6 +4408,7 @@ def release_sweep(
             progress=progress,
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
+            advance_uncertain=advance_uncertain,
         )
 
 
@@ -4388,6 +4425,7 @@ def _release_sweep_locked(
     progress: Callable[[dict[str, Any]], None] | None = None,
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
+    advance_uncertain: bool = False,
     _fixed_point_generation: int = 1,
     _fixed_point_seen_trees: tuple[str, ...] = (),
     _prior_results: tuple[dict[str, Any], ...] = (),
@@ -4428,6 +4466,7 @@ def _release_sweep_locked(
         "push_mode": push_mode,
         "integration_mode": integration_mode,
         "publish_clawpatch_state": publish_clawpatch_state,
+        "advance_uncertain": advance_uncertain,
         "results": list(_prior_results),
         "continuations": list(_prior_continuations),
         "false_positives": list(_prior_false_positives),
@@ -4901,6 +4940,7 @@ def _release_sweep_locked(
                     pushed=pushed,
                     progress=progress,
                     require_project_gates=require_project_gates,
+                    advance_uncertain=advance_uncertain,
                 )
             except BaseException as exc:
                 if isinstance(exc, (KeyboardInterrupt, SystemExit)):
@@ -4911,7 +4951,12 @@ def _release_sweep_locked(
                 ) from exc
             resumed_checkpoint = True
             resumed_outcome = resumed.get("revalidation", {}).get("outcome")
-            if resumed_outcome in {"open", "uncertain"}:
+            resumed_uncertain_can_advance = bool(
+                resumed_outcome == "uncertain" and resumed.get("deferred_uncertain")
+            )
+            if resumed_outcome == "open" or (
+                resumed_outcome == "uncertain" and not resumed_uncertain_can_advance
+            ):
                 finding_id = str(resumed["finding_id"])
                 provider_failure_continuation = bool(
                     resumed.get("revalidation", {}).get("managerooProviderFailureContinuation")
@@ -4968,6 +5013,7 @@ def _release_sweep_locked(
                         resume_seen_states=seen_states,
                         resume_attempt=2,
                         resume_continuations=1,
+                        advance_uncertain=advance_uncertain,
                     )
                 except BaseException:
                     current_resume_head = _git_text(root, ["git", "rev-parse", "HEAD"])
@@ -5000,6 +5046,12 @@ def _release_sweep_locked(
                 resumed_detail = (
                     f"stopped attempt revalidated {resumed_outcome}, continued locally, then fixed"
                 )
+            elif resumed_uncertain_can_advance:
+                finding_id = str(resumed["finding_id"])
+                _clear_release_progress(root, state_root=state_root)
+                report["results"].append(resumed)
+                resumed_phase = "uncertain"
+                resumed_detail = "stopped attempt committed as uncertain; continuing queue"
             elif resumed_outcome == "false-positive":
                 finding_id = str(resumed["finding_id"])
                 discarded_paths = sorted(str(path) for path in resumed["files_changed"])
@@ -5236,6 +5288,7 @@ def _release_sweep_locked(
                 total=total_findings,
                 require_project_gates=require_project_gates,
                 state_root=state_root,
+                advance_uncertain=advance_uncertain,
             )
         except BaseException as exc:
             stopped = _load_release_progress(root, state_root=state_root)
@@ -5284,9 +5337,10 @@ def _release_sweep_locked(
         current_finding += 1
         report["results"].append(record)
         if progress is not None:
+            completed_phase = "uncertain" if record.get("deferred_uncertain") else "fixed"
             progress(
                 {
-                    "phase": "fixed",
+                    "phase": completed_phase,
                     "current": current_finding,
                     "total": total_findings,
                     "finding_id": finding_id,
@@ -5317,6 +5371,7 @@ def _release_sweep_locked(
         total=total_findings,
         require_project_gates=require_project_gates,
         require_fresh_review=known_generation_findings,
+        resolve_uncertain=not advance_uncertain,
     )
     report["results"].extend(closure.get("recovered_findings", []))
     report["continuations"].extend(closure.get("recovered_continuations", []))
@@ -5369,6 +5424,7 @@ def _release_sweep_locked(
             progress=progress,
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
+            advance_uncertain=advance_uncertain,
             _fixed_point_generation=_fixed_point_generation + 1,
             _fixed_point_seen_trees=(*_fixed_point_seen_trees, generation_tree),
             _prior_results=tuple(report["results"]),
@@ -5378,14 +5434,19 @@ def _release_sweep_locked(
             _already_pushed=bool(closure.get("pushed", pushed)),
         )
     final_head = _git_text(root, ["git", "rev-parse", "HEAD"])
+    final_uncertain_count = _required_int(
+        closure.get("uncertain_report", {"total": 0}), "total"
+    )
+    completion_status = "COMPLETE" if final_uncertain_count == 0 else "PROCESSED_WITH_UNCERTAIN"
     proof = {
-        "status": "COMPLETE",
+        "status": completion_status,
         "completed_at": utc_now(),
         "repo": str(root),
         "branch": selected_branch,
         "git_head": final_head,
         "clawpatch_version": version,
         "open_findings": 0,
+        "uncertain_findings": final_uncertain_count,
         "completed_findings": report["results"],
         "continuation_attempts": report["continuations"],
         "false_positives": report["false_positives"],
@@ -5400,8 +5461,9 @@ def _release_sweep_locked(
             "git_head": final_head,
             "finding_count": len(report["results"]),
             "false_positive_count": len(report["false_positives"]),
-            "unresolved_count": 0,
+            "unresolved_count": final_uncertain_count,
             "open_findings": 0,
+            "uncertain_findings": final_uncertain_count,
             "final_closure": closure,
             "proof_path": str(proof_path),
         }
@@ -5418,10 +5480,12 @@ def format_release_sweep(report: dict[str, Any]) -> str:
             f"Lifecycle: {report['lifecycle']}\n"
             "No repository changes were made. Run again with --apply to execute.\n"
         )
+    completion = "COMPLETE" if not report.get("uncertain_findings") else "PROCESSED WITH UNCERTAIN"
     return (
-        "CLAWPATCH RELEASE SWEEP: COMPLETE\n"
-        f"Findings fixed and committed: {report.get('finding_count', 0)}\n"
+        f"CLAWPATCH RELEASE SWEEP: {completion}\n"
+        f"Findings processed: {report.get('finding_count', 0)}\n"
         f"Open findings: {report.get('open_findings', 0)}\n"
+        f"Uncertain findings retained: {report.get('uncertain_findings', 0)}\n"
         f"Final HEAD: {report.get('git_head', '')}\n"
         f"Proof: {report.get('proof_path', '')}\n"
     )

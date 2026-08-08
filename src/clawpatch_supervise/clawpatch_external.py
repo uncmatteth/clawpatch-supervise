@@ -304,6 +304,13 @@ def _render_event(event: dict[str, Any]) -> str:
             f"\n{_counter(event)} FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED\n"
             f"commit: {_terminal_safe(commit)}"
         )
+    if phase == "uncertain":
+        commit = event.get("commit") or "no source commit required"
+        return (
+            f"\n{_counter(event)} UNCERTAIN — 📦➡️ SAVED. MOVING TO THE NEXT OPEN FINDING.\n"
+            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
+            f"commit: {_terminal_safe(commit)}"
+        )
     if phase == "continuing":
         commit = event.get("commit") or "no source commit required"
         return (
@@ -536,6 +543,7 @@ def main(
                 progress=display_after_external_preflight,
                 integration_mode="external",
                 child_env_overrides=child_env_overrides,
+                advance_uncertain=True,
             )
     except ClawpatchStop as exc:
         print("\n🛑💥🤬 FUCK. SUPERVISOR STOPPED SAFELY.", flush=True)
@@ -588,11 +596,12 @@ def main(
 
     print(
         "\nCOMPLETE: "
-        f"fixed={report.get('finding_count', 0)} "
+        f"processed={report.get('finding_count', 0)} "
         f"open={report.get('open_findings', '?')} "
+        f"uncertain={report.get('uncertain_findings', 0)} "
         f"fresh_review_generations={len(report.get('review_generations', []))} "
         f"head={report.get('git_head', '')} "
-        "— 🏁🔥🤘 FUCK YES. QUEUE'S CLEAN.",
+        "— 🏁🔥🤘 FUCK YES. EVERY OPEN FINDING WAS PROCESSED.",
         flush=True,
     )
     return 0

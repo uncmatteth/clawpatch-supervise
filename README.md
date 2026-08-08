@@ -140,6 +140,8 @@ The supervisor provides:
 - complete map/review waves with a decreasing-pending proof;
 - automatic ClawPatch agent mapping when the heuristic mapper reports zero features, so unsupported languages such as Solidity are not falsely declared empty;
 - one-current-finding `next → show → fix → revalidate` ordering;
+- external unattended parity with the proven manual loop: commit/push an applied `uncertain`
+  repair, continue to the next open finding, and report the retained uncertain count at the end;
 - exact-path temporary commits for genuine partial progress;
 - same-finding continuation only when ClawPatch produced a new source tree;
 - durable checkpoints outside the repository being repaired;
@@ -158,7 +160,9 @@ The supervisor provides:
 | ClawPatch result | Supervisor action |
 |---|---|
 | `fixed` with a verified repair | Create one exact-path repair commit, push if requested, continue. |
-| `open` or `uncertain` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
+| `open` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
+| `uncertain` from the external unattended command | Commit the exact applied repair (if any), push when requested, retain its ClawPatch `uncertain` status, and continue to the next open finding. |
+| `uncertain` from strict library/Manageroo mode | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
 | `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with new `open` or `uncertain` evidence. |
 | `fix` exits `6` without another source diff | Revalidate the code already present. If ClawPatch now proves it `fixed`, continue without demanding a duplicate edit or empty commit. |
 | `fix` times out or loses its provider after applying source progress | Save the exact repair and revalidate it before spending another provider attempt; finalize immediately when the saved repair is already fixed. |
@@ -170,7 +174,8 @@ The supervisor provides:
 | Same finding still returns the same tree after bounded recovery | Preserve the checkpoint and stop without losing source. |
 | Transient provider, refusal, quota, or timeout with no source progress | Exit `75` so a service may restart later. |
 | Ownership, branch, checkpoint, or Git provenance mismatch | Exit `2` and leave the source for inspection. |
-| Fresh final review proves zero remaining work | Write `status: COMPLETE` proof, retain `.clawpatch` so `clawpatch status` remains verifiable, and exit `0`. |
+| External run reaches zero open findings with uncertain findings retained | Write `status: PROCESSED_WITH_UNCERTAIN`, include the exact uncertain count, retain `.clawpatch`, and exit `0` without claiming those findings are fixed. |
+| Strict final review proves zero remaining work | Write `status: COMPLETE` proof, retain `.clawpatch` so `clawpatch status` remains verifiable, and exit `0`. |
 
 ## Built for real repositories
 
@@ -182,7 +187,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Empty stop markers do not strand open findings.** If a stopped checkpoint owns no source, has no temporary commit, and ClawPatch still reports the exact finding open at the same HEAD, the supervisor retires only that empty wrapper. `clawpatch next` must return the same finding before its fix is attempted again.
 - **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a stopped checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor retires only the obsolete recovery wrapper. The same recovery applies when a source-clean checkpoint owns no paths and has no temporary commit, because there is no repair content to lose. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and the sanitized environment is passed exactly so inherited database credentials and reset guards stay removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
-- **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. When either result belongs to a genuinely changed repair tree, its concrete failures feed the next same-finding fix instead of stopping the queue. An unchanged uncertain result still stops rather than looping blindly.
+- **New evidence gets another chance in strict mode.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. The external unattended command instead records an applied uncertain repair and continues the remaining open queue, matching the documented manual workflow without falsely relabeling the result as fixed.
 - **Existing queues do not get erased.** The default command resumes the current `.clawpatch` queue. A reset is offered only for a proven-clean queue with clean project source, and dirty source blocks reset.
 - **State queries keep JSON clean.** Existing-queue checks parse only command stdout; stderr diagnostics remain separate and are included with bounded stdout context when a query fails.
 - **Zero heuristic features are not completion.** The supervisor asks ClawPatch's own agent mapper to inspect the repository before accepting an empty map, which keeps Solidity and other unsupported heuristic languages in the real review flow.
@@ -362,7 +367,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.24 alpha**.
+Current release: **0.1.25 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 
