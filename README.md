@@ -96,7 +96,7 @@ clawpatch-supervise `
   --timeout-minutes 15
 ```
 
-Use `--push none` if you want verified local commits without publishing them. The normal command preserves and processes an existing `.clawpatch` queue instead of deleting it. When an existing queue is proven clean and project source is clean, an interactive run asks whether to remove that state and start a new full review. Press `Enter` or answer `n` to keep the existing state and continue; answer `y` to reset the proven-clean state and review again. While that question is waiting, the heartbeat explicitly identifies a user prompt and never claims `clawpatch --version` or a child watchdog is still running. Closing input at this prompt retains the state and stops safely. `--fresh` is the explicit non-interactive reset choice, but it still requires proof that the existing queue has no open findings, locks, lock files, or uncertain findings and that no project source is retained. Use `--resume-stopped` for an exact stopped supervisor checkpoint.
+From a target repository, bare `clawpatch-supervise` uses the current branch, pushes each verified repair, and processes the queue without a start-mode prompt. It resumes any exact stopped checkpoint automatically, preserves an open or uncertain queue, and starts a fresh full review automatically only when both the existing queue and project source are proven clean. Another active run makes the command wait, and transient provider, refusal, quota, or timeout failures retry from durable state every 30 seconds until they succeed or the operator interrupts the command. Use `--push none` for verified local commits without publication. `--fresh` still explicitly requires a clean queue and clean source; `--resume-stopped` remains available only as a compatibility override that forbids an automatic fresh start.
 
 The supervisor resolves `--repo` to one canonical path before preflight and uses that same path for the entire run, so retargeting a repository symlink cannot redirect later repair work.
 
@@ -172,7 +172,9 @@ The supervisor provides:
 - same-finding continuation only when ClawPatch produced a new source tree;
 - durable checkpoints outside the repository being repaired;
 - repository-scoped active-process detection for console, script, and `python -m clawpatch_supervise` launches;
+- automatic waiting when another verified run owns the repository;
 - a child-process watchdog that terminates the entire timed-out process group;
+- automatic in-process retry and exact-checkpoint resume for transient provider, refusal, quota, and timeout failures;
 - one marked run-owned temporary root, automatic stale-run pruning, and explicit cleanup dry-run/apply commands;
 - optional verified `each` or `final` pushes;
 - fresh fixed-point review generations after repairs;
@@ -198,7 +200,7 @@ The supervisor provides:
 | `false-positive` | Restore only the exact supervisor-owned repair paths to the finding's starting tree, retire the checkpoint, continue. |
 | Open or uncertain revalidation with no new source changes, including after a checkpointed repair | Feed the new evidence into up to two more same-finding attempts; never advance the queue or try to save the identical tree again. |
 | Same finding still returns the same tree after bounded recovery | Preserve the checkpoint and stop without losing source. |
-| Transient provider, refusal, quota, or timeout with no source progress | Exit `75` so a service may restart later. |
+| Transient provider, refusal, quota, or timeout with no source progress | Wait, retry automatically, and resume the exact durable checkpoint or source-clean command without requiring a new invocation. |
 | Ownership, branch, checkpoint, or Git provenance mismatch | Exit `2` and leave the source for inspection. |
 | External run reaches zero open findings with uncertain findings retained | Write `status: PROCESSED_WITH_UNCERTAIN`, include the exact uncertain count, retain `.clawpatch`, and exit `0` without claiming those findings are fixed. |
 | Strict final review proves zero remaining work | Write `status: COMPLETE` proof, retain `.clawpatch` so `clawpatch status` remains verifiable, and exit `0`. |
@@ -211,12 +213,12 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
 - **Stale checkpoint wrappers recover in one command.** If committed work advances HEAD while the only dirty paths still exactly match a modern stopped checkpoint, but their bytes no longer match its fingerprint, the normal command preserves the complete ambiguous tree under a local-only `refs/clawpatch-supervise/recovery/...` ref, writes an external recovery receipt, restores current HEAD, retires only the stale wrapper, and continues the existing ClawPatch queue. It never pushes the recovery ref or absorbs unrelated paths.
-- **Published updates do not strand the next plain run.** When pushing is enabled, the current branch has no source changes, and local HEAD is strictly behind the stable live origin branch, the supervisor fetches that exact commit, proves ancestry, fast-forwards with local Git hooks disabled, preserves `.clawpatch`, and continues automatically. Source-dirty, ahead, diverged, detached, missing, or moving remote branches still stop safely.
+- **Published updates do not strand the next plain run.** When pushing is enabled and the current branch has no source changes, a strictly behind local HEAD is fast-forwarded to the stable live origin commit with local Git hooks disabled. A clean strictly ahead local HEAD is accepted for the authorized push path. Diverged, detached, missing, moving, or source-dirty branches still stop safely.
 - **Empty stop markers do not strand open findings.** If a stopped checkpoint owns no source, has no temporary commit, and ClawPatch still reports the exact finding open at the same HEAD, the supervisor retires only that empty wrapper. `clawpatch next` must return the same finding before its fix is attempted again.
 - **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a stopped checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor retires only the obsolete recovery wrapper. The same recovery applies when a source-clean checkpoint owns no paths and has no temporary commit, because there is no repair content to lose. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and the sanitized environment is passed exactly so inherited database credentials and reset guards stay removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
 - **New evidence gets another chance in strict mode.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. The external unattended command instead records an applied uncertain repair and continues the remaining open queue, matching the documented manual workflow without falsely relabeling the result as fixed.
-- **Existing queues do not get erased.** The default command resumes the current `.clawpatch` queue. A reset is offered only for a proven-clean queue with clean project source, and dirty source blocks reset.
+- **Bare invocation owns recovery.** The default command resumes the current `.clawpatch` queue and exact stopped checkpoint, waits for another active owner, and retries transient failures without exiting. It automatically resets only a proven-clean queue with clean project source; dirty source blocks reset.
 - **State queries keep JSON clean.** Existing-queue checks parse only command stdout; stderr diagnostics remain separate and are included with bounded stdout context when a query fails.
 - **Zero heuristic features are not completion.** The supervisor asks ClawPatch's own agent mapper to inspect the repository before accepting an empty map, which keeps Solidity and other unsupported heuristic languages in the real review flow.
 - **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary. If the repair was already present and a later `fix` has nothing new to edit, the supervisor revalidates that existing code instead of misclassifying the empty second diff as the repair disappearing.
@@ -298,7 +300,7 @@ systemd-run --user \
   --property=RestartPreventExitStatus=2 \
   --property=RestartSec=30s \
   clawpatch-supervise --repo "$PWD" --branch current --push each \
-    --timeout-minutes 15 --resume-stopped
+    --timeout-minutes 15
 ```
 
 Watch it:
@@ -324,7 +326,7 @@ $Logs = "$env:LOCALAPPDATA\ClawPatchSupervise\logs"
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 
 Start-Process -FilePath $Supervisor `
-  -ArgumentList @("--repo", $Repo, "--branch", "current", "--push", "each", "--timeout-minutes", "15", "--resume-stopped") `
+  -ArgumentList @("--repo", $Repo, "--branch", "current", "--push", "each", "--timeout-minutes", "15") `
   -RedirectStandardOutput "$Logs\queue.out.log" `
   -RedirectStandardError "$Logs\queue.err.log" `
   -WindowStyle Hidden
@@ -332,7 +334,7 @@ Start-Process -FilePath $Supervisor `
 Get-Content "$Logs\queue.out.log" -Wait
 ```
 
-For unattended restart after sign-in or reboot, create a Windows Task Scheduler task that invokes the same installed `.exe` and arguments. Exit `75` is retryable; exit `2` is a terminal/safety stop that needs inspection.
+For unattended restart after sign-in or reboot, create a Windows Task Scheduler task that invokes the same installed `.exe` and arguments. The process handles transient retries itself; exit `2` remains a terminal safety/provenance stop that needs inspection.
 
 ## Safety boundary
 
@@ -360,6 +362,7 @@ ClawPatch owns the findings and repairs. The supervisor owns the reliable journe
 --fresh                     explicitly reset only clean project source and rebuild the queue
 --resume-stopped            resume existing state or one exact stopped checkpoint
 --timeout-minutes N         watchdog for each ClawPatch child; default 15
+--retry-seconds N           wait before an automatic transient/busy retry; default 30
 --print-state-path          print the external checkpoint/proof directory and exit
 --publish-clawpatch-state   explicitly commit safe generated ClawPatch state
 ```
@@ -367,7 +370,7 @@ ClawPatch owns the findings and repairs. The supervisor owns the reliable journe
 Exit codes:
 
 - `0`: complete;
-- `75`: classified transient stop, suitable for a delayed service restart;
+- `75`: classified transient stop outside the normal in-process retry boundary;
 - `2`: terminal, safety, or provenance stop.
 
 ## Install from source

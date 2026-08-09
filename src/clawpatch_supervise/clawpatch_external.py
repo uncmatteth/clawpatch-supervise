@@ -23,7 +23,7 @@ from .clawpatch_release import (
     runtime_doctor,
 )
 from .cleanup import cleanup_owned_runs, owned_run_directory
-from .errors import SafetyError
+from .errors import RepositoryBusyError, SafetyError
 from .runner import CommandRunner
 from .validation_services import provision_disposable_validation_environment
 
@@ -82,34 +82,7 @@ def _resolve_fresh_mode(
         if requested is True:
             raise SafetyError("Explicit --fresh refuses to discard retained project source changes.")
         return False
-    if requested is True:
-        return True
-    if not sys.stdin.isatty():
-        print(
-            "Existing clean .clawpatch state retained; use --fresh to explicitly start over.",
-            flush=True,
-        )
-        return False
-    if progress is not None:
-        progress(
-            {
-                "phase": "fresh-choice",
-                "current": "?",
-                "total": "?",
-                "detail": (
-                    "waiting for y/N; Enter or N keeps the existing state and continues; "
-                    "this is not a stuck ClawPatch command"
-                ),
-            }
-        )
-    try:
-        answer = input(
-            "ClawPatch queue is clean. Start a new full review? "
-            "[y/N] (Enter or N keeps this state and continues) "
-        )
-    except EOFError as exc:
-        raise SafetyError("Fresh-state prompt closed; existing .clawpatch state retained.") from exc
-    return answer.strip().casefold() in {"y", "yes"}
+    return True
 
 
 def _terminal_safe(value: Any) -> str:
@@ -243,12 +216,6 @@ def _render_event(event: dict[str, Any]) -> str:
         )
     if phase == "finding":
         return _render_inspection(event)
-    if phase == "fresh-choice":
-        return (
-            f"\n{_counter(event)} WAITING FOR YOUR Y/N ANSWER — "
-            "⌨️👀 THIS IS A PROMPT, NOT A HUNG COMMAND\n"
-            f"detail: {_terminal_safe(event.get('detail', ''))}"
-        )
     if phase == "false-positive":
         return (
             f"\n{_counter(event)} FALSE-POSITIVE — 🙄🗑️ BOGUS BUG. "
@@ -356,12 +323,6 @@ def _heartbeat_lines(
     now: float | None = None,
 ) -> list[str]:
     phase = str(snapshot.get("phase", "working"))
-    if phase == "fresh-choice":
-        return [
-            f"{_counter(snapshot)} WAITING FOR YOUR Y/N ANSWER — NOT A STUCK COMMAND",
-            "Press Enter or n: keeps the existing state and continues. "
-            "Press y: removes the proven-clean state and starts a new full review.",
-        ]
     current_time = time.monotonic() if now is None else now
     elapsed = int(current_time - float(snapshot["changed"]))
     attempt = snapshot.get("attempt")
@@ -470,9 +431,17 @@ def main(
         type=int,
         default=CLAWPATCH_CHILD_WATCHDOG_SECONDS // 60,
     )
+    parser.add_argument(
+        "--retry-seconds",
+        type=float,
+        default=30,
+        help="seconds to wait before automatically resuming a transient stop",
+    )
     args = parser.parse_args(raw_argv)
     if args.timeout_minutes < 1:
         parser.error("--timeout-minutes must be at least 1")
+    if args.retry_seconds < 0:
+        parser.error("--retry-seconds cannot be negative")
     try:
         repo = Path(args.repo).resolve()
     except (OSError, RuntimeError) as exc:
@@ -523,21 +492,33 @@ def main(
     print(
         f"ClawPatch external supervisor: repo={repo} "
         f"branch={args.branch} push={args.push} fresh={'auto' if args.fresh is None else args.fresh} "
-        f"timeout={args.timeout_minutes}m",
+        f"timeout={args.timeout_minutes}m retry={args.retry_seconds:g}s",
         flush=True,
     )
     try:
-        display(
-            {
-                "phase": "preflight",
-                "current": "?",
-                "total": "?",
-                "command": "clawpatch --version",
-                "attempt": 1,
-                "max_attempts": 1,
-            }
-        )
-        preflight_env_overrides = ensure_repository_idle(repo) or {}
+        preflight_attempt = 0
+        while True:
+            preflight_attempt += 1
+            display(
+                {
+                    "phase": "preflight",
+                    "current": "?",
+                    "total": "?",
+                    "command": "clawpatch --version",
+                    "attempt": preflight_attempt,
+                }
+            )
+            try:
+                preflight_env_overrides = ensure_repository_idle(repo) or {}
+                break
+            except RepositoryBusyError as exc:
+                print(
+                    "\nBUSY: WAITING FOR THE ACTIVE RUN to release this repository; "
+                    f"checking again in {args.retry_seconds:g}s.\n{exc}",
+                    flush=True,
+                )
+                if args.retry_seconds:
+                    time.sleep(args.retry_seconds)
         resolved_fresh = _resolve_fresh_mode(repo, args.fresh, progress=display)
         def report_blocked_cleanup(path: Path, _error: OSError) -> None:
             print(
@@ -564,20 +545,55 @@ def main(
                 **owned_run.child_environment(),
                 **preflight_env_overrides,
             }
-            report = run_sweep(
-                repo,
-                apply=True,
-                branch=args.branch,
-                push_mode=args.push,
-                publish_clawpatch_state=args.publish_clawpatch_state,
-                trusted_host_codex_sandbox_bypass=args.trusted_host_codex_sandbox_bypass,
-                fresh=resolved_fresh,
-                child_timeout_seconds=watchdog_seconds,
-                progress=display_after_external_preflight,
-                integration_mode="external",
-                child_env_overrides=child_env_overrides,
-                advance_uncertain=True,
-            )
+            retry_attempt = 0
+            while True:
+                try:
+                    report = run_sweep(
+                        repo,
+                        apply=True,
+                        branch=args.branch,
+                        push_mode=args.push,
+                        publish_clawpatch_state=args.publish_clawpatch_state,
+                        trusted_host_codex_sandbox_bypass=args.trusted_host_codex_sandbox_bypass,
+                        fresh=resolved_fresh,
+                        child_timeout_seconds=watchdog_seconds,
+                        progress=display_after_external_preflight,
+                        integration_mode="external",
+                        child_env_overrides=child_env_overrides,
+                        advance_uncertain=True,
+                    )
+                    break
+                except ClawpatchStop as exc:
+                    if exc.repair_action is not RepairAction.STOP_TRANSIENT:
+                        raise
+                    retry_attempt += 1
+                    print(
+                        "\nTRANSIENT: RETRYING AUTOMATICALLY from the exact durable "
+                        f"checkpoint in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
+                        f"{exc}",
+                        flush=True,
+                    )
+                except ClawpatchCommandFailure as exc:
+                    if not exc.failure.transient:
+                        raise
+                    retry_attempt += 1
+                    print(
+                        "\nTRANSIENT: RETRYING AUTOMATICALLY from the source-clean "
+                        f"command in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
+                        f"{exc}",
+                        flush=True,
+                    )
+                except RepositoryBusyError as exc:
+                    retry_attempt += 1
+                    print(
+                        "\nBUSY: WAITING FOR THE ACTIVE RUN to release this repository; "
+                        f"checking again in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
+                        f"{exc}",
+                        flush=True,
+                    )
+                resolved_fresh = False
+                if args.retry_seconds:
+                    time.sleep(args.retry_seconds)
     except ClawpatchStop as exc:
         print("\n🛑💥🤬 FUCK. SUPERVISOR STOPPED SAFELY.", flush=True)
         print(f"\nSTOPPED: {exc}", flush=True)

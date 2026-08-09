@@ -26,7 +26,7 @@ from .clawpatch_protocol import (
     failure_from_legacy_outcome,
 )
 from .cleanup import current_temporary_root
-from .errors import GateFailure, SafetyError
+from .errors import GateFailure, RepositoryBusyError, SafetyError
 from .runner import CommandRunner
 from .util import atomic_write_json, utc_now
 
@@ -362,6 +362,13 @@ def _require_synchronized_remote_branch(
             raise SafetyError(
                 f"Origin/{branch} changed during synchronization; rerun the supervisor."
             )
+        remote_is_ancestor = _run(
+            ["git", "merge-base", "--is-ancestor", remote, local],
+            cwd=repo,
+            timeout=60,
+        )
+        if remote_is_ancestor.returncode == 0:
+            return local
         ancestor = _run(
             ["git", "merge-base", "--is-ancestor", local, remote],
             cwd=repo,
@@ -657,7 +664,9 @@ def _windows_clawpatch_processes(root: Path) -> list[dict[str, Any]]:
 def _require_no_process(repo: Path) -> None:
     active = _active_clawpatch_processes(repo)
     if active:
-        raise SafetyError(f"A Clawpatch process is already active for this repository: {active}")
+        raise RepositoryBusyError(
+            f"A Clawpatch process is already active for this repository: {active}"
+        )
 
 
 @contextmanager
@@ -710,7 +719,7 @@ def _release_sweep_lock(repo: Path) -> Iterator[None]:
             acquired = True
         except OSError as exc:
             if exc.errno in {errno.EACCES, errno.EAGAIN}:
-                raise SafetyError(
+                raise RepositoryBusyError(
                     f"A Clawpatch release sweep is already active for this repository: {repo}"
                 ) from exc
             raise SafetyError(

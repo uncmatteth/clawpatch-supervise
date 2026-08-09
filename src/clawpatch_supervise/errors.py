@@ -10,6 +10,10 @@ class SafetyError(ClawpatchSuperviseError):
     """A safety invariant was violated."""
 
 
+class RepositoryBusyError(SafetyError):
+    """Another verified process currently owns the repository workflow."""
+
+
 class StateTransitionError(ClawpatchSuperviseError):
     """An invalid state transition was attempted."""
 

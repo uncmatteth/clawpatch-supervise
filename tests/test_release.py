@@ -1408,7 +1408,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ],
             )
 
-    def test_pushable_branch_must_match_the_live_origin_sha_before_any_fix(self):
+    def test_pushable_branch_accepts_a_clean_local_ahead_history_before_fixing(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = root / "repo"
@@ -1430,8 +1430,14 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             (repo / "local-only.txt").write_text("ahead\n", encoding="utf-8")
             subprocess.run(["git", "add", "local-only.txt"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-q", "-m", "local only"], cwd=repo, check=True)
-            with self.assertRaisesRegex(SafetyError, "not synchronized"):
-                _require_synchronized_remote_branch(repo, branch)
+            local_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            self.assertEqual(
+                _require_synchronized_remote_branch(repo, branch),
+                local_head,
+            )
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")

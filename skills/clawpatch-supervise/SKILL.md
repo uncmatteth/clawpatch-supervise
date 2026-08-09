@@ -31,12 +31,11 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 2. Verify `git`, Python 3.11+, `clawpatch --version`, and `clawpatch-supervise --version`.
 3. Check for another supervisor or ClawPatch process targeting the same repository.
 4. Choose one start mode:
-   - normal invocation to preserve and process the existing `.clawpatch` queue;
-   - accept the interactive reset prompt only when the existing queue and project source are clean;
+   - normal invocation to resume exact stopped state, preserve an open or uncertain queue, wait for another active owner, retry transient failures, and automatically rebuild only a proven-clean queue;
    - `--fresh` only as an explicit non-interactive clean-source reset;
-   - `--resume-stopped` for the exact stopped checkpoint already on disk.
+   - `--resume-stopped` only as a compatibility override that prevents automatic fresh review.
 5. Run one repository at a time with an explicit absolute path, branch policy, push policy, and watchdog.
-6. If it stops, preserve the printed finding, paths, checkpoint, and source exactly. Relaunch normally or with `--resume-stopped`; the supervisor can adopt a later applied ClawPatch repair only when its finding, base SHA, and complete source-path set match the stopped checkpoint boundary. If later committed work cleanly advances HEAD, it may retire only a verified obsolete recovery wrapper while preserving `.clawpatch` and continuing the queue.
+6. Let the plain command retry provider, refusal, quota, timeout, and active-owner conditions itself. If it reaches a terminal safety/provenance stop, preserve the printed finding, paths, checkpoint, and source exactly. The supervisor can adopt a later applied ClawPatch repair only when its finding, base SHA, and complete source-path set match the stopped checkpoint boundary. If later committed work cleanly advances HEAD, it may retire only a verified obsolete recovery wrapper while preserving `.clawpatch` and continuing the queue.
 7. On completion, verify the proof file, clean Git state, local HEAD, and remote SHA when pushes were enabled.
 8. When disk cleanup is requested, run `clawpatch-supervise cleanup --dry-run` first. Use `cleanup --apply` only for entries the command classifies as `STALE`; `ACTIVE`, `RECENT`, `UNOWNED`, and `UNSAFE` entries stay preserved.
 
@@ -52,12 +51,6 @@ Windows PowerShell:
 ```powershell
 clawpatch-supervise --repo "C:\absolute\path\to\repo" --branch current `
   --push each --timeout-minutes 15
-```
-
-Resume only an exact stopped attempt:
-
-```text
-clawpatch-supervise --repo <absolute-path> --branch current --push each --timeout-minutes 15 --resume-stopped
 ```
 
 Find the external checkpoint and proof directory:

@@ -20,31 +20,12 @@ from clawpatch_supervise.clawpatch_external import (
 )
 from clawpatch_supervise.clawpatch_protocol import RepairAction, classify_clawpatch_failure
 from clawpatch_supervise.clawpatch_release import ClawpatchCommandFailure, ClawpatchStop
-from clawpatch_supervise.errors import SafetyError
+from clawpatch_supervise.errors import RepositoryBusyError, SafetyError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class ExternalClawpatchSupervisorTests(unittest.TestCase):
-    def test_clean_queue_prompt_heartbeat_does_not_claim_clawpatch_is_running(self):
-        lines = _heartbeat_lines(
-            {
-                "phase": "fresh-choice",
-                "current": "?",
-                "total": "?",
-                "changed": 0.0,
-            },
-            watchdog_seconds=900,
-            now=960.0,
-        )
-
-        rendered = "\n".join(lines)
-        self.assertIn("WAITING FOR YOUR Y/N ANSWER", rendered)
-        self.assertIn("Enter or n", rendered)
-        self.assertIn("keeps the existing state and continues", rendered)
-        self.assertNotIn("clawpatch --version", rendered)
-        self.assertNotIn("child watchdog", rendered)
-
     @unittest.skipUnless(os.name == "nt", "Windows command shim test")
     def test_state_query_launches_clawpatch_cmd_from_path_with_spaces(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -723,42 +704,101 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertNotIn("COMPLETE", rendered)
         self.assertNotIn("QUEUE'S CLEAN", rendered)
 
-    def test_transient_stop_has_a_distinct_service_retry_exit(self):
-        def fake_sweep(_repo: Path, **_kwargs):
-            raise ClawpatchStop(
-                "provider timed out without source progress",
-                repair_action=RepairAction.STOP_TRANSIENT,
-            )
+    def test_plain_command_retries_a_transient_stop_and_resumes_automatically(self):
+        calls = []
+
+        def fake_sweep(_repo: Path, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise ClawpatchStop(
+                    "provider timed out without source progress",
+                    repair_action=RepairAction.STOP_TRANSIENT,
+                )
+            return {"ok": True, "finding_count": 1, "open_findings": 0, "git_head": "abc"}
 
         output = StringIO()
-        with redirect_stdout(output):
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(output),
+        ):
             code = main(
-                ["--repo", ".", "--resume-stopped"],
+                ["--repo", ".", "--retry-seconds", "0"],
                 run_sweep=fake_sweep,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
             )
 
-        self.assertEqual(code, 75)
-        self.assertIn("TRANSIENT", output.getvalue())
-        self.assertIn("--resume-stopped", output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[0]["fresh"])
+        self.assertFalse(calls[1]["fresh"])
+        self.assertIn("RETRYING AUTOMATICALLY", output.getvalue())
+        self.assertIn("COMPLETE", output.getvalue())
 
-    def test_transient_source_clean_command_failure_uses_the_same_retry_exit(self):
-        def fake_sweep(_repo: Path, **_kwargs):
-            raise ClawpatchCommandFailure(
-                "review provider timed out",
-                failure=classify_clawpatch_failure("review", 124),
+    def test_plain_command_waits_for_an_active_repository_run(self):
+        preflight_calls = []
+
+        def fake_preflight(_repo: Path):
+            preflight_calls.append(True)
+            if len(preflight_calls) == 1:
+                raise RepositoryBusyError("another supervisor owns this repository")
+            return None
+
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(StringIO()) as output,
+        ):
+            code = main(
+                ["--repo", ".", "--retry-seconds", "0"],
+                run_sweep=lambda _repo, **_kwargs: {
+                    "ok": True,
+                    "finding_count": 0,
+                    "open_findings": 0,
+                    "git_head": "abc",
+                },
+                ensure_repository_idle=fake_preflight,
+                heartbeat_seconds=0,
             )
 
-        with redirect_stdout(StringIO()):
+        self.assertEqual(code, 0)
+        self.assertEqual(len(preflight_calls), 2)
+        self.assertIn("WAITING FOR THE ACTIVE RUN", output.getvalue())
+
+    def test_plain_command_retries_a_transient_source_clean_command(self):
+        calls = []
+
+        def fake_sweep(_repo: Path, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise ClawpatchCommandFailure(
+                    "review provider timed out",
+                    failure=classify_clawpatch_failure("review", 124),
+                )
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(StringIO()) as output,
+        ):
             code = main(
-                ["--repo", ".", "--resume-stopped"],
+                ["--repo", ".", "--retry-seconds", "0"],
                 run_sweep=fake_sweep,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
             )
 
-        self.assertEqual(code, 75)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("RETRYING AUTOMATICALLY", output.getvalue())
 
     def test_keyboard_interrupt_warns_that_applied_changes_may_remain(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -951,7 +991,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
-    def test_default_run_prompts_before_resetting_a_clean_completed_queue(
+    def test_default_run_starts_fresh_without_prompting_at_a_clean_completed_queue(
         self, _state_exists, _queue_is_clean, _source
     ):
         calls = []
@@ -961,8 +1001,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
 
         with (
-            patch("sys.stdin.isatty", return_value=True),
-            patch("builtins.input", return_value="y") as prompt,
+            patch("builtins.input", side_effect=AssertionError("must not prompt")),
             redirect_stdout(StringIO()),
         ):
             code = main(
@@ -973,71 +1012,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             )
 
         self.assertEqual(code, 0)
-        prompt.assert_called_once_with(
-            "ClawPatch queue is clean. Start a new full review? "
-            "[y/N] (Enter or N keeps this state and continues) "
-        )
         self.assertTrue(calls[0][1]["fresh"])
-
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
-    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
-    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
-    def test_default_no_at_clean_queue_prompt_keeps_state_and_continues(
-        self, _state_exists, _queue_is_clean, _source
-    ):
-        calls = []
-        output = StringIO()
-
-        def fake_sweep(repo: Path, **kwargs):
-            calls.append((repo, kwargs))
-            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
-
-        with (
-            patch("sys.stdin.isatty", return_value=True),
-            patch("builtins.input", return_value="") as prompt,
-            redirect_stdout(output),
-        ):
-            code = main(
-                ["--repo", "."],
-                run_sweep=fake_sweep,
-                ensure_repository_idle=lambda _repo: None,
-                heartbeat_seconds=0,
-            )
-
-        self.assertEqual(code, 0)
-        self.assertFalse(calls[0][1]["fresh"])
-        self.assertIn("WAITING FOR YOUR Y/N ANSWER", output.getvalue())
-        self.assertIn("not a stuck ClawPatch command", output.getvalue())
-        prompt.assert_called_once()
-
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
-    @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
-    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
-    def test_default_run_stops_safely_when_fresh_prompt_reaches_eof(
-        self, _state_exists, _queue_is_clean, _source
-    ):
-        calls = []
-        output = StringIO()
-
-        with (
-            patch("sys.stdin.isatty", return_value=True),
-            patch("builtins.input", side_effect=EOFError),
-            redirect_stdout(output),
-        ):
-            code = main(
-                ["--repo", "."],
-                run_sweep=lambda repo, **kwargs: calls.append((repo, kwargs)),
-                ensure_repository_idle=lambda _repo: None,
-                heartbeat_seconds=0,
-            )
-
-        self.assertEqual(code, 2)
-        self.assertEqual(calls, [])
-        self.assertIn(
-            "STOPPED: Fresh-state prompt closed; existing .clawpatch state retained.",
-            output.getvalue(),
-        )
-        self.assertNotIn("Traceback", output.getvalue())
 
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
