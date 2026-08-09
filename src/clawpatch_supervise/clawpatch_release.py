@@ -4329,6 +4329,8 @@ def _resolve_uncertain_findings(
     require_project_gates: bool,
     progress: Callable[[dict[str, Any]], None] | None = None,
     current_offset: int = 0,
+    finding_ids: list[str] | None = None,
+    retain_uncertain: bool = False,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     if (
         not isinstance(uncertain_total, int)
@@ -4336,6 +4338,12 @@ def _resolve_uncertain_findings(
         or uncertain_total < 0
     ):
         raise SafetyError("Clawpatch returned an invalid uncertain-finding count.")
+    if finding_ids is not None and (
+        len(finding_ids) != uncertain_total
+        or len(set(finding_ids)) != len(finding_ids)
+        or any(not _FINDING_ID.fullmatch(finding_id) for finding_id in finding_ids)
+    ):
+        raise SafetyError("Clawpatch uncertain report returned invalid finding IDs.")
     if _source_paths(repo):
         raise SafetyError("Uncommitted source changes block uncertain-finding recovery.")
     recovered: list[dict[str, Any]] = []
@@ -4343,18 +4351,23 @@ def _resolve_uncertain_findings(
     for index in range(1, uncertain_total + 1):
         displayed = current_offset + index
         display_total = current_offset + uncertain_total
-        finding_id, queue = _next_finding(
-            repo,
-            env=env,
-            status="uncertain",
-            progress=progress,
-            current=displayed,
-            total=display_total,
-        )
-        if finding_id is None:
-            raise SafetyError(
-                "Clawpatch uncertain report count changed before every finding could be revalidated."
+        if finding_ids is None:
+            finding_id, queue = _next_finding(
+                repo,
+                env=env,
+                status="uncertain",
+                progress=progress,
+                current=displayed,
+                total=display_total,
             )
+            if finding_id is None:
+                raise SafetyError(
+                    "Clawpatch uncertain report count changed before every finding could be "
+                    "revalidated."
+                )
+        else:
+            finding_id = finding_ids[index - 1]
+            queue = {"finding": {"id": finding_id, "status": "uncertain"}}
         inspected = _show_finding(
             repo,
             finding_id,
@@ -4416,24 +4429,28 @@ def _resolve_uncertain_findings(
                 )
         elif validation.get("outcome") == "open":
             reopened.append(finding_id)
+        elif validation.get("outcome") == "uncertain" and retain_uncertain:
+            record["retained_uncertain"] = True
+            recovered.append(record)
         else:
             raise SafetyError(
                 f"Uncertain-finding recovery returned an unsupported outcome for {finding_id}."
             )
         if _source_paths(repo):
             raise SafetyError("Uncertain-finding revalidation unexpectedly changed source files.")
-    remaining, _payload = _next_finding(
-        repo,
-        env=env,
-        status="uncertain",
-        progress=progress,
-        current=current_offset + uncertain_total,
-        total=current_offset + uncertain_total,
-    )
-    if remaining is not None:
-        raise SafetyError(
-            "Clawpatch uncertain report contained more findings than its reported total."
+    if finding_ids is None:
+        remaining, _payload = _next_finding(
+            repo,
+            env=env,
+            status="uncertain",
+            progress=progress,
+            current=current_offset + uncertain_total,
+            total=current_offset + uncertain_total,
         )
+        if remaining is not None:
+            raise SafetyError(
+                "Clawpatch uncertain report contained more findings than its reported total."
+            )
     return recovered, reopened
 
 
@@ -4453,6 +4470,7 @@ def _final_closure(
     require_project_gates: bool = True,
     require_fresh_review: bool = False,
     resolve_uncertain: bool = True,
+    refresh_retained_uncertain: bool = False,
 ) -> dict[str, Any]:
     _require_no_process(repo)
     review_completion = _review_completion(
@@ -4493,18 +4511,43 @@ def _final_closure(
         raise SafetyError("Final Clawpatch uncertain report has inconsistent items and total.")
     recovered_findings: list[dict[str, Any]] = []
     recovered_continuations: list[dict[str, Any]] = []
-    if uncertain_total and resolve_uncertain:
+    revalidated_uncertain: list[dict[str, Any]] = []
+    if uncertain_total and (resolve_uncertain or refresh_retained_uncertain):
         current_offset = (
             current if isinstance(current, int) and not isinstance(current, bool) else 0
         )
-        fixed_uncertain, reopened = _resolve_uncertain_findings(
-            repo,
-            env=env,
-            uncertain_total=uncertain_total,
-            require_project_gates=require_project_gates,
-            progress=progress,
-            current_offset=current_offset,
-        )
+        if refresh_retained_uncertain and not resolve_uncertain:
+            finding_ids = [
+                item.get("id") if isinstance(item, dict) else None
+                for item in uncertain_items
+            ]
+            if any(not isinstance(finding_id, str) for finding_id in finding_ids):
+                raise SafetyError("Final Clawpatch uncertain report has invalid finding IDs.")
+            refreshed, reopened = _resolve_uncertain_findings(
+                repo,
+                env=env,
+                uncertain_total=uncertain_total,
+                require_project_gates=require_project_gates,
+                progress=progress,
+                current_offset=current_offset,
+                finding_ids=finding_ids,
+                retain_uncertain=True,
+            )
+            revalidated_uncertain = [
+                record for record in refreshed if record.get("retained_uncertain")
+            ]
+            fixed_uncertain = [
+                record for record in refreshed if not record.get("retained_uncertain")
+            ]
+        else:
+            fixed_uncertain, reopened = _resolve_uncertain_findings(
+                repo,
+                env=env,
+                uncertain_total=uncertain_total,
+                require_project_gates=require_project_gates,
+                progress=progress,
+                current_offset=current_offset,
+            )
         recovered_findings.extend(fixed_uncertain)
         recovery_total = current_offset + uncertain_total
         for reopened_index, expected_finding in enumerate(reopened, start=1):
@@ -4617,8 +4660,22 @@ def _final_closure(
             current=recovery_total,
             total=recovery_total,
         )
-        if uncertain_report.get("total") != 0 or uncertain_report.get("items") != []:
+        if resolve_uncertain and (
+            uncertain_report.get("total") != 0 or uncertain_report.get("items") != []
+        ):
             raise SafetyError("Final Clawpatch report still contains uncertain findings.")
+        if refresh_retained_uncertain and not resolve_uncertain:
+            remaining_items = uncertain_report.get("items")
+            remaining_ids = [
+                item.get("id") if isinstance(item, dict) else None
+                for item in remaining_items
+            ] if isinstance(remaining_items, list) else []
+            retained_ids = [record["finding_id"] for record in revalidated_uncertain]
+            if remaining_ids != retained_ids:
+                raise SafetyError(
+                    "Retained Clawpatch uncertain report changed unexpectedly after revalidation."
+                )
+        uncertain_total = _required_int(uncertain_report, "total")
     status = _json_clawpatch(
         repo,
         ["clawpatch", "status", "--json"],
@@ -4693,6 +4750,7 @@ def _final_closure(
         "state_retained": (repo / ".clawpatch").is_dir(),
         "recovered_findings": recovered_findings,
         "recovered_continuations": recovered_continuations,
+        "revalidated_uncertain": revalidated_uncertain,
         "needs_fresh_review": needs_fresh_review,
     }
 
@@ -5745,6 +5803,7 @@ def _release_sweep_locked(
         require_project_gates=require_project_gates,
         require_fresh_review=known_generation_findings,
         resolve_uncertain=not advance_uncertain,
+        refresh_retained_uncertain=advance_uncertain,
     )
     report["results"].extend(closure.get("recovered_findings", []))
     report["continuations"].extend(closure.get("recovered_continuations", []))

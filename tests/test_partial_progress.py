@@ -744,6 +744,44 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 total=1,
             )
 
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._revalidate")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    def test_external_refresh_revalidates_and_retains_still_uncertain_finding(
+        self,
+        next_finding,
+        show_finding,
+        revalidate,
+        _gates,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            show_finding.return_value = {
+                "finding": {"id": "fnd_uncertain", "status": "uncertain"},
+                "validation": ["python -m unittest"],
+                "patchAttempts": [],
+            }
+            revalidate.return_value = {
+                "finding": "fnd_uncertain",
+                "outcome": "uncertain",
+            }
+
+            records, reopened = _resolve_uncertain_findings(
+                repo,
+                env={},
+                uncertain_total=1,
+                require_project_gates=False,
+                finding_ids=["fnd_uncertain"],
+                retain_uncertain=True,
+            )
+
+        self.assertEqual(reopened, [])
+        self.assertEqual(len(records), 1)
+        self.assertTrue(records[0]["retained_uncertain"])
+        next_finding.assert_not_called()
+
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._next_finding")
@@ -812,14 +850,19 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch(
+        "clawpatch_supervise.clawpatch_release._next_finding",
+        return_value=(None, {"finding": None}),
+    )
     @patch("clawpatch_supervise.clawpatch_release._resolve_uncertain_findings")
     @patch("clawpatch_supervise.clawpatch_release._review_completion", return_value={"done": True})
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
-    def test_external_manual_loop_finishes_open_queue_with_uncertain_report_retained(
+    def test_external_manual_loop_revalidates_then_retains_still_uncertain_report(
         self,
         json_clawpatch,
         _review,
         resolve_uncertain,
+        _next_finding,
         _gates,
         _processes,
     ):
@@ -829,7 +872,18 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
             repo.mkdir()
             branch, _head = self.init_repo(repo)
             uncertain_report = {"total": 1, "items": [{"id": "fnd_uncertain"}]}
+            retained = {
+                "finding_id": "fnd_uncertain",
+                "revalidation": {"outcome": "uncertain"},
+                "commit": "",
+                "recovered_uncertain": True,
+                "retained_uncertain": True,
+            }
+            resolve_uncertain.return_value = ([retained], [])
             json_clawpatch.side_effect = [
+                {"revalidated": 0},
+                {"total": 0, "items": []},
+                uncertain_report,
                 {"revalidated": 0},
                 {"total": 0, "items": []},
                 uncertain_report,
@@ -848,12 +902,23 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 require_project_gates=False,
                 require_fresh_review=True,
                 resolve_uncertain=False,
+                refresh_retained_uncertain=True,
             )
 
         self.assertEqual(closure["uncertain_report"], uncertain_report)
         self.assertEqual(closure["recovered_findings"], [])
+        self.assertEqual(closure["revalidated_uncertain"], [retained])
         self.assertFalse(closure["needs_fresh_review"])
-        resolve_uncertain.assert_not_called()
+        resolve_uncertain.assert_called_once_with(
+            repo,
+            env={},
+            uncertain_total=1,
+            require_project_gates=False,
+            progress=None,
+            current_offset=0,
+            finding_ids=["fnd_uncertain"],
+            retain_uncertain=True,
+        )
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])

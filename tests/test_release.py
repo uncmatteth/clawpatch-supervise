@@ -5244,10 +5244,13 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 apply=True,
                 branch="current",
                 publish_clawpatch_state=True,
+                advance_uncertain=True,
             )
 
         self.assertEqual(report["open_findings"], 0)
         self.assertTrue(final_closure.call_args.kwargs["publish_clawpatch_state"])
+        self.assertFalse(final_closure.call_args.kwargs["resolve_uncertain"])
+        self.assertTrue(final_closure.call_args.kwargs["refresh_retained_uncertain"])
 
     @patch("clawpatch_supervise.clawpatch_release._prepare_fresh_release")
     @patch("clawpatch_supervise.clawpatch_release._final_closure")

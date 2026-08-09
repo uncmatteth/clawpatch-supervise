@@ -31,7 +31,7 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 2. Verify `git`, Python 3.11+, `clawpatch --version`, and `clawpatch-supervise --version`.
 3. Check for another supervisor or ClawPatch process targeting the same repository.
 4. Choose one start mode:
-   - normal invocation to resume exact stopped state, preserve an open or uncertain queue, wait for another active owner, retry transient failures, and automatically rebuild only a proven-clean queue;
+   - normal invocation to resume exact stopped state, preserve an open queue, revalidate retained uncertain findings, wait for another active owner, retry transient failures, and automatically rebuild only a proven-clean queue;
    - `--fresh` only as an explicit non-interactive clean-source reset;
    - `--resume-stopped` only as a compatibility override that prevents automatic fresh review.
 5. Run one repository at a time with an explicit absolute path, branch policy, push policy, and watchdog.
