@@ -43,11 +43,28 @@
   "whyTestsDoNotAlreadyCoverThis": "None of the included tests compare project metadata, the package attribute, and CLI output.",
   "suggestedRegressionTest": "Assert that importlib.metadata.version('clawpatch-supervise'), clawpatch_supervise.__version__, and --version agree in an installed-package test.",
   "minimumFixScope": "Consolidate version lookup in __init__.py or clawpatch_external.py and add one release-version consistency test.",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260809T204114-5862c9",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original package version remains at src/clawpatch_supervise/__init__.py:3. The CLI import moved from line 11 to line 12, and --version moved to line 444; both still read __version__. The former literal project.version is gone: pyproject.toml:7 declares version dynamic, and line 29 directs setuptools to clawpatch_supervise.__version__, eliminating the independent metadata source. Commit 5505219 contains this repair and regression coverage. Both focused version tests pass. Setuptools 83.0.0 resolves distribution version 0.1.28 from the current pyproject, matching the package and CLI. The linked attempt's exit-127 results were missing-tool failures, not evidence that the repair is incorrect.",
+      "commands": [
+        "git show --format=fuller --find-renames --find-copies HEAD -- README.md pyproject.toml tests/test_cli.py tests/test_installers.py",
+        "rg -n '__version__|dynamic = \\[\"version\"\\]|tool\\.setuptools\\.dynamic|--version' pyproject.toml src tests README.md",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest -v tests.test_cli.ExternalClawpatchSupervisorTests.test_version_is_available_without_running_clawpatch tests.test_cli.ExternalClawpatchSupervisorTests.test_distribution_version_is_derived_from_package_version",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src /home/Tommy/.local/share/tommy-build-envs/mirrorfall/bin/python -c \"from setuptools.config.pyprojecttoml import read_configuration; import clawpatch_supervise; c=read_configuration('pyproject.toml', expand=True); assert c['project']['version'] == clawpatch_supervise.__version__ == '0.1.28'\""
+      ],
+      "createdAt": "2026-08-09T20:44:35.238Z"
+    }
+  ],
   "signature": "sig_feat-library-4445d2d730_edb1a898fa",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-4445d2d730-_cb41acea80"
+  ],
   "createdByRunId": "20260807T184035-c7b1f2",
   "createdAt": "2026-08-07T18:44:15.694Z",
-  "updatedAt": "2026-08-07T18:44:15.694Z"
+  "updatedAt": "2026-08-09T20:44:35.238Z"
 }

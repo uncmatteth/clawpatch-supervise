@@ -99,15 +99,52 @@
         "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -v"
       ],
       "createdAt": "2026-08-07T20:44:04.080Z"
+    },
+    {
+      "runId": "20260807T213448-298181",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original evidence file and InstallerContractTests still exist, but the relevant evidence moved. The configurable Windows harness is now at tests/test_installers.py:151-283; the three requested native Windows regressions are at lines 604-649; and an additional cross-platform source-order test is present as an uncommitted change at lines 579-590. Current scripts/install.ps1 supports the intended repair: it probes Python 3.11+ at lines 50-60 and validates existing ClawPatch and ClawHub versions at lines 63-84, all before venv creation at lines 108-112. However, fixed cannot be returned because every linked patch attempt is failed, neither pwsh nor powershell is available, all nine native Windows tests are skipped on this Linux host, and fresh targeted validation exited 1 because the read-only environment has no usable temporary directory. The current source no longer clearly supports an open test-gap classification, but the repair lacks successful targeted/native validation.",
+      "commands": [
+        "git status --short && git rev-parse HEAD && git log --oneline --decorate -20 -- tests/test_installers.py scripts/install.ps1 README.md",
+        "rg -n \"def _run_windows_installer|test_windows_installer_(validates_compatibility_before_mutation|rejects_mismatched_clawhub_version|rejects_mismatched_clawpatch_version|rejects_python_older_than_3_11_before_mutation)|Assert-CommandVersion|Python 3\\.11|ClawHub .*required|ClawPatch .*required|--cli-version|--version|venv\" tests/test_installers.py scripts/install.ps1 README.md",
+        "nl -ba scripts/install.ps1 | sed -n '1,175p'; nl -ba tests/test_installers.py | sed -n '575,655p'",
+        "git diff -- tests/test_installers.py scripts/install.ps1 README.md && git diff --stat",
+        "sed -n '1,360p' .clawpatch/patches/pat_fnd-sig-feat-test-suite-a6226f63_c7de05262a.json",
+        "command -v pwsh || true; command -v powershell || true; uname -a",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -v"
+      ],
+      "createdAt": "2026-08-07T21:36:07.742Z"
+    },
+    {
+      "runId": "20260809T215037-e801e1",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original evidence ranges still exist, but their contents moved: tests/test_installers.py:260-292 is now Windows stub/environment setup, while the current Windows harness is at lines 175-325 and the relevant tests are at lines 691-758. The harness now supports configurable ClawPatch/ClawHub versions and Python-version failure. Current tests cover retaining newer ClawPatch, isolating an older ClawPatch, intentionally ignoring ClawHub under the current documented contract, and rejecting Python older than 3.11 before creating the install root. scripts/install.ps1:59-117 checks Python, Node, and existing ClawPatch compatibility before its first InstallRoot mutation at line 120; a direct source-order probe confirmed both Python and ClawPatch checks precede that mutation. Thus the original exact recommendation is partly stale because ClawHub is no longer a dependency and an older ClawPatch is isolated rather than simply rejected. Fixed cannot be returned: the additional cross-platform ordering test at tests/test_installers.py:661-672 is uncommitted, every linked patch attempt is recorded failed, fresh targeted validation failed with 19 temporary-directory errors and skipped all 13 Windows tests, and neither pwsh nor powershell is installed for native validation.",
+      "commands": [
+        "git status --short && git rev-parse HEAD && git log --oneline --decorate -20 -- tests/test_installers.py scripts/install.ps1 README.md",
+        "rg -n \"def _run_windows_installer|test_windows_installer_|Test-CompatibleClawPatch|Python 3\\.11|clawpatchRoot\" tests/test_installers.py scripts/install.ps1 README.md",
+        "nl -ba tests/test_installers.py | sed -n '255,300p;365,410p;413,512p;640,875p'",
+        "nl -ba scripts/install.ps1 | sed -n '1,245p'",
+        "git diff HEAD -- tests/test_installers.py scripts/install.ps1 README.md",
+        "python3 -c 'from pathlib import Path; p=Path(\"scripts/install.ps1\").read_text(encoding=\"utf-8\"); m=p.index(\"$clawpatchRoot = Join-Path $InstallRoot \\\"clawpatch\\\"\"); print({\"python_before_mutation\": p.index(\"$pythonVersionOutput =\") < m, \"clawpatch_check_before_mutation\": p.index(\"Test-CompatibleClawPatch $clawpatch\") < m})'",
+        "command -v pwsh || true; command -v powershell || true",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_installers.py' -v"
+      ],
+      "createdAt": "2026-08-09T21:52:25.207Z"
     }
   ],
   "signature": "sig_feat-test-suite-a6226f638f_ec00bde80a",
   "linkedPatchAttemptIds": [
     "pat_fnd-sig-feat-test-suite-a6226f63_04e3c05cd5",
     "pat_fnd-sig-feat-test-suite-a6226f63_4dc9d5b24e",
-    "pat_fnd-sig-feat-test-suite-a6226f63_0d64858d97"
+    "pat_fnd-sig-feat-test-suite-a6226f63_0d64858d97",
+    "pat_fnd-sig-feat-test-suite-a6226f63_c7de05262a",
+    "pat_fnd-sig-feat-test-suite-a6226f63_6faca1d48d"
   ],
   "createdByRunId": "20260807T184035-c7b1f2",
   "createdAt": "2026-08-07T18:41:49.141Z",
-  "updatedAt": "2026-08-07T20:44:04.080Z"
+  "updatedAt": "2026-08-09T21:52:25.207Z"
 }

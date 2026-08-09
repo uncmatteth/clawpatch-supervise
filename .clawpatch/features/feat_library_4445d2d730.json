@@ -93,7 +93,7 @@
     "source-group"
   ],
   "trustBoundaries": [],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": [
     "fnd_sig-feat-library-4445d2d730-d3e5_c992c47ede",
@@ -114,5 +114,5 @@
     }
   ],
   "createdAt": "2026-08-07T18:40:35.513Z",
-  "updatedAt": "2026-08-07T18:44:15.695Z"
+  "updatedAt": "2026-08-09T20:44:35.239Z"
 }

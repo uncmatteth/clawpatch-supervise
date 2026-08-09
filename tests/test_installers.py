@@ -658,6 +658,19 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("& $wrapper doctor --repo", windows)
         self.assertNotIn("& $supervisor doctor --repo", windows)
 
+    def test_windows_installer_checks_compatibility_before_install_root_mutation(self) -> None:
+        windows = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
+        first_install_root_mutation = windows.index(
+            '$clawpatchRoot = Join-Path $InstallRoot "clawpatch"'
+        )
+
+        for compatibility_check in (
+            "$pythonVersionOutput =",
+            "Test-CompatibleClawPatch $clawpatch",
+        ):
+            with self.subTest(compatibility_check=compatibility_check):
+                self.assertLess(windows.index(compatibility_check), first_install_root_mutation)
+
     @unittest.skipUnless(os.name == "nt", "Windows installer test")
     def test_windows_installer_does_not_install_dependencies_that_are_present(self) -> None:
         result, invocations, _install_root = self._run_windows_installer(
