@@ -13,7 +13,7 @@ import tomllib
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Iterator, Mapping, Protocol
 from urllib.parse import quote
 
 from .errors import SafetyError
@@ -38,6 +38,20 @@ _DEFAULT_READY_SECONDS = 90
 _MAX_PYTHON_REQUIREMENTS = 256
 _MAX_PYTHON_REQUIREMENT_BYTES = 4096
 _MAX_PYTHON_REQUIREMENTS_BYTES = 64 * 1024
+_PROVISIONING_INHERITED_ENV_NAMES = frozenset(
+    {
+        "COMSPEC",
+        "LANG",
+        "LC_ALL",
+        "LC_CTYPE",
+        "PATH",
+        "PATHEXT",
+        "SYSTEMDRIVE",
+        "SYSTEMROOT",
+        "TZ",
+        "WINDIR",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -54,20 +68,74 @@ class PythonTestContract:
     requirements: tuple[str, ...]
 
 
-RunCommand = Callable[..., subprocess.CompletedProcess[str]]
+class RunCommand(Protocol):
+    def __call__(
+        self,
+        argv: list[str],
+        *,
+        cwd: Path,
+        timeout: int,
+        env: Mapping[str, str],
+    ) -> subprocess.CompletedProcess[str]: ...
+
+
 Progress = Callable[[dict[str, object]], None]
 
 
-def _run_command(argv: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+def _run_command(
+    argv: list[str],
+    *,
+    cwd: Path,
+    timeout: int,
+    env: Mapping[str, str],
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         argv,
         cwd=cwd,
         timeout=timeout,
+        env=dict(env),
         text=True,
         capture_output=True,
         check=False,
         shell=False,
     )
+
+
+def _base_provisioning_environment() -> dict[str, str]:
+    return {
+        name: value
+        for name in _PROVISIONING_INHERITED_ENV_NAMES
+        if (value := os.environ.get(name)) is not None
+    }
+
+
+def _python_provisioning_environment(root: Path) -> dict[str, str]:
+    home = root / "home"
+    cache = root / "cache"
+    temporary = root / "tmp"
+    for directory in (home, cache, temporary):
+        directory.mkdir(mode=0o700, parents=True)
+    environment = _base_provisioning_environment()
+    environment.update(
+        {
+            "HOME": str(home),
+            "USERPROFILE": str(home),
+            "APPDATA": str(home / "AppData" / "Roaming"),
+            "LOCALAPPDATA": str(home / "AppData" / "Local"),
+            "XDG_CACHE_HOME": str(cache),
+            "PIP_CACHE_DIR": str(cache / "pip"),
+            "PIP_CONFIG_FILE": os.devnull,
+            "TMPDIR": str(temporary),
+            "TMP": str(temporary),
+            "TEMP": str(temporary),
+            "PYTHONIOENCODING": "utf-8",
+            "PYTHONNOUSERSITE": "1",
+            "PYTHONUTF8": "1",
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+            "PIP_NO_INPUT": "1",
+        }
+    )
+    return environment
 
 
 def _repository_identity(repo: Path) -> str:
@@ -257,9 +325,10 @@ def _checked_python_environment_command(
     repo: Path,
     timeout: int,
     action: str,
+    env: Mapping[str, str],
 ) -> subprocess.CompletedProcess[str]:
     try:
-        result = run(argv, cwd=repo, timeout=timeout)
+        result = run(argv, cwd=repo, timeout=timeout, env=env)
     except (FileNotFoundError, OSError) as exc:
         raise SafetyError(
             f"Disposable Python validation environment {action} could not start."
@@ -304,18 +373,30 @@ def _provision_python_test_environment(
             dir=str(temporary_root) if temporary_root is not None else None,
         ) as temp:
             environment = Path(temp) / "venv"
+            provisioning_env = _python_provisioning_environment(Path(temp) / "provisioning")
             _checked_python_environment_command(
                 run,
                 [sys.executable, "-m", "venv", str(environment)],
                 repo=repo,
                 timeout=120,
                 action="creation",
+                env=provisioning_env,
             )
             executable_dir, python = _python_environment_bin(environment)
             if not python.is_file():
                 raise SafetyError(
                     "Disposable Python validation environment did not create its interpreter."
                 )
+            install_env = {
+                **provisioning_env,
+                "PATH": str(executable_dir)
+                + (
+                    os.pathsep + provisioning_env["PATH"]
+                    if provisioning_env.get("PATH")
+                    else ""
+                ),
+                "VIRTUAL_ENV": str(environment),
+            }
             _checked_python_environment_command(
                 run,
                 [
@@ -332,6 +413,7 @@ def _provision_python_test_environment(
                 repo=repo,
                 timeout=900,
                 action="dependency installation",
+                env=install_env,
             )
             _checked_python_environment_command(
                 run,
@@ -349,6 +431,7 @@ def _provision_python_test_environment(
                 repo=repo,
                 timeout=900,
                 action="project installation",
+                env=install_env,
             )
             child_path = str(executable_dir)
             inherited_path = os.environ.get("PATH")
@@ -390,9 +473,10 @@ def _checked(
     repo: Path,
     timeout: int,
     action: str,
+    env: Mapping[str, str],
 ) -> subprocess.CompletedProcess[str]:
     try:
-        result = run(argv, cwd=repo, timeout=timeout)
+        result = run(argv, cwd=repo, timeout=timeout, env=env)
     except (FileNotFoundError, OSError) as exc:
         raise SafetyError(
             "This repository requires Docker to create its disposable PostgreSQL "
@@ -414,6 +498,7 @@ def _verified_postgres_image(
     contract: PostgresTestContract,
     *,
     run: RunCommand,
+    env: Mapping[str, str],
 ) -> str:
     result = _checked(
         run,
@@ -421,6 +506,7 @@ def _verified_postgres_image(
         repo=repo,
         timeout=60,
         action="compose inspection",
+        env=env,
     )
     try:
         payload = json.loads(result.stdout)
@@ -448,6 +534,7 @@ def _published_port(
     container_id: str,
     *,
     run: RunCommand,
+    env: Mapping[str, str],
 ) -> int:
     result = _checked(
         run,
@@ -455,6 +542,7 @@ def _published_port(
         repo=repo,
         timeout=30,
         action="port inspection",
+        env=env,
     )
     lines = [line.strip() for line in result.stdout.splitlines() if line.strip()]
     loopback = [line for line in lines if line.startswith("127.0.0.1:")]
@@ -474,9 +562,15 @@ def _remove_container(
     container_id: str,
     *,
     run: RunCommand,
+    env: Mapping[str, str],
 ) -> None:
     try:
-        result = run(["docker", "rm", "-f", container_id], cwd=repo, timeout=60)
+        result = run(
+            ["docker", "rm", "-f", container_id],
+            cwd=repo,
+            timeout=60,
+            env=env,
+        )
     except (FileNotFoundError, OSError) as exc:
         raise SafetyError(
             "ClawPatch Supervise could not remove its disposable PostgreSQL container because "
@@ -500,12 +594,13 @@ def _start_postgres_container(
     argv: list[str],
     *,
     run: RunCommand,
+    env: Mapping[str, str],
 ) -> subprocess.CompletedProcess[str]:
     try:
-        return _checked(run, argv, repo=repo, timeout=180, action="startup")
+        return _checked(run, argv, repo=repo, timeout=180, action="startup", env=env)
     except BaseException as startup_error:
         try:
-            _remove_container(repo, container_name, run=run)
+            _remove_container(repo, container_name, run=run, env=env)
         except SafetyError as cleanup_error:
             startup_error.add_note(f"Disposable PostgreSQL cleanup also failed: {cleanup_error}")
         raise
@@ -539,7 +634,8 @@ def _provision_postgres_test_environment(
                 "max_attempts": 1,
             }
         )
-    image = _verified_postgres_image(root, contract, run=run)
+    provisioning_env = _base_provisioning_environment()
+    image = _verified_postgres_image(root, contract, run=run, env=provisioning_env)
     password = password_factory()
     if not password or any(character in password for character in ("\x00", "\n", "\r")):
         raise SafetyError("Disposable PostgreSQL generated an invalid password.")
@@ -589,13 +685,14 @@ def _provision_postgres_test_environment(
                 image,
             ],
             run=run,
+            env=provisioning_env,
         )
     container_id = result.stdout.strip()
     body_error: BaseException | None = None
     try:
         if _CONTAINER_ID.fullmatch(container_id) is None:
             raise SafetyError("Docker returned an invalid disposable PostgreSQL container ID.")
-        port = _published_port(root, container_id, run=run)
+        port = _published_port(root, container_id, run=run, env=provisioning_env)
         deadline = monotonic() + _DEFAULT_READY_SECONDS
         while True:
             try:
@@ -612,6 +709,7 @@ def _provision_postgres_test_environment(
                     ],
                     cwd=root,
                     timeout=15,
+                    env=provisioning_env,
                 )
             except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
                 ready = subprocess.CompletedProcess([], 1, "", "not ready")
@@ -643,7 +741,7 @@ def _provision_postgres_test_environment(
         raise
     finally:
         try:
-            _remove_container(root, container_name, run=run)
+            _remove_container(root, container_name, run=run, env=provisioning_env)
         except SafetyError as cleanup_error:
             if body_error is None:
                 raise

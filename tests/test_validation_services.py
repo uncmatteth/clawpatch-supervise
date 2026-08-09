@@ -2,16 +2,110 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Mapping
 from unittest.mock import patch
 
 from clawpatch_supervise.errors import SafetyError
 from clawpatch_supervise.validation_services import (
     PostgresTestContract,
+    PythonTestContract,
+    _provision_python_test_environment,
     _provision_postgres_test_environment,
+    _run_command,
 )
+
+
+class DisposablePythonValidationTests(unittest.TestCase):
+    @patch.dict(os.environ, {"GITHUB_TOKEN": "github-secret"})
+    def test_default_runner_does_not_restore_omitted_host_environment(self) -> None:
+        safe_env = {
+            name: os.environ[name]
+            for name in ("PATH", "SYSTEMROOT")
+            if name in os.environ
+        }
+
+        result = _run_command(
+            [
+                sys.executable,
+                "-c",
+                "import os; print(os.environ.get('GITHUB_TOKEN', 'absent'))",
+            ],
+            cwd=Path.cwd(),
+            timeout=30,
+            env=safe_env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), "absent")
+
+    @patch.dict(
+        "clawpatch_supervise.validation_services.os.environ",
+        {
+            "PATH": os.environ.get("PATH", ""),
+            "DATABASE_URL": "postgresql://production.invalid/live",
+            "BTT_ALLOW_DATABASE_RESET": "true",
+            "GITHUB_TOKEN": "github-secret",
+            "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "PIP_INDEX_URL": "https://user:password@packages.invalid/simple",
+            "SSH_AUTH_SOCK": "/tmp/host-agent.sock",
+        },
+        clear=True,
+    )
+    def test_every_python_provisioning_command_uses_owned_sanitized_environment(self) -> None:
+        calls: list[tuple[list[str], dict[str, str]]] = []
+
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append((argv, dict(env)))
+            if argv[:3] == [sys.executable, "-m", "venv"]:
+                environment = Path(argv[3])
+                executable_dir = environment / ("Scripts" if os.name == "nt" else "bin")
+                executable_dir.mkdir(parents=True)
+                python = executable_dir / ("python.exe" if os.name == "nt" else "python")
+                python.touch()
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        contract = PythonTestContract(Path("pyproject.toml"), ())
+        with tempfile.TemporaryDirectory() as temp:
+            temporary_root = Path(temp)
+            with _provision_python_test_environment(
+                temporary_root,
+                contract,
+                run=run,
+                progress=None,
+                temporary_root=temporary_root,
+            ):
+                self.assertEqual(len(calls), 3)
+                credential_names = {
+                    "DATABASE_URL",
+                    "BTT_ALLOW_DATABASE_RESET",
+                    "GITHUB_TOKEN",
+                    "AWS_SECRET_ACCESS_KEY",
+                    "PIP_INDEX_URL",
+                    "SSH_AUTH_SOCK",
+                }
+                for _argv, environment in calls:
+                    self.assertTrue(credential_names.isdisjoint(environment))
+                    for name in ("HOME", "USERPROFILE", "PIP_CACHE_DIR", "TMPDIR", "TMP", "TEMP"):
+                        self.assertTrue(
+                            Path(environment[name]).is_relative_to(temporary_root),
+                            f"{name} escaped the supervisor-owned temporary root",
+                        )
+                    self.assertEqual(environment["PIP_CONFIG_FILE"], os.devnull)
+                    self.assertEqual(environment["PIP_NO_INPUT"], "1")
+
+        self.assertEqual(calls[0][0][1:3], ["-m", "venv"])
+        self.assertIn("pytest>=8,<10", calls[1][0])
+        self.assertEqual(calls[2][0][-1], ".")
 
 
 class DisposablePostgresValidationTests(unittest.TestCase):
@@ -40,7 +134,13 @@ class DisposablePostgresValidationTests(unittest.TestCase):
         calls: list[list[str]] = []
         env_files: list[Path] = []
 
-        def run(argv: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
             calls.append(argv)
             if argv[:2] == ["docker", "run"]:
                 self.assertFalse(any("disposable-password" in argument for argument in argv))
@@ -92,7 +192,13 @@ class DisposablePostgresValidationTests(unittest.TestCase):
         )
         calls: list[list[str]] = []
 
-        def run(argv: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
             calls.append(argv)
             if argv[:2] == ["docker", "run"]:
                 return subprocess.CompletedProcess(argv, 0, "a" * 64 + "\nunexpected output\n", "")
@@ -128,7 +234,13 @@ class DisposablePostgresValidationTests(unittest.TestCase):
         )
         calls: list[list[str]] = []
 
-        def run(argv: list[str], *, cwd: Path, timeout: int) -> subprocess.CompletedProcess[str]:
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
             calls.append(argv)
             if argv[:2] == ["docker", "run"]:
                 raise subprocess.TimeoutExpired(argv, timeout)
