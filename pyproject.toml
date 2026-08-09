@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clawpatch-supervise"
-version = "0.1.28"
+dynamic = ["version"]
 description = "The external queue runtime behind Manageroo's ClawPatch workflow: exact checkpoints, bounded retries, verified repairs, and completion proof."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -24,6 +24,9 @@ clawpatch-supervise = "clawpatch_supervise.clawpatch_external:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}
+
+[tool.setuptools.dynamic]
+version = {attr = "clawpatch_supervise.__version__"}
 
 [tool.setuptools.packages.find]
 where = ["src"]

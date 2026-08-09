@@ -11,6 +11,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from clawpatch_supervise import __version__
 from clawpatch_supervise.clawpatch_external import (
     _heartbeat_lines,
     _render_event,
@@ -117,7 +118,19 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.28")
+        self.assertEqual(output.getvalue().strip(), f"clawpatch-supervise {__version__}")
+
+    def test_distribution_version_is_derived_from_package_version(self):
+        manifest = tomllib.loads(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+
+        self.assertNotIn("version", manifest["project"])
+        self.assertIn("version", manifest["project"]["dynamic"])
+        self.assertEqual(
+            manifest["tool"]["setuptools"]["dynamic"]["version"],
+            {"attr": "clawpatch_supervise.__version__"},
+        )
 
     def test_doctor_reports_portable_runtime_without_starting_queue(self):
         output = StringIO()

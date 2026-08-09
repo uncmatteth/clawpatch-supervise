@@ -4,9 +4,10 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import tomllib
 import unittest
 from pathlib import Path
+
+from clawpatch_supervise import __version__
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CLAWPATCH_VERSION = "0.7.2"
@@ -649,15 +650,11 @@ class InstallerContractTests(unittest.TestCase):
         self.assertFalse(install_root.exists())
 
     def test_installer_defaults_match_the_packaged_release(self) -> None:
-        project = tomllib.loads((REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8"))[
-            "project"
-        ]
-        version = project["version"]
         linux = (REPOSITORY_ROOT / "scripts" / "install.sh").read_text(encoding="utf-8")
         windows = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
 
-        self.assertIn(f"CLAWPATCH_SUPERVISE_VERSION:-{version}", linux)
-        self.assertIn(f'[string]$Version = "{version}"', windows)
+        self.assertIn(f"CLAWPATCH_SUPERVISE_VERSION:-{__version__}", linux)
+        self.assertIn(f'[string]$Version = "{__version__}"', windows)
         self.assertIn("& $wrapper doctor --repo", windows)
         self.assertNotIn("& $supervisor doctor --repo", windows)
 
