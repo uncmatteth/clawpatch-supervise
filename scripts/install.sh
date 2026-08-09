@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.25}"
+version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.26}"
 source_package="${CLAWPATCH_SUPERVISE_SOURCE:-https://github.com/uncmatteth/clawpatch-supervise/releases/download/v${version}/clawpatch_supervise-${version}-py3-none-any.whl}"
 install_root="${CLAWPATCH_SUPERVISE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/clawpatch-supervise}"
 bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
-readonly clawpatch_version="0.7.2"
-readonly clawhub_version="0.19.1"
-readonly release_sha256_0_1_25="f898aa429e6fb9ba7de3e59b0ed1874df126fc5899cb36dab053aef1d3683736"
+verify_repo="${CLAWPATCH_SUPERVISE_VERIFY_REPO:-}"
+readonly minimum_clawpatch_version="0.7.2"
+readonly release_sha256_0_1_26="07169d18a3391dfaf186372d4594bc6391c5e8bffc0a9d08f3f7acf688769783"
 download_root=""
 staging_venv=""
 pending_supervisor_link=""
@@ -19,20 +19,6 @@ cleanup() {
   [[ -z "$download_root" ]] || rm -rf "$download_root"
 }
 trap cleanup EXIT
-
-check_command_version() {
-  local command_name="$1"
-  local expected_version="$2"
-  shift 2
-  if ! checked_version="$("$@")"; then
-    echo "The $command_name command failed its version check." >&2
-    exit 2
-  fi
-  if [[ "$checked_version" != "$expected_version" ]]; then
-    echo "$command_name $expected_version is required; found ${checked_version:-unknown}." >&2
-    exit 2
-  fi
-}
 
 command -v "$python_command" >/dev/null 2>&1 || {
   echo "Python 3.11 or newer is required." >&2
@@ -47,20 +33,35 @@ command -v git >/dev/null 2>&1 || {
   exit 2
 }
 
-if command -v clawhub >/dev/null 2>&1; then
-  clawhub_command="$(command -v clawhub)"
-  check_command_version "ClawHub" "$clawhub_version" "$clawhub_command" --cli-version
-  clawhub_installed_version="$checked_version"
-else
-  command -v npm >/dev/null 2>&1 || {
-    echo "ClawHub is missing and npm is unavailable. Install Node.js 22 or newer, then rerun this installer." >&2
-    exit 2
-  }
-  clawhub_command=""
-  clawhub_installed_version=""
+compatible_clawpatch() {
+  local command_path="$1"
+  local actual_version
+  actual_version="$("$command_path" --version 2>/dev/null)" || return 1
+  "$python_command" - "$actual_version" "$minimum_clawpatch_version" <<'PY'
+import re
+import sys
+
+def version(value):
+    match = re.search(r"(\d+)\.(\d+)\.(\d+)", value)
+    if not match:
+        raise SystemExit(1)
+    return tuple(map(int, match.groups()))
+
+raise SystemExit(version(sys.argv[1]) < version(sys.argv[2]))
+PY
+}
+command -v node >/dev/null 2>&1 || {
+  echo "Node.js 22 or newer is required." >&2
+  exit 2
+}
+node_major="$(node --version | sed -n 's/^v\([0-9][0-9]*\).*/\1/p')"
+if [[ -z "$node_major" || "$node_major" -lt 22 ]]; then
+  echo "Node.js 22 or newer is required." >&2
+  exit 2
 fi
 
-if command -v clawpatch >/dev/null 2>&1; then
+if command -v clawpatch >/dev/null 2>&1 && \
+  compatible_clawpatch "$(command -v clawpatch)"; then
   clawpatch_command="$(command -v clawpatch)"
 else
   command -v npm >/dev/null 2>&1 || {
@@ -68,15 +69,18 @@ else
     exit 2
   }
   clawpatch_root="$install_root/clawpatch"
-  npm install --prefix "$clawpatch_root" --no-fund --no-audit "clawpatch@${clawpatch_version}"
+  npm install --prefix "$clawpatch_root" --no-fund --no-audit "clawpatch@latest"
   clawpatch_command="$clawpatch_root/node_modules/.bin/clawpatch"
   test -x "$clawpatch_command" || {
     echo "ClawPatch installation did not create its command." >&2
     exit 2
   }
 fi
-check_command_version "ClawPatch" "$clawpatch_version" "$clawpatch_command" --version
-clawpatch_installed_version="$checked_version"
+if ! compatible_clawpatch "$clawpatch_command"; then
+  echo "ClawPatch $minimum_clawpatch_version or newer is required." >&2
+  exit 2
+fi
+clawpatch_installed_version="$("$clawpatch_command" --version)"
 
 package_to_install="$source_package"
 if [[ ! -d "$source_package" ]]; then
@@ -86,11 +90,11 @@ if [[ ! -d "$source_package" ]]; then
       echo "CLAWPATCH_SUPERVISE_SHA256 is required for a custom wheel source." >&2
       exit 2
     fi
-    if [[ "$version" != "0.1.25" ]]; then
+    if [[ "$version" != "0.1.26" ]]; then
       echo "No trusted SHA-256 is available for clawpatch-supervise $version." >&2
       exit 2
     fi
-    expected_sha256="$release_sha256_0_1_25"
+    expected_sha256="$release_sha256_0_1_26"
   fi
 
   download_root="$(mktemp -d)"
@@ -128,27 +132,37 @@ staging_venv="$(mktemp -d "$install_root/venv.${version}.XXXXXX")"
 "$python_command" -m venv "$staging_venv"
 "$staging_venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$package_to_install"
 
-if [[ -z "$clawhub_command" ]]; then
-  clawhub_root="$install_root/clawhub"
-  echo "ClawHub is missing; installing clawhub@${clawhub_version} into $clawhub_root"
-  npm install --prefix "$clawhub_root" --no-fund --no-audit "clawhub@${clawhub_version}"
-  clawhub_command="$clawhub_root/node_modules/.bin/clawhub"
-  test -x "$clawhub_command" || {
-    echo "ClawHub installation did not create its command." >&2
-    exit 2
-  }
-  check_command_version "ClawHub" "$clawhub_version" "$clawhub_command" --cli-version
-  clawhub_installed_version="$checked_version"
-fi
-
 "$staging_venv/bin/clawpatch-supervise" --version
-printf '%s\n' "$clawhub_installed_version"
+if [[ -n "$verify_repo" ]]; then
+  PATH="$(dirname "$clawpatch_command"):$PATH" \
+    "$staging_venv/bin/clawpatch-supervise" doctor --repo "$verify_repo"
+fi
 printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$bin_dir"
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
-rm -f "$pending_supervisor_link"
-ln -s "$staging_venv/bin/clawpatch-supervise" "$pending_supervisor_link"
+clawpatch_dir="$(dirname "$clawpatch_command")"
+"$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$bin_dir" "$clawpatch_dir" <<'PY'
+import os
+import shlex
+import sys
+from pathlib import Path
+
+destination, supervisor, bin_dir, clawpatch_dir = sys.argv[1:]
+content = "\n".join(
+    (
+        "#!/bin/sh",
+        "export PYTHONUTF8=1",
+        "export PYTHONIOENCODING=utf-8",
+        "export NODE_DISABLE_COMPILE_CACHE=1",
+        f"export PATH={shlex.quote(clawpatch_dir)}:{shlex.quote(bin_dir)}:\"$PATH\"",
+        f"exec {shlex.quote(supervisor)} \"$@\"",
+        "",
+    )
+)
+Path(destination).write_text(content, encoding="utf-8")
+os.chmod(destination, 0o755)
+PY
 # Stop EXIT cleanup from removing either valid target once activation begins.
 activated_venv="$staging_venv"
 staging_venv=""
@@ -162,10 +176,4 @@ if [[ "$clawpatch_command" == "$install_root/clawpatch/"* ]]; then
   ln -sfn "$clawpatch_command" "$bin_dir/clawpatch"
   clawpatch_command="$bin_dir/clawpatch"
 fi
-if [[ "$clawhub_command" == "$install_root/clawhub/"* ]]; then
-  ln -sfn "$clawhub_command" "$bin_dir/clawhub"
-  clawhub_command="$bin_dir/clawhub"
-fi
-
 echo "Installed command: $bin_dir/clawpatch-supervise"
-echo "ClawHub command: $clawhub_command"

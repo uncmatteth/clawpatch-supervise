@@ -188,8 +188,55 @@ class CleanupCommandTests(unittest.TestCase):
             for variable in ("TMPDIR", "TMP", "TEMP"):
                 self.assertEqual(child_env[variable], str(temporary_root))
             self.assertEqual(child_env["NODE_DISABLE_COMPILE_CACHE"], "1")
+            self.assertEqual(child_env["PYTHONUTF8"], "1")
+            self.assertEqual(child_env["PYTHONIOENCODING"], "utf-8")
             self.assertTrue(cleanup_root.is_dir())
             self.assertEqual(list(cleanup_root.iterdir()), [])
+
+    def test_completed_run_warns_instead_of_stopping_when_windows_blocks_temp_cleanup(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            output = StringIO()
+
+            def fake_sweep(_repo: Path, **_kwargs):
+                return {
+                    "ok": True,
+                    "finding_count": 36,
+                    "open_findings": 0,
+                    "git_head": "abc123",
+                }
+
+            original_remove = cleanup_module._remove_exact_owned_run
+            calls = 0
+
+            def blocked_final_remove(candidate: Path, root: Path) -> None:
+                nonlocal calls
+                calls += 1
+                if calls == 1:
+                    raise PermissionError(5, "Access is denied", str(candidate / ".wrangler"))
+                original_remove(candidate, root)
+
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup._remove_exact_owned_run",
+                    side_effect=blocked_final_remove,
+                ),
+                redirect_stdout(output),
+            ):
+                code = main(
+                    ["--repo", temp, "--fresh"],
+                    cleanup_root=cleanup_root,
+                    run_sweep=fake_sweep,
+                    ensure_repository_idle=lambda _repo: None,
+                    heartbeat_seconds=0,
+                )
+
+            self.assertEqual(code, 0)
+            self.assertIn("WARNING: The operating system retained", output.getvalue())
+            self.assertIn("COMPLETE", output.getvalue())
+            self.assertNotIn("STOPPED", output.getvalue())
 
     @unittest.skipUnless(Path("/proc").is_dir(), "Linux live-reference proof")
     def test_cleanup_preserves_stale_owned_directory_referenced_by_live_child(self) -> None:

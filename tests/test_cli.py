@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 import tempfile
 import tomllib
 import unittest
@@ -116,7 +117,28 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.25")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.26")
+
+    def test_doctor_reports_portable_runtime_without_starting_queue(self):
+        output = StringIO()
+        report = {
+            "ready": True,
+            "platform": "win32",
+            "provider": "codex",
+            "windowsCodexSandbox": "ready",
+        }
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external.runtime_doctor",
+                return_value=(report, {"PATH": "C:\\working-codex"}),
+            ) as doctor,
+            redirect_stdout(output),
+        ):
+            code = main(["doctor", "--repo", "."], heartbeat_seconds=0)
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue()), report)
+        doctor.assert_called_once_with(Path(".").resolve())
 
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
@@ -324,6 +346,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         def fake_idle(repo: Path):
             lifecycle.append(("idle", repo))
+            return {"PATH": "C:\\working-codex-bin"}
 
         output = StringIO()
         with redirect_stdout(output):
@@ -340,6 +363,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         child_env = calls[0][1]["child_env_overrides"]
         self.assertEqual(child_env["TEST_DATABASE_URL"], "postgresql://127.0.0.1:49152/test")
         self.assertEqual(child_env["BTT_ALLOW_DATABASE_RESET"], "true")
+        self.assertEqual(child_env["PATH"], "C:\\working-codex-bin")
         for variable in ("TMPDIR", "TMP", "TEMP"):
             self.assertEqual(child_env[variable], str(lifecycle[1][2]))
         self.assertIn("VALIDATION SERVICE START", output.getvalue())

@@ -54,6 +54,8 @@ class OwnedRunDirectory:
             # A sandboxed Node child can create an owner-only compile cache that
             # the parent Windows user cannot enumerate or remove afterward.
             "NODE_DISABLE_COMPILE_CACHE": "1",
+            "PYTHONUTF8": "1",
+            "PYTHONIOENCODING": "utf-8",
         }
 
 
@@ -278,6 +280,7 @@ def owned_run_directory(
     repo: Path,
     *,
     root: Path | None = None,
+    on_blocked_cleanup: Callable[[Path, OSError], None] | None = None,
 ) -> Iterator[OwnedRunDirectory]:
     cleanup_root = (root or default_cleanup_root()).expanduser()
     if cleanup_root.is_symlink():
@@ -314,7 +317,15 @@ def owned_run_directory(
         _CURRENT_TEMPORARY_ROOT.reset(token)
         try:
             _remove_exact_owned_run(candidate, cleanup_root)
-        except (OSError, SafetyError) as cleanup_error:
+        except OSError as cleanup_error:
+            if body_error is None:
+                if on_blocked_cleanup is not None:
+                    on_blocked_cleanup(candidate, cleanup_error)
+                return
+            body_error.add_note(
+                f"ClawPatch Supervise cleanup also failed for its owned run directory: {candidate}"
+            )
+        except SafetyError as cleanup_error:
             if body_error is None:
                 raise SafetyError(
                     f"ClawPatch Supervise could not remove its owned run directory: {candidate}"

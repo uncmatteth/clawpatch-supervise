@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_protocol import (
@@ -19,6 +20,7 @@ from clawpatch_supervise.clawpatch_release import (
     _checkpoint_can_follow_supervisor_upgrade,
     _checkpoint_later_applied_attempt,
     _checkpoint_unapplied_attempt,
+    _clawpatch_doctor,
     _clawpatch_version,
     _commit_attempt,
     _execute_fix,
@@ -51,7 +53,9 @@ from clawpatch_supervise.clawpatch_release import (
     _source_paths_fingerprint,
     _UnresolvedFinding,
     _windows_clawpatch_processes,
+    _windows_codex_sandbox_path,
     _write_release_progress,
+    runtime_doctor,
     release_sweep,
 )
 from clawpatch_supervise.errors import GateFailure, SafetyError
@@ -85,6 +89,118 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         argv: list[str], output: str = "", code: int = 0
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, code, output, None)
+
+    def test_windows_codex_preflight_skips_broken_long_path_launcher(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repository"
+            repo.mkdir()
+            broken = root / "very-long-node-install"
+            working = root / "short-npm-bin"
+            broken.mkdir()
+            working.mkdir()
+            (broken / "codex.cmd").write_text("@echo off\r\n", encoding="ascii")
+            (working / "codex.cmd").write_text("@echo off\r\n", encoding="ascii")
+            path = f"{broken};{working}"
+            failed = SimpleNamespace(passed=False, stdout="", stderr="path not found")
+            passed = SimpleNamespace(
+                passed=True,
+                stdout="CLAWPATCH_WINDOWS_CODEX_SANDBOX_OK\n",
+                stderr="",
+            )
+
+            with patch(
+                "clawpatch_supervise.clawpatch_release.CommandRunner.run",
+                side_effect=[failed, passed],
+            ) as run:
+                selected = _windows_codex_sandbox_path(
+                    repo,
+                    env={"PATH": path, "COMSPEC": "cmd.exe"},
+                    platform_name="nt",
+                )
+
+        self.assertEqual(selected, f"{working};{path}")
+        self.assertEqual(run.call_count, 2)
+        self.assertEqual(Path(run.call_args_list[0].args[0][0]), broken / "codex.cmd")
+        self.assertEqual(Path(run.call_args_list[1].args[0][0]), working / "codex.cmd")
+
+    def test_clawpatch_doctor_accepts_fresh_uninitialized_repository(self):
+        output = json.dumps(
+            {
+                "state": "missing",
+                "provider": "codex",
+                "providerVersion": "test",
+            }
+        )
+        completed = SimpleNamespace(passed=True, stdout=output, stderr="")
+        with patch(
+            "clawpatch_supervise.clawpatch_release.CommandRunner.run",
+            return_value=completed,
+        ):
+            payload = _clawpatch_doctor(Path("repository"))
+
+        self.assertEqual(payload["state"], "missing")
+        self.assertEqual(payload["provider"], "codex")
+
+    def test_windows_codex_preflight_stops_before_queue_when_every_launcher_is_broken(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            tools = root / "node-install"
+            tools.mkdir()
+            (tools / "codex.cmd").write_text("@echo off\r\n", encoding="ascii")
+            failed = SimpleNamespace(passed=False, stdout="", stderr="path not found")
+
+            with (
+                patch(
+                    "clawpatch_supervise.clawpatch_release.CommandRunner.run",
+                    return_value=failed,
+                ),
+                self.assertRaisesRegex(SafetyError, "No ClawPatch queue was started"),
+            ):
+                _windows_codex_sandbox_path(
+                    root,
+                    env={"PATH": str(tools), "COMSPEC": "cmd.exe"},
+                    platform_name="nt",
+                )
+
+    def test_runtime_doctor_selects_working_codex_path_before_provider_probe(self):
+        selected_path = r"C:\short-codex;C:\broken-codex"
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            with (
+                patch.dict(
+                    os.environ,
+                    {"PATH": r"C:\broken-codex", "SYSTEMROOT": r"C:\Windows"},
+                    clear=True,
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._git_root",
+                    return_value=repo,
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._clawpatch_version",
+                    return_value="0.7.2",
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._windows_codex_sandbox_path",
+                    return_value=selected_path,
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._clawpatch_doctor",
+                    return_value={"provider": "codex", "providerVersion": "test"},
+                ) as doctor,
+                patch(
+                    "clawpatch_supervise.clawpatch_release._must_run",
+                    return_value="git version test",
+                ),
+            ):
+                report, overrides = runtime_doctor(repo)
+
+        doctor_env = doctor.call_args.kwargs["env"]
+        self.assertEqual(doctor_env["PATH"], selected_path)
+        self.assertEqual(doctor_env["SYSTEMROOT"], r"C:\Windows")
+        self.assertEqual(overrides, {"PATH": selected_path})
+        self.assertEqual(report["windowsCodexSandbox"], "ready")
 
     @staticmethod
     def init_repo(repo: Path) -> None:

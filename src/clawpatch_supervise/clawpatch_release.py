@@ -670,13 +670,142 @@ def _release_sweep_lock(repo: Path) -> Iterator[None]:
             os.close(descriptor)
 
 
-def require_external_clawpatch_preflight(repo: Path) -> None:
-    """Prove tool, Git, and process readiness before external service setup."""
+_WINDOWS_CODEX_SANDBOX_MARKER = "CLAWPATCH_WINDOWS_CODEX_SANDBOX_OK"
+
+
+def _clawpatch_doctor(repo: Path, *, env: dict[str, str] | None = None) -> dict[str, Any]:
+    result = CommandRunner().run(
+        ["clawpatch", "doctor", "--json"],
+        cwd=repo,
+        timeout_seconds=60,
+        env=env,
+        kill_process_group=True,
+    )
+    if not result.passed:
+        raise SafetyError(
+            "ClawPatch doctor could not prove provider readiness.\n"
+            f"stdout:\n{result.stdout[-4000:]}\n"
+            f"stderr:\n{result.stderr[-4000:]}"
+        )
+    try:
+        payload = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise SafetyError("ClawPatch doctor returned malformed JSON.") from exc
+    if not isinstance(payload, dict) or payload.get("state") not in {"ok", "missing"}:
+        raise SafetyError("ClawPatch doctor did not report a ready runtime.")
+    provider = payload.get("provider")
+    if not isinstance(provider, str) or not provider:
+        raise SafetyError("ClawPatch doctor did not identify its provider.")
+    return payload
+
+
+def _windows_codex_sandbox_path(
+    repo: Path,
+    *,
+    env: dict[str, str] | None = None,
+    platform_name: str = os.name,
+    required: bool = True,
+) -> str | None:
+    """Prefer the first Windows Codex launcher whose nested sandbox can execute."""
+    if platform_name != "nt":
+        return None
+    process_env = dict(os.environ if env is None else env)
+    original_path = process_env.get("PATH", "")
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for raw_directory in original_path.split(";"):
+        directory_text = raw_directory.strip().strip('"')
+        if not directory_text:
+            continue
+        directory = Path(directory_text)
+        for name in ("codex.cmd", "codex.exe"):
+            candidate = directory / name
+            key = str(candidate).casefold()
+            if key in seen or not candidate.is_file():
+                continue
+            seen.add(key)
+            candidates.append(candidate)
+    if not candidates:
+        if not required:
+            return None
+        raise SafetyError(
+            "ClawPatch selected the Codex provider, but no Windows Codex launcher is on PATH."
+        )
+
+    failures: list[str] = []
+    for candidate in candidates:
+        selected_path = str(candidate.parent) + (";" + original_path if original_path else "")
+        candidate_env = dict(process_env)
+        candidate_env["PATH"] = selected_path
+        result = CommandRunner().run(
+            [
+                str(candidate),
+                "sandbox",
+                "cmd.exe",
+                "/d",
+                "/c",
+                "echo",
+                _WINDOWS_CODEX_SANDBOX_MARKER,
+            ],
+            cwd=repo,
+            timeout_seconds=45,
+            env=candidate_env,
+            kill_process_group=True,
+        )
+        if result.passed and _WINDOWS_CODEX_SANDBOX_MARKER in result.stdout:
+            return selected_path
+        failures.append(str(candidate))
+
+    if not required:
+        return None
+    raise SafetyError(
+        "Every installed Codex launcher failed the Windows nested-sandbox check: "
+        + ", ".join(failures)
+        + ". Reinstall Codex under a short user-local path and remove broken duplicate launchers. "
+        "No ClawPatch queue was started."
+    )
+
+
+def runtime_doctor(repo: Path) -> tuple[dict[str, Any], dict[str, str]]:
+    """Prove the portable runtime contract without creating or advancing a queue."""
     root = _git_root(repo)
-    _clawpatch_version(root)
+    clawpatch_version = _clawpatch_version(root)
+    env_overrides: dict[str, str] = {}
+    selected_codex_path = _windows_codex_sandbox_path(root, required=False)
+    if selected_codex_path is not None:
+        env_overrides["PATH"] = selected_codex_path
+    doctor_env = dict(os.environ)
+    doctor_env.update(env_overrides)
+    provider = _clawpatch_doctor(root, env=doctor_env)
+    if (
+        provider["provider"].casefold() == "codex"
+        and os.name == "nt"
+        and selected_codex_path is None
+    ):
+        selected_codex_path = _windows_codex_sandbox_path(root)
+        if selected_codex_path is not None:
+            env_overrides["PATH"] = selected_codex_path
+    report = {
+        "ready": True,
+        "platform": sys.platform,
+        "python": sys.version.split()[0],
+        "git": _must_run(["git", "--version"], cwd=root, timeout=30).strip(),
+        "clawpatch": clawpatch_version,
+        "provider": provider["provider"],
+        "providerVersion": provider.get("providerVersion"),
+        "windowsCodexSandbox": "ready" if selected_codex_path is not None else "not-applicable",
+    }
+    return report, env_overrides
+
+
+def require_external_clawpatch_preflight(repo: Path) -> dict[str, str]:
+    """Prove tool, provider, Git, and process readiness before external service setup."""
+    root = _git_root(repo)
+    _report, env_overrides = runtime_doctor(root)
     _git_text(root, ["git", "rev-parse", "--abbrev-ref", "HEAD"])
     _git_text(root, ["git", "rev-parse", "HEAD"])
     _require_no_process(root)
+    return env_overrides
 
 
 def _version_tuple(text: str) -> tuple[int, int, int]:

@@ -12,25 +12,40 @@
 
 `clawpatch-supervise` runs the long job around [ClawPatch](https://www.npmjs.com/package/clawpatch). ClawPatch still reviews the code, selects the current finding, writes the repair, and revalidates it. This supervisor remembers exactly where the queue was, protects real source progress, prevents unchanged retry loops, commits only verified repair paths, optionally pushes them, and refuses to call the job complete until a fresh review generation proves there is nothing left.
 
-It is a standalone Python package, a command-line program, and a public [ClawHub skill](https://clawhub.ai/uncmatteth/skills/clawpatch-supervise). It runs on Linux, macOS, and Windows and has no Python runtime dependencies outside the standard library.
+It is a standalone Python package and command-line program. It runs on Linux, macOS, and Windows and has no Python runtime dependencies outside the standard library.
 
 ## Quick start
 
-You need Python 3.11 or newer, Git, Node/npm, and a provider already authenticated for ClawPatch. If the `clawpatch` command is missing, the Linux/macOS installer installs the reviewed `clawpatch@0.7.2` release under its isolated install root, exposes it from the configured bin directory, and verifies the command. The Windows installer installs the same reviewed release with npm and verifies it. An existing ClawPatch installation is left unchanged; ClawPatch 0.7.2 is required.
+You need Python 3.11 or newer, Git, Node.js 22 or newer with npm, and a provider already authenticated for ClawPatch. Any installed ClawPatch version 0.7.2 or newer is retained. If ClawPatch is missing or older, the installer obtains the current `clawpatch@latest` release under its isolated install root and verifies the resulting command. On Windows it resolves the `.cmd` or `.exe` launcher directly, so PowerShell execution policy cannot select an unusable `.ps1` shim. ClawHub is not a supervisor dependency and is never installed, removed, upgraded, downgraded, or version-pinned by these installers.
 
-### Linux and macOS
+### Linux
 
 ```bash
 git clone https://github.com/uncmatteth/clawpatch-supervise.git
 cd clawpatch-supervise
-CLAWPATCH_SUPERVISE_SOURCE=. ./scripts/install.sh
+CLAWPATCH_SUPERVISE_SOURCE=. \
+  CLAWPATCH_SUPERVISE_VERIFY_REPO=/absolute/path/to/repository \
+  ./scripts/install.sh
 clawpatch-supervise --version
 ```
 
-The installer verifies that the selected Python interpreter is 3.11 or newer and that ClawHub is available or installable before creating any installation files. The default release wheel is downloaded to a temporary file and must match its pinned SHA-256 digest before the virtual environment is created. A custom wheel URL or file requires both `CLAWPATCH_SUPERVISE_SOURCE` and its trusted `CLAWPATCH_SUPERVISE_SHA256`; a local source directory can still be installed directly for development. The installer then creates an isolated virtual environment under `~/.local/share/clawpatch-supervise`, verifies the installed commands, and exposes them from `~/.local/bin`. On Linux and macOS, upgrades are staged in a new environment and the public command switches atomically only after validation succeeds, so a failed candidate leaves the working command unchanged. If ClawHub is missing, the installer also installs the reviewed `clawhub@0.19.1` CLI into that isolated root. Existing ClawPatch and ClawHub commands are preserved only when they report the required versions 0.7.2 and 0.19.1. If that directory is not already on `PATH`, reopen your terminal or run:
+The installer verifies Python 3.11+, Node.js 22+, Git, and compatible ClawPatch before creating installation files. The default release wheel must match its pinned SHA-256 digest before the virtual environment is created. A custom wheel URL or file requires both `CLAWPATCH_SUPERVISE_SOURCE` and its trusted `CLAWPATCH_SUPERVISE_SHA256`; a local source directory can still be installed directly for development. It creates an isolated virtual environment under `~/.local/share/clawpatch-supervise`, verifies the installed commands, and exposes a launcher from `~/.local/bin`. The launcher pins UTF-8 Python I/O, disables Node's compile cache, and puts the verified tool directory first on `PATH`. Upgrades are staged and activated atomically, so a failed candidate leaves the working command unchanged. If `CLAWPATCH_SUPERVISE_VERIFY_REPO` is set, the installed read-only doctor must prove the target repository and provider before activation completes.
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
+```
+
+### macOS
+
+macOS uses the same POSIX installer and runtime contract:
+
+```bash
+git clone https://github.com/uncmatteth/clawpatch-supervise.git
+cd clawpatch-supervise
+CLAWPATCH_SUPERVISE_SOURCE=. \
+  CLAWPATCH_SUPERVISE_VERIFY_REPO=/absolute/path/to/repository \
+  ./scripts/install.sh
+clawpatch-supervise doctor --repo /absolute/path/to/repository
 ```
 
 ### Windows PowerShell
@@ -39,11 +54,22 @@ export PATH="$HOME/.local/bin:$PATH"
 git clone https://github.com/uncmatteth/clawpatch-supervise.git
 Set-Location clawpatch-supervise
 Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\install.ps1 -Source (Resolve-Path .).Path -AddToPath
+.\scripts\install.ps1 -Source (Resolve-Path .).Path `
+  -VerifyRepo "C:\absolute\path\to\repository" -AddToPath
 clawpatch-supervise --version
 ```
 
-The Windows installer verifies Python 3.11 or newer and rejects existing ClawPatch or ClawHub commands that do not report the required versions before creating its isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. If ClawHub is missing, it also installs the reviewed `clawhub@0.19.1` CLI into that isolated root and creates `clawhub.cmd`; an existing installation is preserved. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` paths immediately.
+The Windows installer verifies Python 3.11+, Node.js 22+, Git, and ClawPatch 0.7.2 or newer before creating its isolated environment under `%LOCALAPPDATA%\ClawPatchSupervise`. The default wheel is downloaded to a staging directory and must match the release's pinned SHA-256; a custom wheel URL or file requires `-Sha256`, while a local source directory remains available for development. It resolves `.cmd`/`.exe` launchers without invoking PowerShell script shims. Its installed wrapper pins UTF-8 Python I/O, disables Node's compile cache, and puts the verified ClawPatch directory first on `PATH`. `-VerifyRepo` runs the installed read-only doctor and fails installation if Git, the configured provider, or the Windows Codex nested sandbox is not usable. Open a new PowerShell window after `-AddToPath`, or use the printed `.cmd` path immediately.
+
+### Prove a machine without starting a queue
+
+Run this on Windows, Linux, or macOS after authenticating the configured provider:
+
+```bash
+clawpatch-supervise doctor --repo /absolute/path/to/repository
+```
+
+`doctor` does not create, reset, or advance `.clawpatch`. It verifies the Git repository, Python runtime, installed ClawPatch, configured provider, and provider version. On Windows with the Codex provider, it also executes a harmless marker inside each discovered Codex nested sandbox, skips broken duplicate launchers, and passes the first working launcher directory into every later ClawPatch child. If no launcher works, supervision stops before the queue starts.
 
 Configured Windows `.cmd` and `.bat` validation gates are launched with exact `cmd.exe` quoting, including when the executable is installed under a path containing spaces. Gate arguments containing `cmd.exe` metacharacters remain rejected.
 The initial existing-queue inspection uses the same Windows shim resolution, so a PATH-installed `clawpatch.cmd` works before any repair begins.
@@ -76,7 +102,7 @@ The supervisor resolves `--repo` to one canonical path before preflight and uses
 
 ### Clean up transient run data without deleting receipts
 
-Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. The supervisor also sets `NODE_DISABLE_COMPILE_CACHE=1` because sandboxed Windows Node children can otherwise create an owner-only cache that the parent process cannot traverse or remove. Release children inherit only a small cross-platform operational environment plus validated supervisor-owned overrides, so host provider, cloud, package-registry, and SSH credentials are not forwarded implicitly. A normal success, stop, validation failure, or keyboard interruption removes the exact owned run directory in `finally` cleanup.
+Every supervisor launch owns one private, marked run directory beneath the operating system's temporary directory. ClawPatch child processes receive that directory through `TMPDIR`, `TMP`, and `TEMP`; disposable Python environments and the supervisor's temporary Git indexes and hook directories live there too. The supervisor pins UTF-8 Python I/O and sets `NODE_DISABLE_COMPILE_CACHE=1` because sandboxed Windows Node children can otherwise create an owner-only cache that the parent process cannot traverse or remove. Release children inherit only a small cross-platform operational environment plus validated supervisor-owned overrides, so host provider, cloud, package-registry, and SSH credentials are not forwarded implicitly. A normal success, stop, validation failure, or keyboard interruption attempts to remove the exact owned run directory in `finally` cleanup. If the operating system denies traversal of a sandbox-owned cache after an otherwise successful run, the supervisor retains that one proven-owned directory, prints a warning, and still reports the queue result instead of converting completion into `STOPPED`.
 
 An abrupt process kill or machine crash can prevent `finally` cleanup. The next launch automatically removes a marked run directory only after it is at least one hour old, its recorded process is gone, and no live process has a working directory or open file inside it. Linux uses `/proc`; other POSIX systems use a scoped `lsof` probe and retain the directory as `UNSAFE` when that inspection is unavailable or inconclusive. Inspect the same decision without changing anything:
 
@@ -367,7 +393,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.25 alpha**.
+Current release: **0.1.26 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 
@@ -375,7 +401,6 @@ The state and safety contracts are intentionally strict. If the supervisor canno
 
 - [Uncle Matt's Project Manageroo](https://github.com/uncmatteth/Uncle-Matts-Project-Manageroo)
 - [ClawPatch on npm](https://www.npmjs.com/package/clawpatch)
-- [ClawPatch Supervise on ClawHub](https://clawhub.ai/uncmatteth/skills/clawpatch-supervise)
 - [BTT Labs](https://bttlabs.fun)
 
 Built by Uncle Matt at BTT Labs because ClawPatch is fucking awesome, AI agents leave garbage behind, and copying repair commands all night is bullshit.

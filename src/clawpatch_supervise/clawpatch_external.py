@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import threading
 import time
@@ -19,6 +20,7 @@ from .clawpatch_release import (
     external_state_root,
     release_sweep,
     require_external_clawpatch_preflight,
+    runtime_doctor,
 )
 from .cleanup import cleanup_owned_runs, owned_run_directory
 from .errors import SafetyError
@@ -382,7 +384,9 @@ def main(
     provision_validation_environment: Callable[..., AbstractContextManager[dict[str, str]]] = (
         provision_disposable_validation_environment
     ),
-    ensure_repository_idle: Callable[[Path], None] = require_external_clawpatch_preflight,
+    ensure_repository_idle: Callable[[Path], dict[str, str] | None] = (
+        require_external_clawpatch_preflight
+    ),
     heartbeat_seconds: float = 30,
     cleanup_root: Path | None = None,
 ) -> int:
@@ -411,6 +415,20 @@ def main(
             f"COMPLETE: inspected={len(cleanup_report.entries)} "
             f"removed={cleanup_report.removed} removed_bytes={cleanup_report.removed_bytes}"
         )
+        return 0
+    if raw_argv and raw_argv[0] == "doctor":
+        doctor_parser = argparse.ArgumentParser(
+            prog="clawpatch-supervise doctor",
+            description="Prove the portable runtime without creating or advancing a queue.",
+        )
+        doctor_parser.add_argument("--repo", default=".")
+        doctor_args = doctor_parser.parse_args(raw_argv[1:])
+        try:
+            report, _env_overrides = runtime_doctor(Path(doctor_args.repo).resolve())
+        except SafetyError as exc:
+            print(f"NOT READY: {exc}")
+            return 2
+        print(json.dumps(report, indent=2, sort_keys=True))
         return 0
     parser = argparse.ArgumentParser(
         prog="clawpatch-supervise",
@@ -517,10 +535,22 @@ def main(
                 "max_attempts": 1,
             }
         )
-        ensure_repository_idle(repo)
+        preflight_env_overrides = ensure_repository_idle(repo) or {}
         resolved_fresh = _resolve_fresh_mode(repo, args.fresh, progress=display)
+        def report_blocked_cleanup(path: Path, _error: OSError) -> None:
+            print(
+                f"WARNING: The operating system retained the supervisor-owned temporary directory {path}; "
+                "the completed queue result and ClawPatch receipts are unchanged. "
+                "A later cleanup run can remove it when the sandbox permissions are released.",
+                flush=True,
+            )
+
         with (
-            owned_run_directory(repo, root=cleanup_root) as owned_run,
+            owned_run_directory(
+                repo,
+                root=cleanup_root,
+                on_blocked_cleanup=report_blocked_cleanup,
+            ) as owned_run,
             provision_validation_environment(
                 repo,
                 progress=display,
@@ -530,6 +560,7 @@ def main(
             child_env_overrides = {
                 **validation_env_overrides,
                 **owned_run.child_environment(),
+                **preflight_env_overrides,
             }
             report = run_sweep(
                 repo,
