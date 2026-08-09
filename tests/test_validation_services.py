@@ -223,6 +223,63 @@ class DisposablePostgresValidationTests(unittest.TestCase):
         return_value="postgres:16",
     )
     @patch("clawpatch_supervise.validation_services._compose_contract")
+    def test_env_file_cleanup_failure_removes_exact_container_name(
+        self, compose_contract, _verified_postgres_image
+    ) -> None:
+        compose_contract.return_value = PostgresTestContract(
+            compose_file=Path("compose.yaml"),
+            image="postgres:16",
+            url_env="TEST_DATABASE_URL",
+            reset_envs=("BTT_ALLOW_DATABASE_RESET",),
+        )
+        calls: list[list[str]] = []
+        original_temporary_directory = tempfile.TemporaryDirectory
+
+        class FailingTemporaryDirectory:
+            def __init__(self, *args, **kwargs):
+                self.directory = original_temporary_directory(*args, **kwargs)
+
+            def __enter__(self):
+                return self.directory.__enter__()
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                self.directory.__exit__(exc_type, exc_value, traceback)
+                raise OSError("env-file cleanup failed")
+
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(argv)
+            if argv[:2] == ["docker", "run"]:
+                return subprocess.CompletedProcess(argv, 0, "a" * 64 + "\n", "")
+            if argv[:3] == ["docker", "rm", "-f"]:
+                return subprocess.CompletedProcess(argv, 0, "", "")
+            self.fail(f"unexpected command: {argv}")
+
+        with tempfile.TemporaryDirectory() as temp:
+            with (
+                patch(
+                    "clawpatch_supervise.validation_services.tempfile.TemporaryDirectory",
+                    FailingTemporaryDirectory,
+                ),
+                self.assertRaisesRegex(OSError, "env-file cleanup failed"),
+            ):
+                with _provision_postgres_test_environment(Path(temp), run=run):
+                    self.fail("failed env-file cleanup must not yield an environment")
+
+        docker_run = next(argv for argv in calls if argv[:2] == ["docker", "run"])
+        container_name = docker_run[docker_run.index("--name") + 1]
+        self.assertIn(["docker", "rm", "-f", container_name], calls)
+
+    @patch(
+        "clawpatch_supervise.validation_services._verified_postgres_image",
+        return_value="postgres:16",
+    )
+    @patch("clawpatch_supervise.validation_services._compose_contract")
     def test_startup_timeout_removes_exact_container_name(
         self, compose_contract, _verified_postgres_image
     ) -> None:

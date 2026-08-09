@@ -588,24 +588,6 @@ def _remove_container(
         )
 
 
-def _start_postgres_container(
-    repo: Path,
-    container_name: str,
-    argv: list[str],
-    *,
-    run: RunCommand,
-    env: Mapping[str, str],
-) -> subprocess.CompletedProcess[str]:
-    try:
-        return _checked(run, argv, repo=repo, timeout=180, action="startup", env=env)
-    except BaseException as startup_error:
-        try:
-            _remove_container(repo, container_name, run=run, env=env)
-        except SafetyError as cleanup_error:
-            startup_error.add_note(f"Disposable PostgreSQL cleanup also failed: {cleanup_error}")
-        raise
-
-
 @contextmanager
 def _provision_postgres_test_environment(
     repo: Path,
@@ -644,52 +626,55 @@ def _provision_postgres_test_environment(
     container_name = (
         f"manageroo-validation-postgres-{repository_identity[:16]}-{validation_run_identity}"
     )
-    with tempfile.TemporaryDirectory(
-        prefix="manageroo-validation-postgres-",
-        dir=str(temporary_root) if temporary_root is not None else None,
-    ) as temp:
-        env_file = Path(temp) / "postgres.env"
-        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
-        descriptor = os.open(env_file, flags, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
-            if os.name != "nt":
-                os.fchmod(handle.fileno(), 0o600)
-            handle.write(f"POSTGRES_PASSWORD={password}\n")
-        result = _start_postgres_container(
-            root,
-            container_name,
-            [
-                "docker",
-                "run",
-                "--detach",
-                "--rm",
-                "--name",
-                container_name,
-                "--label",
-                "manageroo.validation-service=postgresql",
-                "--label",
-                f"manageroo.repository={repository_identity}",
-                "--label",
-                f"manageroo.validation-run={validation_run_identity}",
-                "--mount",
-                "type=tmpfs,destination=/var/lib/postgresql/data",
-                "--publish",
-                "127.0.0.1::5432",
-                "--env",
-                "POSTGRES_DB=manageroo_test",
-                "--env",
-                "POSTGRES_USER=manageroo",
-                "--env-file",
-                str(env_file),
-                "--pull=missing",
-                image,
-            ],
-            run=run,
-            env=provisioning_env,
-        )
-    container_id = result.stdout.strip()
     body_error: BaseException | None = None
+    container_cleanup_required = False
     try:
+        with tempfile.TemporaryDirectory(
+            prefix="manageroo-validation-postgres-",
+            dir=str(temporary_root) if temporary_root is not None else None,
+        ) as temp:
+            env_file = Path(temp) / "postgres.env"
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+            descriptor = os.open(env_file, flags, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
+                if os.name != "nt":
+                    os.fchmod(handle.fileno(), 0o600)
+                handle.write(f"POSTGRES_PASSWORD={password}\n")
+            container_cleanup_required = True
+            result = _checked(
+                run,
+                [
+                    "docker",
+                    "run",
+                    "--detach",
+                    "--rm",
+                    "--name",
+                    container_name,
+                    "--label",
+                    "manageroo.validation-service=postgresql",
+                    "--label",
+                    f"manageroo.repository={repository_identity}",
+                    "--label",
+                    f"manageroo.validation-run={validation_run_identity}",
+                    "--mount",
+                    "type=tmpfs,destination=/var/lib/postgresql/data",
+                    "--publish",
+                    "127.0.0.1::5432",
+                    "--env",
+                    "POSTGRES_DB=manageroo_test",
+                    "--env",
+                    "POSTGRES_USER=manageroo",
+                    "--env-file",
+                    str(env_file),
+                    "--pull=missing",
+                    image,
+                ],
+                repo=root,
+                timeout=180,
+                action="startup",
+                env=provisioning_env,
+            )
+        container_id = result.stdout.strip()
         if _CONTAINER_ID.fullmatch(container_id) is None:
             raise SafetyError("Docker returned an invalid disposable PostgreSQL container ID.")
         port = _published_port(root, container_id, run=run, env=provisioning_env)
@@ -740,22 +725,23 @@ def _provision_postgres_test_environment(
         body_error = exc
         raise
     finally:
-        try:
-            _remove_container(root, container_name, run=run, env=provisioning_env)
-        except SafetyError as cleanup_error:
-            if body_error is None:
-                raise
-            body_error.add_note(f"Disposable PostgreSQL cleanup also failed: {cleanup_error}")
-        else:
-            if progress is not None:
-                progress(
-                    {
-                        "phase": "validation-service-cleanup",
-                        "current": "?",
-                        "total": "?",
-                        "detail": "owned disposable PostgreSQL validation database removed",
-                    }
-                )
+        if container_cleanup_required:
+            try:
+                _remove_container(root, container_name, run=run, env=provisioning_env)
+            except SafetyError as cleanup_error:
+                if body_error is None:
+                    raise
+                body_error.add_note(f"Disposable PostgreSQL cleanup also failed: {cleanup_error}")
+            else:
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "validation-service-cleanup",
+                            "current": "?",
+                            "total": "?",
+                            "detail": "owned disposable PostgreSQL validation database removed",
+                        }
+                    )
 
 
 @contextmanager
