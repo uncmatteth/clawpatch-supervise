@@ -2353,7 +2353,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             run_project_gates.side_effect = GateFailure(
                 "gate: manageroo-release\n"
                 "failed requirement: complete repository validation must pass\n"
-                "github-actions-workflows-are-bounded: false"
+                "release-validation-is-complete: false"
             )
 
             record, pushed = _resume_stopped_attempt(
@@ -2373,7 +2373,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             record["revalidation"]["managerooProjectGateFailureContinuation"]
         )
         self.assertIn(
-            "github-actions-workflows-are-bounded: false",
+            "release-validation-is-complete: false",
             record["revalidation"]["managerooProjectGateFailure"],
         )
         self.assertEqual(record["gate_runs"], [])

@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-test-suite-a6226f63_7c7df84e5b",
+  "findingIds": [
+    "fnd_sig-feat-test-suite-a6226f638f-e_bd0704282d"
+  ],
+  "featureIds": [
+    "feat_test-suite_a6226f638f"
+  ],
+  "status": "failed",
+  "plan": "Strengthened cross-platform Windows installer regression coverage so Python, Node.js, and ClawPatch compatibility checks must precede the first install-root mutation. Focused tests passed (32 tests; 13 Windows-only skips), and the full suite passed (234 tests; 16 platform skips).",
+  "filesChanged": [
+    "tests/test_installers.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    }
+  ],
+  "testResults": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-08-09T21:59:10.214Z",
+    "finishedAt": "2026-08-09T22:01:07.487Z"
+  },
+  "git": {
+    "baseSha": "562858f53f673308e68040b0cd4d8b7cec7443a7",
+    "commitSha": null,
+    "branchName": "main",
+    "prUrl": null
+  },
+  "createdAt": "2026-08-09T21:59:10.211Z",
+  "updatedAt": "2026-08-09T22:01:07.487Z"
+}

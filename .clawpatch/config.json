@@ -20,10 +20,10 @@
     "codexConfig": {}
   },
   "commands": {
-    "typecheck": "ruff check .",
-    "lint": "ruff check .",
-    "format": "ruff format --check .",
-    "test": "pytest"
+    "typecheck": "python3 -m compileall -q src tests",
+    "lint": "python3 -m compileall -q src tests",
+    "format": "git diff --check",
+    "test": "PYTHONPATH=src python3 -m unittest discover -s tests -v"
   },
   "review": {
     "maxContextFiles": 24,

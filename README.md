@@ -396,7 +396,7 @@ Run the complete local suite:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The GitHub workflow runs the full suite, installed CLI smoke test, and native installer on Ubuntu, macOS, and Windows with Python 3.11 and 3.12. A release is not described as cross-platform until those live jobs pass.
+This project intentionally has no hosted CI workflows. Before describing a release as cross-platform, run the full suite, installed CLI smoke test, and native installer manually on Linux, macOS, and Windows with every supported Python version, and retain the command output as release evidence.
 
 The release version is declared once as `clawpatch_supervise.__version__`; setuptools derives distribution metadata from that attribute, and the CLI reports the same value.
 
