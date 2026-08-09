@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.26}"
+version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.27}"
 source_package="${CLAWPATCH_SUPERVISE_SOURCE:-https://github.com/uncmatteth/clawpatch-supervise/releases/download/v${version}/clawpatch_supervise-${version}-py3-none-any.whl}"
 install_root="${CLAWPATCH_SUPERVISE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/clawpatch-supervise}"
 bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 verify_repo="${CLAWPATCH_SUPERVISE_VERIFY_REPO:-}"
 readonly minimum_clawpatch_version="0.7.2"
-readonly release_sha256_0_1_26="07169d18a3391dfaf186372d4594bc6391c5e8bffc0a9d08f3f7acf688769783"
+readonly release_sha256_0_1_27="a6eb22ac8c04d8025fbc7b64b6428586396ba09626eb4fbce1d40a918a22a1c2"
 download_root=""
 staging_venv=""
 pending_supervisor_link=""
@@ -90,11 +90,11 @@ if [[ ! -d "$source_package" ]]; then
       echo "CLAWPATCH_SUPERVISE_SHA256 is required for a custom wheel source." >&2
       exit 2
     fi
-    if [[ "$version" != "0.1.26" ]]; then
+    if [[ "$version" != "0.1.27" ]]; then
       echo "No trusted SHA-256 is available for clawpatch-supervise $version." >&2
       exit 2
     fi
-    expected_sha256="$release_sha256_0_1_26"
+    expected_sha256="$release_sha256_0_1_27"
   fi
 
   download_root="$(mktemp -d)"
@@ -134,14 +134,14 @@ staging_venv="$(mktemp -d "$install_root/venv.${version}.XXXXXX")"
 
 "$staging_venv/bin/clawpatch-supervise" --version
 if [[ -n "$verify_repo" ]]; then
-  PATH="$(dirname "$clawpatch_command"):$PATH" \
+  PATH="${clawpatch_command%/*}:$PATH" \
     "$staging_venv/bin/clawpatch-supervise" doctor --repo "$verify_repo"
 fi
 printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$bin_dir"
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
-clawpatch_dir="$(dirname "$clawpatch_command")"
+clawpatch_dir="${clawpatch_command%/*}"
 "$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$bin_dir" "$clawpatch_dir" <<'PY'
 import os
 import shlex

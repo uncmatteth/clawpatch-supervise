@@ -2462,6 +2462,135 @@ def _checkpoint_proves_exact_source(
     )
 
 
+def _preserve_ambiguous_checkpoint_source(
+    repo: Path,
+    checkpoint: dict[str, Any],
+    paths: list[str],
+    *,
+    state_root: Path,
+) -> dict[str, Any] | None:
+    """Preserve one exact stale-checkpoint source set and restore current HEAD.
+
+    Recovery is limited to a modern fingerprinted stopped checkpoint whose old
+    HEAD is an ancestor of the current HEAD and whose recorded paths exactly
+    match every current source change. The ambiguous tree is anchored under a
+    local-only Git ref and described by an external receipt before restoration.
+    """
+    exact_paths = sorted(set(paths))
+    owned_paths = sorted(str(path) for path in checkpoint.get("owned_paths", []))
+    recorded_fingerprint = str(checkpoint.get("owned_source_fingerprint", ""))
+    if (
+        checkpoint.get("phase") != "stopped"
+        or not recorded_fingerprint
+        or not exact_paths
+        or exact_paths != owned_paths
+        or exact_paths != _source_paths(repo)
+    ):
+        return None
+    _validate_attempt_paths_syntax(exact_paths)
+    old_head = str(checkpoint.get("head_before", ""))
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    if not old_head or old_head == current_head:
+        return None
+    ancestor = _run(
+        ["git", "merge-base", "--is-ancestor", old_head, current_head],
+        cwd=repo,
+        timeout=60,
+    )
+    if ancestor.returncode:
+        return None
+
+    temporary_root = current_temporary_root()
+    with tempfile.TemporaryDirectory(
+        prefix="clawpatch-supervise-recovery-index-",
+        dir=str(temporary_root) if temporary_root is not None else None,
+    ) as temp:
+        index_path = Path(temp) / "index"
+        env = dict(os.environ)
+        env["GIT_INDEX_FILE"] = str(index_path)
+        env.update(
+            {
+                "GIT_AUTHOR_NAME": "ClawPatch Supervise Recovery",
+                "GIT_AUTHOR_EMAIL": "clawpatch-supervise-recovery@localhost",
+                "GIT_COMMITTER_NAME": "ClawPatch Supervise Recovery",
+                "GIT_COMMITTER_EMAIL": "clawpatch-supervise-recovery@localhost",
+            }
+        )
+        _must_run(["git", "read-tree", current_head], cwd=repo, timeout=120, env=env)
+        _must_run(["git", "add", "-A", "--", *exact_paths], cwd=repo, timeout=120, env=env)
+        preserved_tree = _must_run(
+            ["git", "write-tree"], cwd=repo, timeout=120, env=env
+        ).strip()
+        preserved_commit = _must_run(
+            [
+                "git",
+                "commit-tree",
+                preserved_tree,
+                "-p",
+                current_head,
+                "-m",
+                "clawpatch-supervise recovery: preserve ambiguous checkpoint source",
+            ],
+            cwd=repo,
+            timeout=120,
+            env=env,
+        ).strip()
+    if _paths_between(repo, current_head, preserved_commit) != exact_paths:
+        raise SafetyError(
+            "Automatic Clawpatch checkpoint recovery could not preserve exactly its ambiguous "
+            "source paths."
+        )
+
+    preserved_ref = f"refs/clawpatch-supervise/recovery/{preserved_commit}"
+    existing_ref = _run(
+        ["git", "rev-parse", "--verify", preserved_ref],
+        cwd=repo,
+        timeout=60,
+    )
+    if existing_ref.returncode:
+        _must_run(
+            ["git", "update-ref", preserved_ref, preserved_commit],
+            cwd=repo,
+            timeout=60,
+        )
+    elif existing_ref.stdout.strip() != preserved_commit:
+        raise SafetyError("Clawpatch recovery ref unexpectedly points to different source.")
+
+    receipt_path = state_root / "recoveries" / f"{preserved_commit}.json"
+    receipt = {
+        "version": 1,
+        "repo": str(repo.resolve()),
+        "finding_id": str(checkpoint["finding_id"]),
+        "checkpoint_head": old_head,
+        "current_head": current_head,
+        "paths": exact_paths,
+        "recorded_source_fingerprint": recorded_fingerprint,
+        "preserved_source_fingerprint": _source_paths_fingerprint(repo, exact_paths),
+        "preserved_commit": preserved_commit,
+        "preserved_ref": preserved_ref,
+        "created_at": utc_now(),
+        "checkpoint": checkpoint,
+    }
+    atomic_write_json(receipt_path, receipt)
+
+    _discard_checkpoint_owned_source(repo, exact_paths)
+    remaining_source = _source_paths(repo)
+    if remaining_source:
+        raise SafetyError(
+            "Automatic Clawpatch checkpoint recovery preserved source at "
+            f"{preserved_ref} but could not restore a clean current HEAD: "
+            + ", ".join(remaining_source)
+        )
+    _clear_release_progress(repo, state_root=state_root)
+    return {
+        "finding_id": str(checkpoint["finding_id"]),
+        "paths": exact_paths,
+        "preserved_commit": preserved_commit,
+        "preserved_ref": preserved_ref,
+        "receipt": str(receipt_path),
+    }
+
+
 def _temporary_commit_matches_owned_source(
     repo: Path,
     *,
@@ -4748,6 +4877,45 @@ def _release_sweep_locked(
                             "owned_paths": recovered_paths,
                         }
                     )
+        if (
+            durable_progress is not None
+            and preexisting_source
+            and durable_progress["head_before"] != head_before
+            and durable_progress.get("owned_source_fingerprint")
+            and not _checkpoint_proves_exact_source(
+                root,
+                durable_progress,
+                preexisting_source,
+            )
+        ):
+            ambiguous_recovery = _preserve_ambiguous_checkpoint_source(
+                root,
+                durable_progress,
+                preexisting_source,
+                state_root=state_root,
+            )
+            if ambiguous_recovery is not None:
+                report["ambiguous_checkpoint_recovery"] = ambiguous_recovery
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "reset-recovery",
+                            "current": "?",
+                            "total": "?",
+                            "finding_id": ambiguous_recovery["finding_id"],
+                            "command": (
+                                "preserve ambiguous checkpoint source in a local recovery ref; "
+                                "restore current HEAD; continue ClawPatch queue"
+                            ),
+                            "attempt": 1,
+                            "max_attempts": 1,
+                            "owned_paths": list(ambiguous_recovery["paths"]),
+                            "preserved_ref": ambiguous_recovery["preserved_ref"],
+                            "receipt": ambiguous_recovery["receipt"],
+                        }
+                    )
+                durable_progress = None
+                preexisting_source = _source_paths(root)
         if durable_progress is not None and durable_progress["head_before"] != head_before:
             if _checkpoint_can_follow_supervisor_upgrade(root, durable_progress):
                 if preexisting_source and not _checkpoint_proves_exact_source(

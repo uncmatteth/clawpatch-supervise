@@ -1645,6 +1645,114 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             self.assertEqual(preserved["head_before"], old_head)
             self.assertEqual(preserved["owned_source_fingerprint"], "")
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
+    @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_one_command_preserves_changed_checkpoint_source_and_continues(
+        self,
+        _version,
+        _processes,
+        _gates,
+        resume_stopped_attempt,
+        json_clawpatch,
+        show_finding,
+        review_all,
+        next_finding,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            old_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            finding_path = repo / ".clawpatch" / "findings" / "fnd_one.json"
+            finding_path.parent.mkdir(parents=True)
+            finding_path.write_text(
+                json.dumps(
+                    {
+                        "findingId": "fnd_one",
+                        "evidence": [{"path": "app.py"}],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            source.write_text("checkpoint-owned repair\n", encoding="utf-8")
+            checkpoint = _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=old_head,
+                phase="stopped",
+                owned_paths=["app.py"],
+            )
+            self.assertTrue(checkpoint["owned_source_fingerprint"])
+
+            source.write_text("later ambiguous bytes\n", encoding="utf-8")
+            ambiguous_bytes = source.read_bytes()
+            (repo / "README.md").write_text("controller upgrade\n", encoding="utf-8")
+            subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "controller upgrade"],
+                cwd=repo,
+                check=True,
+            )
+
+            show_finding.return_value = {
+                "finding": {"id": "fnd_one", "status": "open"},
+                "validation": [],
+                "patchAttempts": [],
+            }
+            json_clawpatch.side_effect = [
+                {"activeLocks": 0, "lockFiles": 0, "openFindings": 1},
+                {"features": 1},
+            ]
+            review_all.return_value = {
+                "review": {"reviewed": 1, "findings": 0},
+                "completion": {"dryRun": True, "wouldReview": 0},
+            }
+            next_finding.return_value = (None, {"finding": None})
+            final_closure.return_value = {"pushed": False, "needs_fresh_review": False}
+
+            report = release_sweep(repo, apply=True, branch="current")
+
+            recovery = report["ambiguous_checkpoint_recovery"]
+            preserved_commit = recovery["preserved_commit"]
+            preserved_bytes = subprocess.check_output(
+                ["git", "show", f"{preserved_commit}:app.py"], cwd=repo
+            )
+            receipt = Path(recovery["receipt"])
+            receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
+
+            self.assertEqual(source.read_bytes(), b"before\n")
+            self.assertEqual(preserved_bytes, ambiguous_bytes)
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "rev-parse", recovery["preserved_ref"]], cwd=repo, text=True
+                ).strip(),
+                preserved_commit,
+            )
+            self.assertEqual(receipt_payload["preserved_commit"], preserved_commit)
+            self.assertEqual(receipt_payload["paths"], ["app.py"])
+            self.assertIsNone(_load_release_progress(repo))
+            self.assertTrue(finding_path.is_file())
+
+        resume_stopped_attempt.assert_not_called()
+        show_finding.assert_called_once()
+
     @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")

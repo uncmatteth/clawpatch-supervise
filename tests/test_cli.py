@@ -117,7 +117,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.26")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.27")
 
     def test_doctor_reports_portable_runtime_without_starting_queue(self):
         output = StringIO()

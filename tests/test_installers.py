@@ -219,7 +219,7 @@ class InstallerContractTests(unittest.TestCase):
         self._write_batch(
             supervisor_stub,
             "@echo off\n"
-            'if "%1"=="--version" echo 0.1.26\n'
+            'if "%1"=="--version" echo 0.1.27\n'
             'if "%1"=="doctor" where clawpatch.cmd >nul || exit /b 27\n'
             "exit /b 0\n",
         )
