@@ -1433,6 +1433,94 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             with self.assertRaisesRegex(SafetyError, "not synchronized"):
                 _require_synchronized_remote_branch(repo, branch)
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_plain_release_command_fast_forwards_clean_behind_branch_and_preserves_clawpatch_state(
+        self,
+        _version,
+        _processes,
+        json_clawpatch,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            publisher = root / "publisher"
+            remote = root / "remote.git"
+            repo.mkdir()
+            self.init_repo(repo)
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo, check=True)
+
+            subprocess.run(
+                ["git", "clone", "-q", "--branch", branch, str(remote), str(publisher)],
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.email", "tests@example.com"],
+                cwd=publisher,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "config", "user.name", "Tests"], cwd=publisher, check=True
+            )
+            (publisher / "published.txt").write_text("released\n", encoding="utf-8")
+            subprocess.run(["git", "add", "published.txt"], cwd=publisher, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "published release"],
+                cwd=publisher,
+                check=True,
+            )
+            subprocess.run(["git", "push", "origin", branch], cwd=publisher, check=True)
+            remote_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=publisher, text=True
+            ).strip()
+
+            clawpatch_state = repo / ".clawpatch" / "findings" / "fnd_existing.json"
+            clawpatch_state.parent.mkdir(parents=True)
+            clawpatch_state.write_text('{"findingId":"fnd_existing"}\n', encoding="utf-8")
+            (repo / ".clawpatch" / "project.json").write_text(
+                '{"name":"fixture"}\n', encoding="utf-8"
+            )
+            json_clawpatch.side_effect = [
+                {"activeLocks": 0, "lockFiles": 0, "openFindings": 0},
+                {"features": 1},
+                {"dryRun": True, "wouldReview": 1, "jobs": 1},
+                {"reviewed": 1, "findings": 0},
+                {"dryRun": True, "wouldReview": 0, "jobs": 1},
+                {"finding": None, "status": "open", "next": "clawpatch report --status open"},
+            ]
+            final_closure.return_value = {"pushed": False}
+            progress_events: list[dict[str, object]] = []
+
+            release_sweep(
+                repo,
+                apply=True,
+                branch="current",
+                push_mode="each",
+                integration_mode="external",
+                progress=progress_events.append,
+            )
+
+            self.assertEqual(
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
+                remote_head,
+            )
+            self.assertTrue((repo / "published.txt").is_file())
+            self.assertEqual(
+                clawpatch_state.read_text(encoding="utf-8"),
+                '{"findingId":"fnd_existing"}\n',
+            )
+            self.assertTrue(
+                any(event.get("phase") == "git-sync" for event in progress_events)
+            )
+
     def test_exact_path_commit_and_push_verification_match_the_live_remote_sha(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

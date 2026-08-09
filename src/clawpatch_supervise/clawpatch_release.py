@@ -328,9 +328,15 @@ def _require_branch(repo: Path, expected: str, *, phase: str) -> None:
         )
 
 
-def _require_synchronized_remote_branch(repo: Path, branch: str) -> str:
+def _require_synchronized_remote_branch(
+    repo: Path,
+    branch: str,
+    *,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> str:
     if branch == "HEAD":
         raise SafetyError("Clawpatch release sweep cannot synchronize a detached HEAD.")
+    _require_branch(repo, branch, phase="remote synchronization")
     _must_run(["git", "remote", "get-url", "origin"], cwd=repo, timeout=60)
     local = _git_text(repo, ["git", "rev-parse", "HEAD"])
     remote_line = _git_text(repo, ["git", "ls-remote", "origin", f"refs/heads/{branch}"])
@@ -338,10 +344,71 @@ def _require_synchronized_remote_branch(repo: Path, branch: str) -> str:
     if not remote:
         raise SafetyError(f"Origin has no branch refs/heads/{branch}; synchronization is unproven.")
     if remote != local:
-        raise SafetyError(
-            f"Local HEAD {local!r} is not synchronized with origin/{branch} at {remote!r}."
+        if _source_paths(repo):
+            raise SafetyError(
+                f"Local HEAD {local!r} is not synchronized with origin/{branch} at {remote!r}."
+            )
+        _must_run(
+            ["git", "fetch", "--no-tags", "origin", f"refs/heads/{branch}"],
+            cwd=repo,
+            timeout=300,
         )
-    return remote
+        fetched = _git_text(repo, ["git", "rev-parse", "FETCH_HEAD"])
+        live_remote_line = _git_text(
+            repo, ["git", "ls-remote", "origin", f"refs/heads/{branch}"]
+        )
+        live_remote = live_remote_line.split()[0] if live_remote_line else ""
+        if fetched != remote or live_remote != remote:
+            raise SafetyError(
+                f"Origin/{branch} changed during synchronization; rerun the supervisor."
+            )
+        ancestor = _run(
+            ["git", "merge-base", "--is-ancestor", local, remote],
+            cwd=repo,
+            timeout=60,
+        )
+        if ancestor.returncode:
+            raise SafetyError(
+                f"Local HEAD {local!r} is not synchronized with origin/{branch} at {remote!r}."
+            )
+        if progress is not None:
+            progress(
+                {
+                    "phase": "git-sync",
+                    "current": "?",
+                    "total": "?",
+                    "command": f"git merge --ff-only {remote}",
+                    "detail": f"fast-forward local {branch} to origin/{branch}",
+                    "attempt": 1,
+                    "max_attempts": 1,
+                }
+            )
+        _require_branch(repo, branch, phase="remote synchronization")
+        with tempfile.TemporaryDirectory(prefix="clawpatch-supervise-empty-hooks-") as hooks:
+            _must_run(
+                [
+                    "git",
+                    "-c",
+                    f"core.hooksPath={hooks}",
+                    "merge",
+                    "--ff-only",
+                    remote,
+                ],
+                cwd=repo,
+                timeout=300,
+            )
+        _require_branch(repo, branch, phase="remote synchronization")
+        local = _git_text(repo, ["git", "rev-parse", "HEAD"])
+        final_remote_line = _git_text(
+            repo, ["git", "ls-remote", "origin", f"refs/heads/{branch}"]
+        )
+        final_remote = final_remote_line.split()[0] if final_remote_line else ""
+        if local != remote or final_remote != remote:
+            raise SafetyError(
+                f"Local HEAD {local!r} is not synchronized with origin/{branch} at "
+                f"{final_remote!r}."
+            )
+    return local
 
 
 def _status_entries(repo: Path) -> list[tuple[str, str]]:
@@ -5036,7 +5103,7 @@ def _release_sweep_locked(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."
         )
     if push_mode != "none":
-        _require_synchronized_remote_branch(root, current_branch)
+        _require_synchronized_remote_branch(root, current_branch, progress=progress)
     if durable_progress is not None:
         if durable_progress["phase"] != "stopped":
             raise SafetyError(

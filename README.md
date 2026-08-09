@@ -211,6 +211,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
 - **Stale checkpoint wrappers recover in one command.** If committed work advances HEAD while the only dirty paths still exactly match a modern stopped checkpoint, but their bytes no longer match its fingerprint, the normal command preserves the complete ambiguous tree under a local-only `refs/clawpatch-supervise/recovery/...` ref, writes an external recovery receipt, restores current HEAD, retires only the stale wrapper, and continues the existing ClawPatch queue. It never pushes the recovery ref or absorbs unrelated paths.
+- **Published updates do not strand the next plain run.** When pushing is enabled, the current branch has no source changes, and local HEAD is strictly behind the stable live origin branch, the supervisor fetches that exact commit, proves ancestry, fast-forwards with local Git hooks disabled, preserves `.clawpatch`, and continues automatically. Source-dirty, ahead, diverged, detached, missing, or moving remote branches still stop safely.
 - **Empty stop markers do not strand open findings.** If a stopped checkpoint owns no source, has no temporary commit, and ClawPatch still reports the exact finding open at the same HEAD, the supervisor retires only that empty wrapper. `clawpatch next` must return the same finding before its fix is attempted again.
 - **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a stopped checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor retires only the obsolete recovery wrapper. The same recovery applies when a source-clean checkpoint owns no paths and has no temporary commit, because there is no repair content to lose. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract always receives a newly owned loopback-only database, and the sanitized environment is passed exactly so inherited database credentials and reset guards stay removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
@@ -399,7 +400,7 @@ The GitHub workflow runs the full suite, installed CLI smoke test, and native in
 
 ## Project status
 
-Current release: **0.1.27 alpha**.
+Current release: **0.1.28 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

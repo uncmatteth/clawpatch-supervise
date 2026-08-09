@@ -185,6 +185,7 @@ def _render_event(event: dict[str, Any]) -> str:
     phase = event.get("phase")
     command_phases = {
         "preflight": "PROCESS PREFLIGHT",
+        "git-sync": "GIT SYNC",
         "fresh": "FRESH INIT",
         "fresh-discard": "FRESH OWNED CLEANUP",
         "init": "INIT",
@@ -219,6 +220,7 @@ def _render_event(event: dict[str, Any]) -> str:
         )
         personality = {
             "preflight": " — 🥾🔍 CHECK THE DAMN TOOLS",
+            "git-sync": " — 🔄📦 CATCHING UP AUTOMATICALLY",
             "fresh": " — 🌱🤬 START THIS SHIT CLEAN",
             "fresh-discard": " — 🧹💥 REMOVE ONLY OUR OLD SHIT",
             "baseline-validation": " — 🧪🧱 PROVE THE REPO ISN'T ALREADY FUCKED",

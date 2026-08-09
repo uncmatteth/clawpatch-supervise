@@ -117,7 +117,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             main(["--version"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.27")
+        self.assertEqual(output.getvalue().strip(), "clawpatch-supervise 0.1.28")
 
     def test_doctor_reports_portable_runtime_without_starting_queue(self):
         output = StringIO()
@@ -185,6 +185,22 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             "\n[?/?] SUBMODULE EXCLUSION — "
             "🚧🙅 NOT TOUCHING SOMEBODY ELSE'S SHIT\n"
             "excluded: lib/openzeppelin-contracts",
+        )
+
+    def test_git_sync_progress_explains_the_automatic_fast_forward(self):
+        self.assertEqual(
+            _render_event(
+                {
+                    "phase": "git-sync",
+                    "current": "?",
+                    "total": "?",
+                    "command": "git merge --ff-only abc123",
+                    "attempt": 1,
+                    "max_attempts": 1,
+                }
+            ),
+            "\n[?/?] GIT SYNC (attempt 1/1) — 🔄📦 CATCHING UP AUTOMATICALLY\n"
+            "$ git merge --ff-only abc123",
         )
 
     def test_finding_rendering_escapes_terminal_controls(self):
