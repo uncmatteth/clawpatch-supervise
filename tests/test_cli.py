@@ -5,7 +5,7 @@ import json
 import tempfile
 import tomllib
 import unittest
-from contextlib import contextmanager, redirect_stdout
+from contextlib import contextmanager, redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -100,6 +100,31 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(output.getvalue().strip(), f"clawpatch-supervise {__version__}")
+
+    def test_plain_command_rejects_non_finite_retry_delays(self):
+        def unexpected_preflight(_repo: Path):
+            raise AssertionError("preflight must not run for an invalid retry delay")
+
+        for value in ("nan", "inf"):
+            with self.subTest(value=value):
+                error = StringIO()
+                with self.assertRaises(SystemExit) as raised, redirect_stderr(error):
+                    main(
+                        ["--retry-seconds", value],
+                        ensure_repository_idle=unexpected_preflight,
+                    )
+
+                self.assertEqual(raised.exception.code, 2)
+                self.assertIn(
+                    "--retry-seconds must be a finite non-negative number",
+                    error.getvalue(),
+                )
+
+    def test_plain_command_accepts_a_finite_positive_retry_delay(self):
+        with redirect_stdout(StringIO()):
+            code = main(["--retry-seconds", "0.5", "--print-state-path"])
+
+        self.assertEqual(code, 0)
 
     def test_distribution_version_is_derived_from_package_version(self):
         manifest = tomllib.loads(

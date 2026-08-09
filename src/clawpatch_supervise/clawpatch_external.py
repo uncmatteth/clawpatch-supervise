@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import threading
 import time
@@ -440,8 +441,8 @@ def main(
     args = parser.parse_args(raw_argv)
     if args.timeout_minutes < 1:
         parser.error("--timeout-minutes must be at least 1")
-    if args.retry_seconds < 0:
-        parser.error("--retry-seconds cannot be negative")
+    if not math.isfinite(args.retry_seconds) or args.retry_seconds < 0:
+        parser.error("--retry-seconds must be a finite non-negative number")
     try:
         repo = Path(args.repo).resolve()
     except (OSError, RuntimeError) as exc:
