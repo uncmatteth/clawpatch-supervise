@@ -637,6 +637,49 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(list(install_root.iterdir()), [install_root / "venv.previous"])
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_supervisor_command_directory(self) -> None:
+        command_directory = (
+            Path(self._temporary_directory.name)
+            / "installed-bin"
+            / "clawpatch-supervise"
+        )
+        command_directory.mkdir(parents=True)
+
+        result, _invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="missing",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"Command destination is a directory: {command_directory}",
+            result.stderr,
+        )
+        self.assertEqual(list(command_directory.iterdir()), [])
+        self.assertNotIn("Installed command:", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_clawpatch_command_directory(self) -> None:
+        command_directory = (
+            Path(self._temporary_directory.name) / "installed-bin" / "clawpatch"
+        )
+        command_directory.mkdir(parents=True)
+
+        result, _invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"Command destination is a directory: {command_directory}",
+            result.stderr,
+        )
+        self.assertEqual(list(command_directory.iterdir()), [])
+        self.assertNotIn("Installed command:", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_requires_digest_for_custom_remote_source(self) -> None:
         result, _invocations, install_root = self._run_linux_installer(
             clawpatch_present=True,

@@ -12,9 +12,11 @@ readonly release_sha256_0_1_28="150773b2714f84f30638fca7ab1896ae1b14042f0d4ef2d9
 download_root=""
 staging_venv=""
 pending_supervisor_link=""
+pending_clawpatch_link=""
 
 cleanup() {
   [[ -z "$pending_supervisor_link" ]] || rm -f "$pending_supervisor_link"
+  [[ -z "$pending_clawpatch_link" ]] || rm -f "$pending_clawpatch_link"
   [[ -z "$staging_venv" ]] || rm -rf "$staging_venv"
   [[ -z "$download_root" ]] || rm -rf "$download_root"
 }
@@ -140,6 +142,16 @@ fi
 printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$bin_dir"
+supervisor_destination="$bin_dir/clawpatch-supervise"
+clawpatch_destination="$bin_dir/clawpatch"
+if [[ -d "$supervisor_destination" ]]; then
+  echo "Command destination is a directory: $supervisor_destination" >&2
+  exit 2
+fi
+if [[ "$clawpatch_command" == "$install_root/clawpatch/"* && -d "$clawpatch_destination" ]]; then
+  echo "Command destination is a directory: $clawpatch_destination" >&2
+  exit 2
+fi
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
 clawpatch_dir="${clawpatch_command%/*}"
 "$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$bin_dir" "$clawpatch_dir" <<'PY'
@@ -166,14 +178,27 @@ PY
 # Stop EXIT cleanup from removing either valid target once activation begins.
 activated_venv="$staging_venv"
 staging_venv=""
-mv -f "$pending_supervisor_link" "$bin_dir/clawpatch-supervise" || {
+"$python_command" - "$pending_supervisor_link" "$supervisor_destination" <<'PY' || {
+import os
+import sys
+
+os.replace(sys.argv[1], sys.argv[2])
+PY
   move_status=$?
   staging_venv="$activated_venv"
   exit "$move_status"
 }
 pending_supervisor_link=""
 if [[ "$clawpatch_command" == "$install_root/clawpatch/"* ]]; then
-  ln -sfn "$clawpatch_command" "$bin_dir/clawpatch"
-  clawpatch_command="$bin_dir/clawpatch"
+  pending_clawpatch_link="$(mktemp "$bin_dir/.clawpatch.XXXXXX")"
+  ln -sfn "$clawpatch_command" "$pending_clawpatch_link"
+  "$python_command" - "$pending_clawpatch_link" "$clawpatch_destination" <<'PY'
+import os
+import sys
+
+os.replace(sys.argv[1], sys.argv[2])
+PY
+  pending_clawpatch_link=""
+  clawpatch_command="$clawpatch_destination"
 fi
-echo "Installed command: $bin_dir/clawpatch-supervise"
+echo "Installed command: $supervisor_destination"
