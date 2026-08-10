@@ -35,12 +35,20 @@ def _clawpatch_state_exists(repo: Path) -> bool:
     return state.is_dir() and (state / "project.json").is_file()
 
 
-def _run_state_query(repo: Path, argv: list[str]) -> dict[str, Any]:
+def _run_state_query(
+    repo: Path,
+    argv: list[str],
+    *,
+    preflight_env_overrides: dict[str, str] | None = None,
+) -> dict[str, Any]:
     result = CommandRunner().run(
         argv,
         cwd=repo,
         timeout_seconds=120,
-        env=_release_clawpatch_env(trusted_host_codex_sandbox_bypass=False),
+        env=_release_clawpatch_env(
+            trusted_host_codex_sandbox_bypass=False,
+            child_env_overrides=preflight_env_overrides,
+        ),
         kill_process_group=True,
     )
     if result.exit_code != 0:
@@ -52,15 +60,27 @@ def _run_state_query(repo: Path, argv: list[str]) -> dict[str, Any]:
     return _parse_json_output(result.stdout, command=" ".join(argv[1:]))
 
 
-def _existing_queue_is_clean(repo: Path) -> bool:
-    status = _run_state_query(repo, ["clawpatch", "status", "--json"])
+def _existing_queue_is_clean(
+    repo: Path,
+    *,
+    preflight_env_overrides: dict[str, str] | None = None,
+) -> bool:
+    status = _run_state_query(
+        repo,
+        ["clawpatch", "status", "--json"],
+        preflight_env_overrides=preflight_env_overrides,
+    )
     for field in ("openFindings", "activeLocks", "lockFiles"):
         value = status.get(field)
         if isinstance(value, bool) or not isinstance(value, int) or value < 0:
             raise SafetyError(f"Existing ClawPatch status has an invalid {field!r} value.")
     if any(status[field] for field in ("openFindings", "activeLocks", "lockFiles")):
         return False
-    uncertain = _run_state_query(repo, ["clawpatch", "report", "--status", "uncertain", "--json"])
+    uncertain = _run_state_query(
+        repo,
+        ["clawpatch", "report", "--status", "uncertain", "--json"],
+        preflight_env_overrides=preflight_env_overrides,
+    )
     total = uncertain.get("total")
     if isinstance(total, bool) or not isinstance(total, int) or total < 0:
         raise SafetyError("Existing ClawPatch uncertain report has an invalid total.")
@@ -71,13 +91,17 @@ def _resolve_fresh_mode(
     repo: Path,
     requested: bool | None,
     *,
+    preflight_env_overrides: dict[str, str] | None = None,
     progress: Callable[[dict[str, Any]], None] | None = None,
 ) -> bool:
     if requested is False:
         return False
     if not _clawpatch_state_exists(repo):
         return True
-    if not _existing_queue_is_clean(repo):
+    if not _existing_queue_is_clean(
+        repo,
+        preflight_env_overrides=preflight_env_overrides,
+    ):
         if requested is True:
             raise SafetyError("Explicit --fresh requires an existing ClawPatch queue to be clean.")
         return False
@@ -533,7 +557,13 @@ def main(
                     flush=True,
                 )
                 time.sleep(args.retry_seconds)
-        resolved_fresh = _resolve_fresh_mode(repo, args.fresh, progress=display)
+        resolved_fresh = _resolve_fresh_mode(
+            repo,
+            args.fresh,
+            preflight_env_overrides=preflight_env_overrides,
+            progress=display,
+        )
+
         def report_blocked_cleanup(path: Path, _error: OSError) -> None:
             print(
                 "WARNING: The operating system retained the supervisor-owned temporary directory "

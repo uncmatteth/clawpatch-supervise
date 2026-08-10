@@ -521,7 +521,13 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             return {"PATH": "C:\\working-codex-bin"}
 
         output = StringIO()
-        with redirect_stdout(output):
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(output),
+        ):
             code = main(
                 ["--repo", "."],
                 run_sweep=fake_sweep,
@@ -544,6 +550,62 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             output.getvalue().index("VALIDATION SERVICE START"),
         )
         self.assertEqual(output.getvalue().count("PROCESS PREFLIGHT"), 1)
+
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
+    def test_existing_state_queries_receive_preflight_environment_overrides(
+        self, _state_exists, _source_paths
+    ):
+        preflight_env = {
+            "PATH": "/preflight/clawpatch/bin",
+            "CLAWPATCH_PREFLIGHT_SENTINEL": "ready",
+        }
+        completed = [
+            SimpleNamespace(
+                exit_code=0,
+                stdout='{"openFindings": 0, "activeLocks": 0, "lockFiles": 0}',
+                stderr="",
+            ),
+            SimpleNamespace(exit_code=0, stdout='{"total": 0}', stderr=""),
+        ]
+
+        @contextmanager
+        def fake_provision(_repo: Path, *, progress, temporary_root: Path):
+            yield {}
+
+        def fake_sweep(_repo: Path, **_kwargs):
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with tempfile.TemporaryDirectory() as temp:
+            with (
+                patch(
+                    "clawpatch_supervise.clawpatch_external.CommandRunner.run",
+                    side_effect=completed,
+                ) as run,
+                redirect_stdout(StringIO()),
+            ):
+                code = main(
+                    ["--repo", "."],
+                    run_sweep=fake_sweep,
+                    provision_validation_environment=fake_provision,
+                    ensure_repository_idle=lambda _repo: preflight_env,
+                    heartbeat_seconds=0,
+                    cleanup_root=Path(temp) / "cleanup",
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(
+            [item.args[0] for item in run.call_args_list],
+            [
+                ["clawpatch", "status", "--json"],
+                ["clawpatch", "report", "--status", "uncertain", "--json"],
+            ],
+        )
+        expected_env = _release_clawpatch_env(
+            trusted_host_codex_sandbox_bypass=False,
+            child_env_overrides=preflight_env,
+        )
+        self.assertTrue(all(item.kwargs["env"] == expected_env for item in run.call_args_list))
 
     def test_repository_path_stays_canonical_after_preflight_retargets_symlink(self):
         received_paths = []
