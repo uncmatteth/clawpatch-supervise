@@ -395,13 +395,13 @@ py -3 -m venv .venv
 
 ## Test and release proof
 
-Run the complete local suite:
+Run the complete local suite, including the installed-wheel console-entry-point smoke test:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-This project intentionally has no hosted CI workflows. Before describing a release as cross-platform, run the full suite, installed CLI smoke test, and native installer manually on Linux, macOS, and Windows with every supported Python version, and retain the command output as release evidence.
+This project intentionally has no hosted CI workflows. Before describing a release as cross-platform, run the full suite and native installer manually on Linux, macOS, and Windows with every supported Python version, and retain the command output as release evidence.
 
 The release version is declared once as `clawpatch_supervise.__version__`; setuptools derives distribution metadata from that attribute, and the CLI reports the same value.
 
