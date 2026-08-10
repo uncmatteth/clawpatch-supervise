@@ -383,10 +383,4 @@ activation_complete=true
 activated_clawpatch_root="$staging_clawpatch_root"
 staging_venv=""
 staging_clawpatch_root=""
-if [[ -n "$superseded_venv" && "$superseded_venv" != "$activated_venv" ]]; then
-  rm -rf -- "$superseded_venv"
-fi
-if [[ -n "$superseded_clawpatch_root" && "$superseded_clawpatch_root" != "$activated_clawpatch_root" ]]; then
-  rm -rf -- "$superseded_clawpatch_root"
-fi
 echo "Installed command: $supervisor_destination"

@@ -1020,38 +1020,105 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(list(install_root.iterdir()), [install_root / "venv.previous"])
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
-    def test_linux_installer_removes_superseded_managed_environment(self) -> None:
+    def test_linux_installer_retains_superseded_managed_environment_for_active_processes(
+        self,
+    ) -> None:
         root = Path(self._temporary_directory.name)
         install_root = root / "install"
         previous_venv = install_root / "venv.0.1.27.previous"
         previous_supervisor = previous_venv / "bin" / "clawpatch-supervise"
         previous_supervisor.parent.mkdir(parents=True)
-        self._write_executable(previous_supervisor, "#!/bin/sh\nexit 0\n")
+        previous_child = previous_venv / "bin" / "delayed-child"
+        self._write_executable(
+            previous_child,
+            "#!/bin/sh\nprintf 'active runtime retained\\n'\n",
+        )
+        self._write_executable(
+            previous_supervisor,
+            "#!/bin/sh\n"
+            ': > "$CLAWPATCH_ACTIVE_READY"\n'
+            'while [ ! -e "$CLAWPATCH_ACTIVE_RELEASE" ]; do sleep 0.01; done\n'
+            'exec "$CLAWPATCH_ACTIVE_CHILD"\n',
+        )
         installed_command = root / "installed-bin" / "clawpatch-supervise"
         installed_command.parent.mkdir()
         self._write_executable(
             installed_command,
             f'#!/bin/sh\nexec {previous_supervisor} "$@"\n',
         )
+        active_result = None
+
+        def upgrade_while_previous_process_is_active(
+            installer_path: Path, environment: dict[str, str]
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal active_result
+            ready = root / "active-ready"
+            release = root / "active-release"
+            active_environment = environment.copy()
+            active_environment.update(
+                {
+                    "CLAWPATCH_ACTIVE_READY": str(ready),
+                    "CLAWPATCH_ACTIVE_RELEASE": str(release),
+                    "CLAWPATCH_ACTIVE_CHILD": str(previous_child),
+                }
+            )
+            active_process = subprocess.Popen(
+                [str(installed_command)],
+                env=active_environment,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while not ready.exists() and time.monotonic() < deadline:
+                    if active_process.poll() is not None:
+                        self.fail("previous supervisor exited before the upgrade")
+                    time.sleep(0.01)
+                self.assertTrue(ready.exists(), "previous supervisor did not start")
+
+                install_result = self._run_installer_process(
+                    platform_name="Linux/macOS",
+                    installer_path=installer_path,
+                    argv=[str(installer_path)],
+                    environment=environment,
+                )
+                release.touch()
+                stdout, stderr = active_process.communicate(timeout=10)
+                active_result = subprocess.CompletedProcess(
+                    [str(installed_command)],
+                    active_process.returncode,
+                    stdout,
+                    stderr,
+                )
+                return install_result
+            finally:
+                if active_process.poll() is None:
+                    active_process.kill()
+                    active_process.communicate()
 
         result, _invocations, actual_install_root = self._run_linux_installer(
             clawpatch_present=True,
             clawhub_present=True,
             npm_mode="missing",
+            process_runner=upgrade_while_previous_process_is_active,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(actual_install_root, install_root)
-        self.assertFalse(previous_venv.exists())
+        self.assertIsNotNone(active_result)
+        self.assertEqual(active_result.returncode, 0, active_result.stderr)
+        self.assertEqual(active_result.stdout.strip(), "active runtime retained")
+        self.assertTrue(previous_venv.exists())
         environments = list(install_root.glob("venv.*"))
-        self.assertEqual(len(environments), 1)
+        self.assertEqual(len(environments), 2)
         self.assertIn(
-            str(environments[0] / "bin" / "clawpatch-supervise"),
+            str(next(path for path in environments if path != previous_venv) / "bin" / "clawpatch-supervise"),
             installed_command.read_text(encoding="utf-8"),
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
-    def test_linux_installer_removes_superseded_managed_clawpatch_root(self) -> None:
+    def test_linux_installer_retains_superseded_managed_clawpatch_root(self) -> None:
         root = Path(self._temporary_directory.name)
         install_root = root / "install"
         previous_root = install_root / "clawpatch.previous"
@@ -1080,7 +1147,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(actual_install_root, install_root)
         staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
-        self.assertFalse(previous_root.exists())
+        self.assertTrue(previous_root.exists())
         self.assertTrue(staged_root.exists())
         self.assertTrue(unrelated_directory.exists())
         self.assertEqual(
