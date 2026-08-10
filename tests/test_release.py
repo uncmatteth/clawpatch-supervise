@@ -49,6 +49,7 @@ from clawpatch_supervise.clawpatch_release import (
     _review_all_features,
     _run_project_gates,
     _source_state_fingerprint,
+    _status_entries,
     _source_paths,
     _source_paths_fingerprint,
     _UnresolvedFinding,
@@ -227,6 +228,26 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         )
         subprocess.run(["git", "add", ".gitignore"], cwd=repo, check=True)
         subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX byte filenames")
+    def test_status_and_source_paths_preserve_distinct_non_utf8_filenames(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            names = [os.fsdecode(value) for value in (b"invalid-\xfe.txt", b"invalid-\xff.txt")]
+            for name in names:
+                (repo / name).write_text("original\n", encoding="utf-8")
+            subprocess.run(["git", "add", "--", *names], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "byte paths"], cwd=repo, check=True)
+            for name in names:
+                (repo / name).write_text("changed\n", encoding="utf-8")
+
+            entries = _status_entries(repo)
+
+            self.assertEqual(entries, [(" M", name) for name in sorted(names)])
+            self.assertEqual(_source_paths(repo), sorted(names))
+            for _status, name in entries:
+                self.assertTrue((repo / name).is_file())
 
     def test_source_paths_ignore_only_untracked_node_modules(self):
         with tempfile.TemporaryDirectory() as temp:

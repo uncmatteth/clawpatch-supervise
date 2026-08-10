@@ -239,7 +239,7 @@ def _run(
             cwd=str(cwd),
             text=True,
             encoding="utf-8",
-            errors="replace",
+            errors="surrogateescape",
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             env=env,
