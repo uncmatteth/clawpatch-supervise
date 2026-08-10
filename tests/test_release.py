@@ -5318,6 +5318,52 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 release_sweep(repo, apply=True, branch="current")
 
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    def test_external_apply_waits_on_preexisting_source_changes(self, _processes, _version):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            (repo / "app.py").write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+            (repo / "app.py").write_text("dirty\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RepositoryBusyError, "waiting without discarding"):
+                release_sweep(
+                    repo,
+                    apply=True,
+                    branch="current",
+                    integration_mode="external",
+                )
+
+            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "dirty\n")
+
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    def test_external_automatic_fresh_waits_before_resetting_dirty_source(
+        self, _processes, _version
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            (repo / "app.py").write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+            (repo / "app.py").write_text("dirty\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(RepositoryBusyError, "Automatic fresh review"):
+                release_sweep(
+                    repo,
+                    apply=True,
+                    branch="current",
+                    integration_mode="external",
+                    fresh=True,
+                    wait_on_preserved_source=True,
+                )
+
+            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "dirty\n")
+
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
     @patch(
         "clawpatch_supervise.clawpatch_release._active_clawpatch_processes",
         return_value=[{"pid": 42}],

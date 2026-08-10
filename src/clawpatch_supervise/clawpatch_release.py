@@ -4835,6 +4835,7 @@ def release_sweep(
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
     advance_uncertain: bool = False,
+    wait_on_preserved_source: bool = False,
 ) -> dict[str, Any]:
     """Automate Clawpatch's documented one-finding workflow without automatic triage."""
     root = _git_root(repo)
@@ -4852,6 +4853,7 @@ def release_sweep(
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
             advance_uncertain=advance_uncertain,
+            wait_on_preserved_source=wait_on_preserved_source,
         )
     with _release_sweep_lock(root):
         return _release_sweep_locked(
@@ -4867,6 +4869,7 @@ def release_sweep(
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
             advance_uncertain=advance_uncertain,
+            wait_on_preserved_source=wait_on_preserved_source,
         )
 
 
@@ -4884,6 +4887,7 @@ def _release_sweep_locked(
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
     advance_uncertain: bool = False,
+    wait_on_preserved_source: bool = False,
     _fixed_point_generation: int = 1,
     _fixed_point_seen_trees: tuple[str, ...] = (),
     _prior_results: tuple[dict[str, Any], ...] = (),
@@ -4944,6 +4948,16 @@ def _release_sweep_locked(
     )
     if integration_mode == "external":
         _migrate_legacy_external_progress(root, state_root=state_root)
+    if (
+        fresh
+        and integration_mode == "external"
+        and wait_on_preserved_source
+        and _source_paths(root)
+    ):
+        raise RepositoryBusyError(
+            "Automatic fresh review found preserved project source changes; waiting without "
+            "discarding them."
+        )
     if fresh:
         _prepare_fresh_release(
             root,
@@ -5227,10 +5241,13 @@ def _release_sweep_locked(
         durable_progress = None
         preexisting_source = _source_paths(root)
     if preexisting_source and durable_progress is None:
-        raise SafetyError(
-            "Clawpatch release sweep found pre-existing source changes: "
+        message = (
+            "Clawpatch release sweep found preserved pre-existing source changes: "
             + ", ".join(preexisting_source)
         )
+        if integration_mode == "external":
+            raise RepositoryBusyError(message + "; waiting without discarding them.")
+        raise SafetyError(message)
     if durable_progress is not None and branch not in {"auto", "current", current_branch}:
         raise SafetyError(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."

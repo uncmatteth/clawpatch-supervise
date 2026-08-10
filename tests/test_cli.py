@@ -1065,6 +1065,29 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(calls[0][1]["fresh"])
 
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
+    @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=False)
+    def test_default_run_marks_automatic_fresh_as_waiting_on_preserved_source(
+        self, _state_exists, _source
+    ):
+        calls = []
+
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with redirect_stdout(StringIO()):
+            code = main(
+                ["--repo", "."],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(calls[0][1]["fresh"])
+        self.assertTrue(calls[0][1]["wait_on_preserved_source"])
+
 
 if __name__ == "__main__":
     unittest.main()
