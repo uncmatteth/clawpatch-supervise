@@ -28,7 +28,7 @@ from .clawpatch_protocol import (
 from .cleanup import current_temporary_root
 from .errors import GateFailure, RepositoryBusyError, SafetyError
 from .runner import CommandRunner
-from .util import atomic_write_json, utc_now
+from .util import atomic_write_json, redact_argv, redact_text, utc_now
 
 PROJECT_DIR = ".manageroo"
 MINIMUM_CLAWPATCH_VERSION = (0, 7, 2)
@@ -273,9 +273,11 @@ def _must_run(
 ) -> str:
     result = _run(argv, cwd=cwd, timeout=timeout, env=env)
     if result.returncode:
+        safe_argv = redact_argv(argv)
+        safe_output = redact_text(result.stdout)
         raise SafetyError(
-            f"command: {shlex.join(argv)}\nexit code: {result.returncode}\n"
-            f"failed requirement: command must exit 0\noutput:\n{result.stdout[-6000:]}"
+            f"command: {shlex.join(safe_argv)}\nexit code: {result.returncode}\n"
+            f"failed requirement: command must exit 0\noutput:\n{safe_output[-6000:]}"
         )
     return result.stdout
 

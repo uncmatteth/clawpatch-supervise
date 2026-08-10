@@ -5,6 +5,7 @@ import json
 import multiprocessing
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -31,6 +32,7 @@ from clawpatch_supervise.clawpatch_release import (
     _map_repository,
     _migrate_legacy_external_progress,
     _MissingFinding,
+    _must_run,
     _must_clawpatch,
     _next_finding,
     _parse_json_output,
@@ -90,6 +92,25 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         argv: list[str], output: str = "", code: int = 0
     ) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(argv, code, output, None)
+
+    def test_must_run_redacts_failed_command_argv_and_output(self):
+        with tempfile.TemporaryDirectory() as temp:
+            argv = [
+                sys.executable,
+                "-c",
+                "print('authorization: Bearer stdout-secret'); raise SystemExit(9)",
+                "--token",
+                "argument-secret",
+            ]
+
+            with self.assertRaises(SafetyError) as raised:
+                _must_run(argv, cwd=Path(temp), timeout=30)
+
+        message = str(raised.exception)
+        self.assertNotIn("argument-secret", message)
+        self.assertNotIn("stdout-secret", message)
+        self.assertIn("<REDACTED>", message)
+        self.assertIn("exit code: 9", message)
 
     def test_windows_codex_preflight_skips_broken_long_path_launcher(self):
         with tempfile.TemporaryDirectory() as temp:

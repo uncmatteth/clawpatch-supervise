@@ -17,6 +17,7 @@ from typing import Callable, Iterator, Mapping, Protocol
 from urllib.parse import quote
 
 from .errors import SafetyError
+from .util import redact_text
 
 _COMPOSE_FILES = ("compose.yaml", "compose.yml", "docker-compose.yaml", "docker-compose.yml")
 _IGNORED_DIRECTORIES = frozenset(
@@ -336,7 +337,9 @@ def _checked_python_environment_command(
     except subprocess.TimeoutExpired as exc:
         raise SafetyError(f"Disposable Python validation environment {action} timed out.") from exc
     if result.returncode != 0:
-        output = "\n".join(value for value in (result.stdout, result.stderr) if value)
+        output = redact_text(
+            "\n".join(value for value in (result.stdout, result.stderr) if value)
+        )
         raise SafetyError(
             f"Disposable Python validation environment {action} failed with exit code "
             f"{result.returncode}: {output[-4000:]}"
@@ -485,7 +488,9 @@ def _checked(
     except subprocess.TimeoutExpired as exc:
         raise SafetyError(f"Disposable PostgreSQL {action} timed out.") from exc
     if result.returncode != 0:
-        output = "\n".join(value for value in (result.stdout, result.stderr) if value)
+        output = redact_text(
+            "\n".join(value for value in (result.stdout, result.stderr) if value)
+        )
         raise SafetyError(
             f"Disposable PostgreSQL {action} failed with exit code {result.returncode}: "
             f"{output[-2000:]}"
@@ -581,7 +586,9 @@ def _remove_container(
             "ClawPatch Supervise timed out removing its disposable PostgreSQL container."
         ) from exc
     if result.returncode != 0:
-        output = "\n".join(value for value in (result.stdout, result.stderr) if value)
+        output = redact_text(
+            "\n".join(value for value in (result.stdout, result.stderr) if value)
+        )
         raise SafetyError(
             "ClawPatch Supervise could not remove its disposable PostgreSQL container: "
             + output[-2000:]

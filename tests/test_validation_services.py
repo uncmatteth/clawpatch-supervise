@@ -13,10 +13,66 @@ from clawpatch_supervise.errors import SafetyError
 from clawpatch_supervise.validation_services import (
     PostgresTestContract,
     PythonTestContract,
+    _checked,
+    _checked_python_environment_command,
     _provision_python_test_environment,
     _provision_postgres_test_environment,
+    _remove_container,
     _run_command,
 )
+
+
+class FailedSubprocessRedactionTests(unittest.TestCase):
+    def test_validation_command_failures_redact_stdout_and_stderr(self) -> None:
+        secrets = ("stdout-secret", "bearer-secret", "stderr-secret")
+
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(
+                argv,
+                9,
+                f"token={secrets[0]}\nAuthorization: Bearer {secrets[1]}",
+                f"password={secrets[2]}",
+            )
+
+        attempts = (
+            lambda: _checked_python_environment_command(
+                run,
+                ["python"],
+                repo=Path.cwd(),
+                timeout=1,
+                action="probe",
+                env={},
+            ),
+            lambda: _checked(
+                run,
+                ["docker"],
+                repo=Path.cwd(),
+                timeout=1,
+                action="probe",
+                env={},
+            ),
+            lambda: _remove_container(
+                Path.cwd(),
+                "a" * 64,
+                run=run,
+                env={},
+            ),
+        )
+
+        for attempt in attempts:
+            with self.subTest(attempt=attempt), self.assertRaises(SafetyError) as raised:
+                attempt()
+
+            message = str(raised.exception)
+            self.assertIn("<REDACTED>", message)
+            for secret in secrets:
+                self.assertNotIn(secret, message)
 
 
 class DisposablePythonValidationTests(unittest.TestCase):
