@@ -312,9 +312,93 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 for control in ("\x07", "\r", "\x1b", "\x9b"):
                     self.assertNotIn(control, rendered)
 
+    def test_heartbeat_rendering_escapes_controls(self):
+        lines = _heartbeat_lines(
+            {
+                "phase": "review\nCOMPLETE: forged",
+                "current": 1,
+                "total": 2,
+                "attempt": "1\r",
+                "max_attempts": "2\t",
+                "finding_id": "fnd\x1b[2J",
+                "command": "clawpatch review\x9b31m\x07",
+                "changed": 100,
+            },
+            watchdog_seconds=900,
+            now=105,
+        )
+        rendered = "\n".join(lines)
+
+        self.assertIn(r"review\nCOMPLETE: forged attempt 1\r/2\t fnd\x1b[2J", rendered)
+        self.assertIn(r"$ clawpatch review\x9b31m\x07", rendered)
+        self.assertNotIn("\nCOMPLETE: forged", rendered)
+        for control in ("\x07", "\r", "\t", "\x1b", "\x9b"):
+            self.assertNotIn(control, rendered)
+
+    def test_cleanup_path_output_escapes_controls(self):
+        output = StringIO()
+        report = SimpleNamespace(
+            root=Path("/tmp/cleanup\nCOMPLETE: forged"),
+            entries=[
+                SimpleNamespace(
+                    status="retained",
+                    path=Path("/tmp/run\r\t\x1b\x9b"),
+                    bytes=12,
+                )
+            ],
+            removed=0,
+            removed_bytes=0,
+        )
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external.cleanup_owned_runs",
+                return_value=report,
+            ),
+            redirect_stdout(output),
+        ):
+            code = main(["cleanup", "--dry-run"])
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn(r"cleanup\nCOMPLETE: forged", rendered)
+        self.assertIn(r"run\r\t\x1b\x9b", rendered)
+        self.assertNotIn("\nCOMPLETE: forged", rendered)
+        for control in ("\r", "\t", "\x1b", "\x9b"):
+            self.assertNotIn(control, rendered)
+
+    def test_startup_repository_path_output_escapes_controls(self):
+        @contextmanager
+        def fake_provision(_repo: Path, *, progress, temporary_root: Path):
+            yield {}
+
+        def fake_sweep(_repo: Path, **_kwargs):
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repo\nCOMPLETE: forged\r\t\x1b\x9b"
+            repo.mkdir()
+            output = StringIO()
+            with redirect_stdout(output):
+                code = main(
+                    ["--repo", str(repo), "--branch", "current\x07"],
+                    run_sweep=fake_sweep,
+                    provision_validation_environment=fake_provision,
+                    ensure_repository_idle=lambda _repo: None,
+                    heartbeat_seconds=0,
+                    cleanup_root=Path(temp) / "cleanup",
+                )
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn(r"repo\nCOMPLETE: forged\r\t\x1b\x9b", rendered)
+        self.assertIn(r"branch=current\x07", rendered)
+        self.assertNotIn("\nCOMPLETE: forged", rendered)
+        for control in ("\x07", "\r", "\t", "\x1b", "\x9b"):
+            self.assertNotIn(control, rendered)
+
     def test_print_state_path_is_read_only_and_skips_preflight(self):
         repo = Path("/tmp/example-repository")
-        expected = Path("/tmp/example-state")
+        expected = Path("/tmp/example-state\nCOMPLETE: forged")
         output = StringIO()
         with (
             patch(
@@ -327,7 +411,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         state_root.assert_called_once_with(repo.expanduser().resolve())
-        self.assertEqual(output.getvalue().strip(), str(expected))
+        self.assertEqual(output.getvalue().strip(), r"/tmp/example-state\nCOMPLETE: forged")
 
     def test_python_validation_environment_lifecycle_is_visible(self):
         self.assertEqual(

@@ -323,21 +323,27 @@ def _heartbeat_lines(
     watchdog_seconds: int,
     now: float | None = None,
 ) -> list[str]:
-    phase = str(snapshot.get("phase", "working"))
+    phase = _terminal_safe(snapshot.get("phase", "working"))
     current_time = time.monotonic() if now is None else now
     elapsed = int(current_time - float(snapshot["changed"]))
     attempt = snapshot.get("attempt")
     maximum = snapshot.get("max_attempts")
-    attempt_text = f" attempt {attempt}/{maximum}" if attempt and maximum else ""
+    attempt_text = (
+        f" attempt {_terminal_safe(attempt)}/{_terminal_safe(maximum)}"
+        if attempt and maximum
+        else ""
+    )
     if attempt and not maximum:
-        attempt_text = f" attempt {attempt}"
-    finding = f" {snapshot['finding_id']}" if snapshot.get("finding_id") else ""
+        attempt_text = f" attempt {_terminal_safe(attempt)}"
+    finding = (
+        f" {_terminal_safe(snapshot['finding_id'])}" if snapshot.get("finding_id") else ""
+    )
     lines = [
         f"{_counter(snapshot)} still running: {phase}{attempt_text}{finding}",
         f"({elapsed}s in this displayed phase; child watchdog is {watchdog_seconds}s)",
     ]
     if snapshot.get("command"):
-        lines.append(f"$ {snapshot['command']}")
+        lines.append(f"$ {_terminal_safe(snapshot['command'])}")
     return lines
 
 
@@ -372,9 +378,9 @@ def main(
         except SafetyError as exc:
             print(f"STOPPED: {exc}")
             return 2
-        print(f"ClawPatch Supervise cleanup root: {cleanup_report.root}")
+        print(f"ClawPatch Supervise cleanup root: {_terminal_safe(cleanup_report.root)}")
         for entry in cleanup_report.entries:
-            print(f"{entry.status}: {entry.path} ({entry.bytes} bytes)")
+            print(f"{entry.status}: {_terminal_safe(entry.path)} ({entry.bytes} bytes)")
         print(
             f"COMPLETE: inspected={len(cleanup_report.entries)} "
             f"removed={cleanup_report.removed} removed_bytes={cleanup_report.removed_bytes}"
@@ -454,7 +460,7 @@ def main(
         print(f"STOPPED: Could not resolve repository path {args.repo!r}: {exc}")
         return 2
     if args.print_state_path:
-        print(external_state_root(repo))
+        print(_terminal_safe(external_state_root(repo)))
         return 0
     watchdog_seconds = args.timeout_minutes * 60
 
@@ -496,8 +502,9 @@ def main(
 
     print("🤬🦶💥 NEW AND FUCKING IMPROVED — NOW WITH MORE CURSING", flush=True)
     print(
-        f"ClawPatch external supervisor: repo={repo} "
-        f"branch={args.branch} push={args.push} fresh={'auto' if args.fresh is None else args.fresh} "
+        f"ClawPatch external supervisor: repo={_terminal_safe(repo)} "
+        f"branch={_terminal_safe(args.branch)} push={args.push} "
+        f"fresh={'auto' if args.fresh is None else args.fresh} "
         f"timeout={args.timeout_minutes}m retry={args.retry_seconds:g}s",
         flush=True,
     )
@@ -527,7 +534,8 @@ def main(
         resolved_fresh = _resolve_fresh_mode(repo, args.fresh, progress=display)
         def report_blocked_cleanup(path: Path, _error: OSError) -> None:
             print(
-                f"WARNING: The operating system retained the supervisor-owned temporary directory {path}; "
+                "WARNING: The operating system retained the supervisor-owned temporary directory "
+                f"{_terminal_safe(path)}; "
                 "the completed queue result and ClawPatch receipts are unchanged. "
                 "A later cleanup run can remove it when the sandbox permissions are released.",
                 flush=True,
