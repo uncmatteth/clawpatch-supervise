@@ -31,11 +31,11 @@ Use the standalone supervisor as the outer runtime for a ClawPatch repair queue.
 2. Verify `git`, Python 3.11+, `clawpatch --version`, and `clawpatch-supervise --version`.
 3. Check for another supervisor or ClawPatch process targeting the same repository.
 4. Choose one start mode:
-   - normal invocation to resume exact stopped state, preserve an open queue, revalidate retained uncertain findings, merge clean divergent Git histories, wait without discarding dirty or conflicting histories, wait for another active owner, retry transient failures, and automatically rebuild only a proven-clean queue;
+   - normal invocation to resume exact stopped state, preserve an open queue, revalidate retained uncertain findings, merge clean divergent Git histories, wait without discarding dirty or conflicting histories or active edits that no longer match a stale checkpoint, wait for another active owner, retry transient failures, and automatically rebuild only a proven-clean queue;
    - `--fresh` only as an explicit non-interactive clean-source reset;
    - `--resume-stopped` only as a compatibility override that prevents automatic fresh review.
 5. Run one repository at a time with an explicit absolute path, branch policy, push policy, and watchdog.
-6. Let the plain command retry provider, refusal, quota, timeout, and active-owner conditions itself. If it reaches a terminal safety/provenance stop, preserve the printed finding, paths, checkpoint, and source exactly. The supervisor can adopt a later applied ClawPatch repair only when its finding, base SHA, and complete source-path set match the stopped checkpoint boundary. If later committed work cleanly advances HEAD, it may retire only a verified obsolete recovery wrapper while preserving `.clawpatch` and continuing the queue.
+6. Let the plain command retry provider, refusal, quota, timeout, active-owner, and dirty checkpoint-mismatch conditions itself. It must wait without adopting or discarding active edits. If it reaches a terminal clean-state safety/provenance stop, preserve the printed finding, paths, checkpoint, and source exactly. The supervisor can adopt a later applied ClawPatch repair only when its finding, base SHA, and complete source-path set match the stopped checkpoint boundary. If later committed work cleanly advances HEAD, it may retire only a verified obsolete recovery wrapper while preserving `.clawpatch` and continuing the queue.
 7. On completion, verify the proof file, clean Git state, local HEAD, and remote SHA when pushes were enabled.
 8. When disk cleanup is requested, run `clawpatch-supervise cleanup --dry-run` first. Use `cleanup --apply` only for entries the command classifies as `STALE`; `ACTIVE`, `RECENT`, `UNOWNED`, and `UNSAFE` entries stay preserved.
 

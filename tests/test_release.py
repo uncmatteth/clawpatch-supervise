@@ -2061,6 +2061,28 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             self.assertEqual(preserved["owned_source_fingerprint"], "")
             resume_stopped_attempt.assert_not_called()
 
+            extra = repo / "other.py"
+            extra.write_text("another active edit\n", encoding="utf-8")
+            with (
+                patch(
+                    "clawpatch_supervise.clawpatch_release._release_state_root",
+                    return_value=repo / ".manageroo" / "cache",
+                ),
+                self.assertRaisesRegex(
+                    RepositoryBusyError,
+                    "waiting without discarding",
+                ),
+            ):
+                release_sweep(
+                    repo,
+                    apply=True,
+                    branch="current",
+                    integration_mode="external",
+                )
+
+            self.assertEqual(source.read_bytes(), source_before)
+            self.assertEqual(extra.read_text(encoding="utf-8"), "another active edit\n")
+
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     def test_complete_review_uses_bounded_worker_waves_until_zero_pending(self, json_clawpatch):
         json_clawpatch.side_effect = [

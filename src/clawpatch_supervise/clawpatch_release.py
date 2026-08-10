@@ -5137,11 +5137,14 @@ def _release_sweep_locked(
                     durable_progress,
                     preexisting_source,
                 ):
-                    raise SafetyError(
+                    conflict = (
                         "Interrupted Clawpatch release progress cannot prove exact "
                         "checkpoint-owned source content; preserving ambiguous changes for "
                         "operator review: " + ", ".join(preexisting_source)
                     )
+                    if integration_mode == "external":
+                        raise RepositoryBusyError(conflict + "; waiting without discarding them.")
+                    raise SafetyError(conflict)
                 durable_progress = _write_release_progress(
                     root,
                     finding_id=str(durable_progress["finding_id"]),
@@ -5155,20 +5158,30 @@ def _release_sweep_locked(
             else:
                 if preexisting_source:
                     if preexisting_source != sorted(durable_progress["owned_paths"]):
-                        raise SafetyError(
+                        conflict = (
                             "Interrupted Clawpatch release progress no longer owns the exact "
-                            "current source paths."
+                            "current source paths"
                         )
+                        if integration_mode == "external":
+                            raise RepositoryBusyError(
+                                conflict + "; waiting without discarding them."
+                            )
+                        raise SafetyError(conflict + ".")
                     if not _checkpoint_proves_exact_source(
                         root,
                         durable_progress,
                         preexisting_source,
                     ):
-                        raise SafetyError(
+                        conflict = (
                             "Interrupted Clawpatch release progress cannot prove exact "
                             "checkpoint-owned source content; preserving ambiguous changes for "
                             "operator review: " + ", ".join(preexisting_source)
                         )
+                        if integration_mode == "external":
+                            raise RepositoryBusyError(
+                                conflict + "; waiting without discarding them."
+                            )
+                        raise SafetyError(conflict)
                     durable_progress = _write_release_progress(
                         root,
                         finding_id=str(durable_progress["finding_id"]),
