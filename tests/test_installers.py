@@ -1,4 +1,5 @@
-﻿import hashlib
+﻿import base64
+import hashlib
 import os
 import signal
 import shutil
@@ -14,6 +15,7 @@ from clawpatch_supervise import __version__
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CLAWPATCH_VERSION = "0.7.2"
+CLAWPATCH_INTEGRITY = "sha512-rhpWj6e31XJUtWKlp/MJOjdjtj+ZXc9WiLcXRk+ZaA699K++dVaYfx00dVS/QNiJBaI71IUFU6sdSPsX/nyW0g=="
 CLAWHUB_VERSION = "0.19.1"
 INSTALLER_TIMEOUT_SECONDS = 300
 
@@ -70,6 +72,16 @@ class InstallerContractTests(unittest.TestCase):
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
+        trusted_clawpatch_artifact = "verified clawpatch package"
+        test_integrity = "sha512-" + base64.b64encode(
+            hashlib.sha512(trusted_clawpatch_artifact.encode("ascii")).digest()
+        ).decode("ascii")
+        installer_path = root / "install.sh"
+        installer_text = (REPOSITORY_ROOT / "scripts" / "install.sh").read_text(
+            encoding="utf-8"
+        )
+        installer_text = installer_text.replace(CLAWPATCH_INTEGRITY, test_integrity)
+        self._write_executable(installer_path, installer_text)
         fake_bin = root / "bin"
         fake_bin.mkdir()
         command_stub = root / "command-stub"
@@ -145,6 +157,15 @@ class InstallerContractTests(unittest.TestCase):
                 fake_bin / "npm",
                 "#!/bin/sh\n"
                 'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
+                'if [ "$1" = "pack" ]; then\n'
+                '  mkdir -p "$4"\n'
+                '  artifact="$CLAWPATCH_TEST_NPM_ARTIFACT"\n'
+                '  if [ "$CLAWPATCH_TEST_NPM_MODE" = "integrity-mismatch" ]; then\n'
+                '    artifact="tampered clawpatch package"\n'
+                "  fi\n"
+                f'  printf "%s" "$artifact" > "$4/clawpatch-{CLAWPATCH_VERSION}.tgz"\n'
+                "  exit 0\n"
+                "fi\n"
                 'if [ "$1" = "install" ] && [ "$2" = "--global" ]; then\n'
                 '  [ "$CLAWPATCH_TEST_NPM_MODE" != "global-unwritable" ] || exit 23\n'
                 '  mkdir -p "$CLAWPATCH_TEST_NPM_PREFIX/bin"\n'
@@ -157,15 +178,9 @@ class InstallerContractTests(unittest.TestCase):
                 "  exit 0\n"
                 "fi\n"
                 'if [ "$1" = "install" ] && [ "$2" = "--prefix" ]; then\n'
-                '  if [ "${6%%@*}" = "clawpatch" ]; then\n'
-                '    [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawpatch" ] || exit 23\n'
-                '    mkdir -p "$3/node_modules/.bin"\n'
-                '    cp "$CLAWPATCH_TEST_INSTALLED_COMMAND_STUB" "$3/node_modules/.bin/clawpatch"\n'
-                "    exit 0\n"
-                "  fi\n"
-                '  [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawhub" ] || exit 24\n'
+                '  [ "$CLAWPATCH_TEST_NPM_MODE" != "fail-clawpatch" ] || exit 23\n'
                 '  mkdir -p "$3/node_modules/.bin"\n'
-                '  cp "$CLAWPATCH_TEST_INSTALLED_COMMAND_STUB" "$3/node_modules/.bin/clawhub"\n'
+                '  cp "$CLAWPATCH_TEST_INSTALLED_COMMAND_STUB" "$3/node_modules/.bin/clawpatch"\n'
                 "  exit 0\n"
                 "fi\n"
                 "exit 25\n",
@@ -184,6 +199,7 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_CLAWPATCH_VERSION": clawpatch_version,
                 "CLAWPATCH_TEST_CLAWHUB_VERSION": clawhub_version,
                 "CLAWPATCH_TEST_LOG": str(invocation_log),
+                "CLAWPATCH_TEST_NPM_ARTIFACT": trusted_clawpatch_artifact,
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
                 "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
                 "CLAWPATCH_TEST_REAL_PYTHON": sys.executable,
@@ -209,7 +225,6 @@ class InstallerContractTests(unittest.TestCase):
             environment["CLAWPATCH_SUPERVISE_SHA256"] = source_sha256
         if verify_repo:
             environment["CLAWPATCH_SUPERVISE_VERIFY_REPO"] = str(root)
-        installer_path = REPOSITORY_ROOT / "scripts" / "install.sh"
         if process_runner is None:
             result = self._run_installer_process(
                 platform_name="Linux/macOS",
@@ -230,12 +245,20 @@ class InstallerContractTests(unittest.TestCase):
     def _assert_staged_clawpatch_install(
         self, invocations: list[str], install_root: Path
     ) -> Path:
-        self.assertEqual(len(invocations), 1)
+        self.assertEqual(len(invocations), 2)
+        pack_prefix = "pack --ignore-scripts --pack-destination "
+        pack_suffix = f" clawpatch@{CLAWPATCH_VERSION}"
+        self.assertTrue(invocations[0].startswith(pack_prefix), invocations)
+        self.assertTrue(invocations[0].endswith(pack_suffix), invocations)
+        download_root = Path(invocations[0][len(pack_prefix) : -len(pack_suffix)])
         prefix = "install --prefix "
-        suffix = f" --no-fund --no-audit clawpatch@{CLAWPATCH_VERSION}"
-        self.assertTrue(invocations[0].startswith(prefix), invocations)
-        self.assertTrue(invocations[0].endswith(suffix), invocations)
-        staged_root = Path(invocations[0][len(prefix) : -len(suffix)])
+        suffix = (
+            " --no-fund --no-audit --ignore-scripts "
+            f"{download_root}/clawpatch-{CLAWPATCH_VERSION}.tgz"
+        )
+        self.assertTrue(invocations[1].startswith(prefix), invocations)
+        self.assertTrue(invocations[1].endswith(suffix), invocations)
+        staged_root = Path(invocations[1][len(prefix) : -len(suffix)])
         self.assertEqual(staged_root.parent, install_root)
         self.assertTrue(staged_root.name.startswith("clawpatch."), staged_root)
         return staged_root
@@ -655,6 +678,23 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 23)
         staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
         self.assertFalse(staged_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_clawpatch_tarball_with_mismatched_integrity(
+        self,
+    ) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+            npm_mode="integrity-mismatch",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("ClawPatch artifact SHA-512 mismatch", result.stderr)
+        self.assertEqual(len(invocations), 1)
+        self.assertTrue(invocations[0].startswith("pack --ignore-scripts "))
+        self.assertFalse(any(command.startswith("install ") for command in invocations))
+        self.assertEqual(list(install_root.glob("clawpatch.*")), [])
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_never_invokes_npm_for_clawhub(self) -> None:
@@ -1243,7 +1283,12 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(f"CLAWPATCH_SUPERVISE_VERSION:-{__version__}", linux)
         self.assertIn(f'[string]$Version = "{__version__}"', windows)
         self.assertIn(f'readonly release_clawpatch_version="{CLAWPATCH_VERSION}"', linux)
+        self.assertIn(
+            f'readonly release_clawpatch_integrity_0_7_2="{CLAWPATCH_INTEGRITY}"',
+            linux,
+        )
         self.assertIn('"clawpatch@$release_clawpatch_version"', linux)
+        self.assertIn('--ignore-scripts "$clawpatch_package"', linux)
         self.assertIn(f'"clawpatch@$ReleaseClawPatchVersion"', windows)
         self.assertIn(f'$ReleaseClawPatchVersion = "{CLAWPATCH_VERSION}"', windows)
         self.assertNotIn("clawpatch@latest", linux)

@@ -9,10 +9,12 @@ python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 verify_repo="${CLAWPATCH_SUPERVISE_VERIFY_REPO:-}"
 readonly minimum_clawpatch_version="0.7.2"
 readonly release_clawpatch_version="0.7.2"
+readonly release_clawpatch_integrity_0_7_2="sha512-rhpWj6e31XJUtWKlp/MJOjdjtj+ZXc9WiLcXRk+ZaA699K++dVaYfx00dVS/QNiJBaI71IUFU6sdSPsX/nyW0g=="
 readonly release_sha256_0_1_28="150773b2714f84f30638fca7ab1896ae1b14042f0d4ef2d9c3cab9fc0acfa5d5"
 download_root=""
 staging_venv=""
 staging_clawpatch_root=""
+clawpatch_download_root=""
 pending_supervisor_link=""
 pending_clawpatch_link=""
 previous_supervisor_command=""
@@ -66,6 +68,7 @@ cleanup() {
   fi
   [[ -z "$staging_venv" ]] || rm -rf "$staging_venv"
   [[ -z "$staging_clawpatch_root" ]] || rm -rf "$staging_clawpatch_root"
+  [[ -z "$clawpatch_download_root" ]] || rm -rf "$clawpatch_download_root"
   [[ -z "$download_root" ]] || rm -rf "$download_root"
   if [[ "$install_lock_held" == true ]]; then
     exec 9>&-
@@ -159,8 +162,40 @@ else
   }
   mkdir -p "$install_root"
   staging_clawpatch_root="$(mktemp -d "$install_root/clawpatch.XXXXXX")"
+  clawpatch_download_root="$(mktemp -d)"
+  clawpatch_package="$clawpatch_download_root/clawpatch-${release_clawpatch_version}.tgz"
+  npm pack --ignore-scripts --pack-destination "$clawpatch_download_root" \
+    "clawpatch@$release_clawpatch_version" >/dev/null
+  test -f "$clawpatch_package" || {
+    echo "ClawPatch download did not create its release tarball." >&2
+    exit 2
+  }
+  "$python_command" - "$clawpatch_package" "$release_clawpatch_integrity_0_7_2" <<'PY'
+import base64
+import binascii
+import hashlib
+import hmac
+import sys
+
+package, expected = sys.argv[1:]
+algorithm, separator, encoded_digest = expected.partition("-")
+try:
+    expected_digest = base64.b64decode(encoded_digest, validate=True)
+except (binascii.Error, ValueError):
+    expected_digest = b""
+if algorithm != "sha512" or not separator or len(expected_digest) != 64:
+    print("The trusted ClawPatch SHA-512 pin is invalid.", file=sys.stderr)
+    raise SystemExit(2)
+
+with open(package, "rb") as artifact:
+    actual_digest = hashlib.file_digest(artifact, "sha512").digest()
+if not hmac.compare_digest(actual_digest, expected_digest):
+    actual = "sha512-" + base64.b64encode(actual_digest).decode("ascii")
+    print(f"ClawPatch artifact SHA-512 mismatch: expected {expected}, found {actual}.", file=sys.stderr)
+    raise SystemExit(2)
+PY
   npm install --prefix "$staging_clawpatch_root" --no-fund --no-audit \
-    "clawpatch@$release_clawpatch_version"
+    --ignore-scripts "$clawpatch_package"
   clawpatch_command="$staging_clawpatch_root/node_modules/.bin/clawpatch"
   test -x "$clawpatch_command" || {
     echo "ClawPatch installation did not create its command." >&2

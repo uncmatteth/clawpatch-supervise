@@ -16,7 +16,7 @@ It is a standalone Python package and command-line program. It runs on Linux, ma
 
 ## Quick start
 
-You need Python 3.11 or newer, Git, Node.js 22 or newer with npm, and a provider already authenticated for ClawPatch. Any installed ClawPatch version 0.7.2 or newer is retained. If ClawPatch is missing or older, both installers obtain their release-pinned `clawpatch@0.7.2` package under the isolated install root and verify the resulting command. On Windows the installer resolves the `.cmd` or `.exe` launcher directly, so PowerShell execution policy cannot select an unusable `.ps1` shim. ClawHub is not a supervisor dependency and is never installed, removed, upgraded, downgraded, or version-pinned by these installers.
+You need Python 3.11 or newer, Git, Node.js 22 or newer with npm, and a provider already authenticated for ClawPatch. Any installed ClawPatch version 0.7.2 or newer is retained. If ClawPatch is missing or older, both installers obtain their release-pinned `clawpatch@0.7.2` package under the isolated install root and verify the resulting command. On Linux and macOS, the installer first downloads the package tarball without running lifecycle scripts, verifies its release-owned SHA-512 integrity pin, and installs only that verified local artifact with lifecycle scripts disabled. On Windows the installer resolves the `.cmd` or `.exe` launcher directly, so PowerShell execution policy cannot select an unusable `.ps1` shim. ClawHub is not a supervisor dependency and is never installed, removed, upgraded, downgraded, or version-pinned by these installers.
 
 ### Linux
 
