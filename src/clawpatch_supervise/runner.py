@@ -56,15 +56,23 @@ def _close_process_pipes(process: subprocess.Popen[str]) -> None:
                 pass
 
 
+def _kill_parent_process(process: subprocess.Popen[str]) -> None:
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
 def _terminate_process_group(
     process: subprocess.Popen[str],
     *,
     stdout: str = "",
     stderr: str = "",
 ) -> tuple[str, str]:
+    windows_cleanup_error = ""
     if os.name == "nt":
         try:
-            subprocess.run(
+            taskkill = subprocess.run(
                 ["taskkill", "/PID", str(process.pid), "/T", "/F"],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -73,7 +81,17 @@ def _terminate_process_group(
                 timeout=10,
             )
         except (OSError, subprocess.TimeoutExpired):
-            process.kill()
+            windows_cleanup_error = (
+                "Windows process-tree termination could not be proven because taskkill failed."
+            )
+            _kill_parent_process(process)
+        else:
+            if taskkill.returncode != 0:
+                windows_cleanup_error = (
+                    "Windows process-tree termination could not be proven because taskkill "
+                    f"exited with status {taskkill.returncode}."
+                )
+                _kill_parent_process(process)
     else:
         try:
             os.killpg(process.pid, signal.SIGTERM)
@@ -87,7 +105,11 @@ def _terminate_process_group(
         stdout = _prefer_timeout_text(stdout, cleanup_timeout.stdout)
         stderr = _prefer_timeout_text(stderr, cleanup_timeout.stderr)
         if os.name == "nt":
-            process.kill()
+            _kill_parent_process(process)
+            if not windows_cleanup_error:
+                windows_cleanup_error = (
+                    "Windows process-tree termination could not be proven after taskkill."
+                )
         else:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -98,6 +120,8 @@ def _terminate_process_group(
         except subprocess.TimeoutExpired:
             pass
         _close_process_pipes(process)
+    if windows_cleanup_error:
+        raise SafetyError(windows_cleanup_error)
     return stdout, stderr
 
 

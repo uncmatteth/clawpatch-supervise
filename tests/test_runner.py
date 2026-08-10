@@ -1,6 +1,7 @@
 import json
 import os
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -8,7 +9,7 @@ from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_release import _release_clawpatch_env
 from clawpatch_supervise.errors import SafetyError
-from clawpatch_supervise.runner import CommandRunner
+from clawpatch_supervise.runner import CommandRunner, _terminate_process_group
 
 
 class CommandRunnerEnvironmentTests(unittest.TestCase):
@@ -89,6 +90,36 @@ class CommandRunnerLoggingTests(unittest.TestCase):
             self.assertEqual([path.name for path in log_root.iterdir()], ["valid-slug.json"])
             payload = json.loads((log_root / "valid-slug.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["stdout"].strip(), "logged")
+
+
+class WindowsProcessTreeTerminationTests(unittest.TestCase):
+    @patch("clawpatch_supervise.runner.os.name", "nt")
+    def test_failed_taskkill_raises_after_killing_parent(self) -> None:
+        class Process:
+            pid = 4321
+            stdin = None
+            stdout = None
+            stderr = None
+            killed = False
+
+            def kill(self) -> None:
+                self.killed = True
+
+            def communicate(self, *, timeout: int) -> tuple[str, str]:
+                if timeout != 5:
+                    raise AssertionError(f"unexpected cleanup timeout: {timeout}")
+                return "", ""
+
+        process = Process()
+        failed = subprocess.CompletedProcess([], 1)
+
+        with (
+            patch("clawpatch_supervise.runner.subprocess.run", return_value=failed),
+            self.assertRaisesRegex(SafetyError, "process-tree termination could not be proven"),
+        ):
+            _terminate_process_group(process)
+
+        self.assertTrue(process.killed)
 
 
 @unittest.skipUnless(os.name == "nt", "Windows command runner only")
