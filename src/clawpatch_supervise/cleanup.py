@@ -5,6 +5,7 @@ import json
 import os
 import secrets
 import shutil
+import stat
 import subprocess
 import tempfile
 import time
@@ -63,12 +64,58 @@ def current_temporary_root() -> Path | None:
     return _CURRENT_TEMPORARY_ROOT.get()
 
 
+def _require_safe_cleanup_directory(path: Path, *, description: str) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError as exc:
+        raise SafetyError(f"The ClawPatch Supervise {description} does not exist.") from exc
+    if stat.S_ISLNK(metadata.st_mode):
+        raise SafetyError(f"The ClawPatch Supervise {description} cannot be a symlink.")
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise SafetyError(f"The ClawPatch Supervise {description} is not a directory.")
+    if hasattr(os, "getuid"):
+        if metadata.st_uid != os.getuid():
+            raise SafetyError(
+                f"The ClawPatch Supervise {description} is not owned by the current user."
+            )
+        if stat.S_IMODE(metadata.st_mode) & 0o022:
+            raise SafetyError(
+                f"The ClawPatch Supervise {description} cannot be group or world writable."
+            )
+
+
+def _ensure_safe_cleanup_directory(
+    path: Path,
+    *,
+    description: str,
+    parents: bool = False,
+) -> None:
+    try:
+        path.mkdir(mode=0o700, parents=parents)
+    except FileExistsError:
+        pass
+    _require_safe_cleanup_directory(path, description=description)
+
+
 def default_cleanup_root() -> Path:
     if hasattr(os, "getuid"):
         identity = str(os.getuid())
+        runtime = os.environ.get("XDG_RUNTIME_DIR")
+        if runtime:
+            runtime_root = Path(runtime)
+            if runtime_root.is_absolute():
+                try:
+                    _require_safe_cleanup_directory(
+                        runtime_root,
+                        description="per-user runtime directory",
+                    )
+                except SafetyError:
+                    pass
+                else:
+                    return runtime_root / "clawpatch-supervise" / "runs"
     else:
         identity = hashlib.sha256(os.fsencode(str(Path.home()))).hexdigest()[:12]
-    return Path(tempfile.gettempdir()) / f"clawpatch-supervise-{identity}" / "runs"
+    return Path(tempfile.gettempdir()) / f"clawpatch-supervise-{identity}-private" / "runs"
 
 
 def _windows_pid_is_running(pid: int) -> bool:
@@ -211,13 +258,18 @@ def cleanup_owned_runs(
     stale_after_seconds: int = DEFAULT_STALE_AFTER_SECONDS,
     now: Callable[[], float] = time.time,
 ) -> CleanupReport:
-    cleanup_root = (root or default_cleanup_root()).expanduser()
-    if cleanup_root.is_symlink():
-        raise SafetyError("The ClawPatch Supervise cleanup root cannot be a symlink.")
+    using_default_root = root is None
+    cleanup_root = (default_cleanup_root() if root is None else root).expanduser()
+    if using_default_root and (cleanup_root.parent.exists() or cleanup_root.parent.is_symlink()):
+        _require_safe_cleanup_directory(
+            cleanup_root.parent,
+            description="cleanup parent",
+        )
     if not cleanup_root.exists():
+        if cleanup_root.is_symlink():
+            _require_safe_cleanup_directory(cleanup_root, description="cleanup root")
         return CleanupReport(cleanup_root, (), 0, 0)
-    if not cleanup_root.is_dir():
-        raise SafetyError("The ClawPatch Supervise cleanup root is not a directory.")
+    _require_safe_cleanup_directory(cleanup_root, description="cleanup root")
     resolved_root = cleanup_root.resolve()
     entries: list[CleanupEntry] = []
     removed = 0
@@ -292,12 +344,20 @@ def owned_run_directory(
     root: Path | None = None,
     on_blocked_cleanup: Callable[[Path, OSError], None] | None = None,
 ) -> Iterator[OwnedRunDirectory]:
-    cleanup_root = (root or default_cleanup_root()).expanduser()
-    if cleanup_root.is_symlink():
-        raise SafetyError("The ClawPatch Supervise cleanup root cannot be a symlink.")
-    cleanup_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if not cleanup_root.is_dir():
-        raise SafetyError("The ClawPatch Supervise cleanup root is not a directory.")
+    using_default_root = root is None
+    cleanup_root = (default_cleanup_root() if root is None else root).expanduser()
+    if using_default_root:
+        _ensure_safe_cleanup_directory(
+            cleanup_root.parent,
+            description="cleanup parent",
+        )
+        _ensure_safe_cleanup_directory(cleanup_root, description="cleanup root")
+    else:
+        _ensure_safe_cleanup_directory(
+            cleanup_root,
+            description="cleanup root",
+            parents=True,
+        )
     cleanup_owned_runs(apply=True, root=cleanup_root)
     created = time.time()
     nonce = secrets.token_hex(12)

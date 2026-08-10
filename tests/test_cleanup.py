@@ -14,13 +14,20 @@ from unittest.mock import patch
 
 from clawpatch_supervise.clawpatch_external import main
 from clawpatch_supervise import cleanup as cleanup_module
-from clawpatch_supervise.cleanup import _pid_is_running, cleanup_owned_runs
+from clawpatch_supervise.cleanup import (
+    _pid_is_running,
+    cleanup_owned_runs,
+    default_cleanup_root,
+    owned_run_directory,
+)
+from clawpatch_supervise.errors import SafetyError
 
 
 class CleanupCommandTests(unittest.TestCase):
     @staticmethod
     def _mark(candidate: Path, *, pid: int, created_unix: float) -> None:
-        candidate.mkdir(parents=True)
+        candidate.mkdir(mode=0o700, parents=True)
+        candidate.parent.chmod(0o700)
         (candidate / ".clawpatch-supervise-owned.json").write_text(
             json.dumps(
                 {
@@ -39,7 +46,8 @@ class CleanupCommandTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
             candidate = cleanup_root / "run-deadbeef"
-            candidate.mkdir(parents=True)
+            candidate.mkdir(mode=0o700, parents=True)
+            cleanup_root.chmod(0o700)
             (candidate / ".clawpatch-supervise-owned.json").write_text(
                 json.dumps(
                     {
@@ -389,6 +397,74 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "keep")
             self.assertIn("STOPPED", output.getvalue())
             self.assertIn("cannot be a symlink", output.getvalue())
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX ownership and mode checks")
+    def test_owned_run_refuses_preexisting_world_writable_cleanup_root(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+            cleanup_root.mkdir()
+            cleanup_root.chmod(0o777)
+
+            with self.assertRaisesRegex(SafetyError, "group or world writable"):
+                with owned_run_directory(root, root=cleanup_root):
+                    self.fail("an unsafe cleanup root must not yield a run directory")
+
+            self.assertEqual(list(cleanup_root.iterdir()), [])
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX ownership and mode checks")
+    def test_owned_run_refuses_unsafe_preexisting_default_parent(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            temporary_root = Path(temp)
+            with (
+                patch.dict(cleanup_module.os.environ, {"XDG_RUNTIME_DIR": ""}),
+                patch("clawpatch_supervise.cleanup.tempfile.gettempdir", return_value=temp),
+            ):
+                cleanup_root = default_cleanup_root()
+                cleanup_root.parent.mkdir()
+                cleanup_root.parent.chmod(0o777)
+
+                with self.assertRaisesRegex(SafetyError, "group or world writable"):
+                    with owned_run_directory(temporary_root):
+                        self.fail("an unsafe cleanup parent must not yield a run directory")
+
+            self.assertFalse(cleanup_root.exists())
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX ownership and mode checks")
+    def test_default_cleanup_root_prefers_verified_per_user_runtime_directory(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            runtime_root = Path(temp)
+            runtime_root.chmod(0o700)
+
+            with patch.dict(
+                cleanup_module.os.environ,
+                {"XDG_RUNTIME_DIR": str(runtime_root)},
+            ):
+                cleanup_root = default_cleanup_root()
+
+            self.assertEqual(
+                cleanup_root,
+                runtime_root / "clawpatch-supervise" / "runs",
+            )
+
+    @unittest.skipUnless(hasattr(os, "getuid"), "POSIX ownership and mode checks")
+    def test_owned_run_refuses_cleanup_root_owned_by_another_user(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+            cleanup_root.mkdir()
+
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup.os.getuid",
+                    return_value=os.getuid() + 1,
+                ),
+                self.assertRaisesRegex(SafetyError, "not owned by the current user"),
+            ):
+                with owned_run_directory(root, root=cleanup_root):
+                    self.fail("a foreign-owned cleanup root must not yield a run directory")
+
+            self.assertEqual(list(cleanup_root.iterdir()), [])
 
     def test_windows_cleanup_liveness_check_never_signals_the_process(self) -> None:
         with (
