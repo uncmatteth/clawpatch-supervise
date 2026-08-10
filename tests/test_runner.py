@@ -1,11 +1,12 @@
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 from clawpatch_supervise.clawpatch_release import _release_clawpatch_env
 from clawpatch_supervise.errors import SafetyError
@@ -120,6 +121,41 @@ class WindowsProcessTreeTerminationTests(unittest.TestCase):
             _terminate_process_group(process)
 
         self.assertTrue(process.killed)
+
+
+class PosixProcessTreeTerminationTests(unittest.TestCase):
+    @patch("clawpatch_supervise.runner.os.name", "posix")
+    def test_unproven_exit_after_sigkill_raises_safety_error(self) -> None:
+        class Process:
+            pid = 4321
+            stdin = None
+            stdout = None
+            stderr = None
+
+            def communicate(self, *, timeout: int) -> tuple[str, str]:
+                raise subprocess.TimeoutExpired(["child"], timeout)
+
+            def wait(self, *, timeout: int) -> int:
+                raise subprocess.TimeoutExpired(["child"], timeout)
+
+            def poll(self) -> None:
+                return None
+
+        process = Process()
+
+        with (
+            patch("clawpatch_supervise.runner.os.killpg") as killpg,
+            self.assertRaisesRegex(SafetyError, r"termination could not be proven.*PID 4321"),
+        ):
+            _terminate_process_group(process)
+
+        self.assertEqual(
+            killpg.call_args_list,
+            [
+                call(4321, signal.SIGTERM),
+                call(4321, signal.SIGKILL),
+            ],
+        )
 
 
 @unittest.skipUnless(os.name == "nt", "Windows command runner only")

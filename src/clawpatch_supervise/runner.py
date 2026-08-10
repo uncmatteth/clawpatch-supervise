@@ -70,6 +70,7 @@ def _terminate_process_group(
     stderr: str = "",
 ) -> tuple[str, str]:
     windows_cleanup_error = ""
+    posix_cleanup_error = ""
     if os.name == "nt":
         try:
             taskkill = subprocess.run(
@@ -118,10 +119,16 @@ def _terminate_process_group(
         try:
             process.wait(timeout=5)
         except subprocess.TimeoutExpired:
-            pass
+            if os.name != "nt" and process.poll() is None:
+                posix_cleanup_error = (
+                    "POSIX process-group termination could not be proven after SIGKILL; "
+                    f"retained process PID {process.pid}."
+                )
         _close_process_pipes(process)
     if windows_cleanup_error:
         raise SafetyError(windows_cleanup_error)
+    if posix_cleanup_error:
+        raise SafetyError(posix_cleanup_error)
     return stdout, stderr
 
 
