@@ -1355,8 +1355,25 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
         )
 
-    def test_process_matcher_recognizes_supported_package_module_invocation(self):
-        self.assertTrue(_is_clawpatch_argv(["python", "-m", "clawpatch_supervise"]))
+    def test_process_matcher_recognizes_supported_python_invocations(self):
+        invocations = (
+            ["python", "-m", "clawpatch_supervise"],
+            ["python", "-u", "-m", "clawpatch_supervise"],
+            ["python", "-X", "utf8", "-m", "clawpatch_supervise"],
+            ["python", "-I", "-u", "-X", "utf8", "-m", "clawpatch_supervise"],
+            ["python.exe", "-u", "-Xutf8", "-m", "clawpatch_supervise"],
+            ["python3", "-u", "/home/Tommy/.local/bin/clawpatch-supervise", "--repo", "."],
+        )
+
+        for argv in invocations:
+            with self.subTest(argv=argv):
+                self.assertTrue(_is_clawpatch_argv(argv))
+
+        self.assertFalse(
+            _is_clawpatch_argv(
+                ["python", "unrelated.py", "-m", "clawpatch_supervise"]
+            )
+        )
 
     @unittest.skipIf(os.name == "nt", "POSIX process inventory only")
     @patch("clawpatch_supervise.clawpatch_release.Path.is_dir", return_value=False)
@@ -1384,7 +1401,8 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         f"101 python3 -m clawpatch_supervise.clawpatch_external --repo {repo}\n"
                         f"202 clawpatch-supervise --repo {other}\n"
                         "303 clawpatch map\n"
-                        "404 clawpatch fix --finding fnd_one\n",
+                        "404 clawpatch fix --finding fnd_one\n"
+                        f"505 python3 -u -X utf8 -m clawpatch_supervise --repo {repo}\n",
                     )
                 if argv[0] == "git":
                     cwd = Path(_kwargs["cwd"]).resolve()
@@ -1404,6 +1422,13 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         "pid": 404,
                         "cwd": str(repo),
                         "command": "clawpatch fix --finding fnd_one",
+                    },
+                    {
+                        "pid": 505,
+                        "cwd": str(repo),
+                        "command": (
+                            f"python3 -u -X utf8 -m clawpatch_supervise --repo {repo}"
+                        ),
                     },
                 ],
             )

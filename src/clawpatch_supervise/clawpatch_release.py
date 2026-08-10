@@ -604,12 +604,53 @@ def _is_clawpatch_argv(argv: list[str]) -> bool:
     }
     if first not in interpreters:
         return False
-    if len(argv) >= 3 and argv[1] == "-m":
-        return argv[2] in {
-            "clawpatch_supervise",
-            "clawpatch_supervise.clawpatch_external",
-            "manageroo.clawpatch_external",
+    if first in {"python", "python.exe", "python3", "python3.exe"}:
+        no_value_options = {
+            "-b",
+            "-bb",
+            "-B",
+            "-d",
+            "-E",
+            "-i",
+            "-I",
+            "-O",
+            "-OO",
+            "-P",
+            "-q",
+            "-s",
+            "-S",
+            "-u",
+            "-v",
+            "-x",
         }
+        index = 1
+        while index < len(argv):
+            value = argv[index]
+            if value == "-m":
+                return index + 1 < len(argv) and argv[index + 1] in {
+                    "clawpatch_supervise",
+                    "clawpatch_supervise.clawpatch_external",
+                    "manageroo.clawpatch_external",
+                }
+            if value == "-c":
+                return False
+            if value in {"-W", "-X", "--check-hash-based-pycs"}:
+                index += 2
+                continue
+            if (value.startswith("-W") or value.startswith("-X")) and len(value) > 2:
+                index += 1
+                continue
+            if value in no_value_options:
+                index += 1
+                continue
+            if value == "--":
+                index += 1
+                break
+            if value.startswith("-"):
+                return False
+            break
+        script = argv[index] if index < len(argv) else ""
+        return _command_name(script) in commands
     script = next((value for value in argv[1:4] if not value.startswith("-")), "")
     return _command_name(script) in commands
 
