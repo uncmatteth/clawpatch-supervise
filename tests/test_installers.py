@@ -58,6 +58,7 @@ class InstallerContractTests(unittest.TestCase):
         source_package: Path | str = REPOSITORY_ROOT,
         source_sha256: str | None = None,
         supervisor_version_fails: bool = False,
+        supervisor_move_fails: bool = False,
         node_version: str = "v22.0.0",
         verify_repo: bool = False,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
@@ -109,6 +110,9 @@ class InstallerContractTests(unittest.TestCase):
         self._write_executable(
             python,
             "#!/bin/sh\n"
+            'if [ "$1" = "-" ] && [ "$#" -eq 3 ] && '
+            '[ "$3" = "$CLAWPATCH_SUPERVISE_BIN_DIR/clawpatch-supervise" ] && '
+            '[ "$CLAWPATCH_TEST_SUPERVISOR_MOVE_FAILS" = "true" ]; then exit 29; fi\n'
             'if [ "$1" = "-c" ] || [ "$1" = "-" ]; then\n'
             '  exec "$CLAWPATCH_TEST_REAL_PYTHON" "$@"\n'
             "fi\n"
@@ -171,6 +175,9 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_REAL_PYTHON": sys.executable,
                 "CLAWPATCH_TEST_SUPERVISOR_VERSION_FAILS": str(
                     supervisor_version_fails
+                ).lower(),
+                "CLAWPATCH_TEST_SUPERVISOR_MOVE_FAILS": str(
+                    supervisor_move_fails
                 ).lower(),
                 "CLAWPATCH_TEST_NODE_VERSION": node_version,
                 "PATH": str(fake_bin),
@@ -684,6 +691,52 @@ class InstallerContractTests(unittest.TestCase):
         )
         self.assertEqual(dependency.returncode, 0, dependency.stderr)
         self.assertEqual(dependency.stdout.strip(), "0.7.1")
+        self.assertEqual(
+            sorted(path.name for path in install_root.iterdir()),
+            ["clawpatch"],
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rolls_back_commands_when_supervisor_activation_fails(
+        self,
+    ) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "install"
+        previous_clawpatch = (
+            install_root / "clawpatch" / "node_modules" / ".bin" / "clawpatch"
+        )
+        previous_clawpatch.parent.mkdir(parents=True)
+        previous_clawpatch_content = "#!/bin/sh\nprintf '0.7.1\\n'\n"
+        self._write_executable(previous_clawpatch, previous_clawpatch_content)
+        installed_bin = root / "installed-bin"
+        installed_bin.mkdir()
+        installed_clawpatch = installed_bin / "clawpatch"
+        installed_clawpatch.symlink_to(previous_clawpatch)
+        installed_supervisor = installed_bin / "clawpatch-supervise"
+        previous_supervisor_content = "#!/bin/sh\nprintf '0.1.20\\n'\n"
+        self._write_executable(installed_supervisor, previous_supervisor_content)
+
+        result, invocations, actual_install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            clawpatch_command=previous_clawpatch,
+            supervisor_move_fails=True,
+        )
+
+        self.assertEqual(result.returncode, 29, result.stderr)
+        self.assertEqual(actual_install_root, install_root)
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
+        self.assertFalse(staged_root.exists())
+        self.assertTrue(installed_clawpatch.is_symlink())
+        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch)
+        self.assertEqual(
+            previous_clawpatch.read_text(encoding="utf-8"),
+            previous_clawpatch_content,
+        )
+        self.assertEqual(
+            installed_supervisor.read_text(encoding="utf-8"),
+            previous_supervisor_content,
+        )
         self.assertEqual(
             sorted(path.name for path in install_root.iterdir()),
             ["clawpatch"],

@@ -15,13 +15,41 @@ staging_venv=""
 staging_clawpatch_root=""
 pending_supervisor_link=""
 pending_clawpatch_link=""
+previous_supervisor_command=""
+previous_clawpatch_command=""
+activation_started=false
+activation_complete=false
+supervisor_destination=""
+clawpatch_destination=""
 
 cleanup() {
+  local exit_status=$?
+  trap - EXIT
+  set +e
+  if [[ "$activation_started" == true && "$activation_complete" != true ]]; then
+    if [[ -n "$previous_supervisor_command" ]]; then
+      if [[ -e "$previous_supervisor_command" || -L "$previous_supervisor_command" ]]; then
+        mv -f "$previous_supervisor_command" "$supervisor_destination"
+      else
+        rm -f "$supervisor_destination"
+      fi
+    fi
+    if [[ -n "$previous_clawpatch_command" ]]; then
+      if [[ -e "$previous_clawpatch_command" || -L "$previous_clawpatch_command" ]]; then
+        mv -f "$previous_clawpatch_command" "$clawpatch_destination"
+      else
+        rm -f "$clawpatch_destination"
+      fi
+    fi
+  fi
   [[ -z "$pending_supervisor_link" ]] || rm -f "$pending_supervisor_link"
   [[ -z "$pending_clawpatch_link" ]] || rm -f "$pending_clawpatch_link"
+  [[ -z "$previous_supervisor_command" ]] || rm -f "$previous_supervisor_command"
+  [[ -z "$previous_clawpatch_command" ]] || rm -f "$previous_clawpatch_command"
   [[ -z "$staging_venv" ]] || rm -rf "$staging_venv"
   [[ -z "$staging_clawpatch_root" ]] || rm -rf "$staging_clawpatch_root"
   [[ -z "$download_root" ]] || rm -rf "$download_root"
+  exit "$exit_status"
 }
 trap cleanup EXIT
 
@@ -217,11 +245,28 @@ if [[ "$managed_clawpatch" == true ]]; then
   pending_clawpatch_link="$(mktemp "$bin_dir/.clawpatch.XXXXXX")"
   ln -sfn "$clawpatch_command" "$pending_clawpatch_link"
 fi
-# Stop EXIT cleanup from removing either valid target once activation begins.
 activated_venv="$staging_venv"
-staging_venv=""
-activated_clawpatch_root="$staging_clawpatch_root"
-staging_clawpatch_root=""
+previous_supervisor_command="$(mktemp "$bin_dir/.clawpatch-supervise.previous.XXXXXX")"
+if [[ "$managed_clawpatch" == true ]]; then
+  previous_clawpatch_command="$(mktemp "$bin_dir/.clawpatch.previous.XXXXXX")"
+fi
+"$python_command" - \
+  "$supervisor_destination" "$previous_supervisor_command" \
+  "$clawpatch_destination" "$previous_clawpatch_command" <<'PY'
+import os
+import shutil
+import sys
+
+for destination, backup in zip(sys.argv[1::2], sys.argv[2::2]):
+    if not backup:
+        continue
+    os.unlink(backup)
+    if os.path.islink(destination):
+        os.symlink(os.readlink(destination), backup)
+    elif os.path.exists(destination):
+        shutil.copy2(destination, backup)
+PY
+activation_started=true
 if [[ "$managed_clawpatch" == true ]]; then
   "$python_command" - "$pending_clawpatch_link" "$clawpatch_destination" <<'PY' || {
 import os
@@ -230,8 +275,6 @@ import sys
 os.replace(sys.argv[1], sys.argv[2])
 PY
     move_status=$?
-    staging_venv="$activated_venv"
-    staging_clawpatch_root="$activated_clawpatch_root"
     exit "$move_status"
   }
   pending_clawpatch_link=""
@@ -244,10 +287,12 @@ import sys
 os.replace(sys.argv[1], sys.argv[2])
 PY
   move_status=$?
-  staging_venv="$activated_venv"
   exit "$move_status"
 }
 pending_supervisor_link=""
+activation_complete=true
+staging_venv=""
+staging_clawpatch_root=""
 if [[ -n "$superseded_venv" && "$superseded_venv" != "$activated_venv" ]]; then
   rm -rf -- "$superseded_venv"
 fi
