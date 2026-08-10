@@ -1228,6 +1228,91 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 temporary_commit,
             )
 
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_fresh_run_retires_temporary_commit_already_in_clean_descendant_history(
+        self, json_clawpatch, _processes
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            test_source = repo / "test_app.py"
+            source.write_text("original\n", encoding="utf-8")
+            test_source.write_text("original test\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py", "test_app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            finding_id = "fnd_sig-feat-library-abc123-1234_abcdef1234"
+
+            source.write_text("completed repair\n", encoding="utf-8")
+            test_source.write_text("repair regression test\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py", "test_app.py"], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "commit",
+                    "-q",
+                    "-m",
+                    f"clawpatch-supervise iteration: {finding_id}",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            temporary_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
+            ).strip()
+            _write_release_progress(
+                repo,
+                finding_id=finding_id,
+                branch="main",
+                head_before=original_head,
+                phase="iteration",
+                owned_paths=["app.py", "test_app.py"],
+                temporary_commit=temporary_commit,
+                source_states=[temporary_tree],
+                last_action="preserve-and-continue",
+            )
+
+            state = repo / ".clawpatch"
+            feature = state / "features" / "feat_one.json"
+            feature.parent.mkdir(parents=True)
+            feature.write_text('{"featureId":"feat_one"}\n', encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "-f", ".clawpatch/features/feat_one.json"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(["git", "commit", "-q", "-m", "clawpatch fix"], cwd=repo, check=True)
+            descendant_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            def initialize(*_args, **_kwargs):
+                feature.parent.mkdir(parents=True)
+                feature.write_text('{"featureId":"feat_one"}\n', encoding="utf-8")
+                return {"created": True}
+
+            json_clawpatch.side_effect = initialize
+            _prepare_fresh_release(repo, env={"PATH": "test"})
+
+            self.assertFalse(
+                (repo / ".manageroo/cache/clawpatch-release-progress.json").exists()
+            )
+            self.assertEqual(
+                subprocess.check_output(["git", "status", "--porcelain"], cwd=repo, text=True),
+                "",
+            )
+            self.assertEqual(
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
+                descendant_head,
+            )
+
     def test_explicit_state_publication_commits_new_safe_clawpatch_state(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)

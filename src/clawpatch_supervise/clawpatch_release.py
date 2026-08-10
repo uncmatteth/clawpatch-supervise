@@ -3019,8 +3019,10 @@ def _recover_checkpoint_temporary_commit(
         if (
             not source_changes
             and original_is_ancestor.returncode == 0
-            and temporary_is_ancestor.returncode == 1
+            and temporary_is_ancestor.returncode in {0, 1}
         ):
+            # The verified iteration may either be a dangling sibling or already
+            # committed in the current clean history. Both are safe to retire.
             return
         raise SafetyError(
             "Interrupted Clawpatch temporary commit no longer matches the current Git HEAD."
