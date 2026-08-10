@@ -126,8 +126,13 @@ class DisposablePythonValidationTests(unittest.TestCase):
             env: Mapping[str, str],
         ) -> subprocess.CompletedProcess[str]:
             calls.append((argv, dict(env)))
-            if argv[:3] == [sys.executable, "-m", "venv"]:
-                environment = Path(argv[3])
+            if argv[-1:] == ["."]:
+                (cwd.parent / f"{cwd.name}-build-hook-ran").write_text(
+                    "escaped",
+                    encoding="utf-8",
+                )
+            if argv[:4] == [sys.executable, "-I", "-m", "venv"]:
+                environment = Path(argv[4])
                 executable_dir = environment / ("Scripts" if os.name == "nt" else "bin")
                 executable_dir.mkdir(parents=True)
                 python = executable_dir / ("python.exe" if os.name == "nt" else "python")
@@ -137,14 +142,27 @@ class DisposablePythonValidationTests(unittest.TestCase):
         contract = PythonTestContract(Path("pyproject.toml"), ())
         with tempfile.TemporaryDirectory() as temp:
             temporary_root = Path(temp)
+            outside_sentinel = temporary_root.parent / f"{temporary_root.name}-build-hook-ran"
+            (temporary_root / "backend.py").write_text(
+                "from pathlib import Path\n"
+                f"Path({str(outside_sentinel)!r}).write_text('escaped')\n",
+                encoding="utf-8",
+            )
+            (temporary_root / "pyproject.toml").write_text(
+                "[build-system]\n"
+                "requires = []\n"
+                'build-backend = "backend"\n'
+                'backend-path = ["."]\n',
+                encoding="utf-8",
+            )
             with _provision_python_test_environment(
                 temporary_root,
                 contract,
                 run=run,
                 progress=None,
                 temporary_root=temporary_root,
-            ):
-                self.assertEqual(len(calls), 3)
+            ) as child_env:
+                self.assertEqual(len(calls), 2)
                 credential_names = {
                     "DATABASE_URL",
                     "BTT_ALLOW_DATABASE_RESET",
@@ -162,10 +180,54 @@ class DisposablePythonValidationTests(unittest.TestCase):
                         )
                     self.assertEqual(environment["PIP_CONFIG_FILE"], os.devnull)
                     self.assertEqual(environment["PIP_NO_INPUT"], "1")
+                self.assertEqual(
+                    child_env["PYTHONPATH"],
+                    os.pathsep.join(
+                        (str(temporary_root / "src"), str(temporary_root))
+                    ),
+                )
+                self.assertFalse(outside_sentinel.exists())
 
-        self.assertEqual(calls[0][0][1:3], ["-m", "venv"])
+        self.assertEqual(calls[0][0][1:4], ["-I", "-m", "venv"])
+        self.assertEqual(calls[1][0][1:4], ["-I", "-m", "pip"])
         self.assertIn("pytest>=8,<10", calls[1][0])
-        self.assertEqual(calls[2][0][-1], ".")
+        self.assertIn("--only-binary=:all:", calls[1][0])
+        self.assertNotIn(".", calls[1][0])
+
+    def test_target_controlled_dependencies_fail_closed_before_running_commands(self) -> None:
+        calls: list[list[str]] = []
+
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
+            calls.append(argv)
+            return subprocess.CompletedProcess(argv, 0, "", "")
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            contract = PythonTestContract(
+                root / "pyproject.toml",
+                (f"malicious-build-input @ {root.as_uri()}",),
+            )
+
+            with self.assertRaisesRegex(
+                SafetyError,
+                "refused target-controlled dependency installation",
+            ):
+                with _provision_python_test_environment(
+                    root,
+                    contract,
+                    run=run,
+                    progress=None,
+                    temporary_root=root,
+                ):
+                    self.fail("unsafe dependency provisioning must not yield")
+
+            self.assertEqual(calls, [])
 
 
 class DisposablePostgresValidationTests(unittest.TestCase):

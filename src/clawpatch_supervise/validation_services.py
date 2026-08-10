@@ -358,6 +358,11 @@ def _provision_python_test_environment(
     if contract is None:
         yield {}
         return
+    if contract.requirements:
+        raise SafetyError(
+            "Disposable Python validation refused target-controlled dependency installation "
+            "because no OS-enforced provisioning sandbox is available."
+        )
     if progress is not None:
         progress(
             {
@@ -378,7 +383,7 @@ def _provision_python_test_environment(
             provisioning_env = _python_provisioning_environment(Path(temp) / "provisioning")
             _checked_python_environment_command(
                 run,
-                [sys.executable, "-m", "venv", str(environment)],
+                [sys.executable, "-I", "-m", "venv", str(environment)],
                 repo=repo,
                 timeout=120,
                 action="creation",
@@ -403,36 +408,18 @@ def _provision_python_test_environment(
                 run,
                 [
                     str(python),
+                    "-I",
                     "-m",
                     "pip",
                     "install",
                     "--disable-pip-version-check",
                     "--no-input",
+                    "--only-binary=:all:",
                     "pytest>=8,<10",
-                    "--",
-                    *contract.requirements,
                 ],
                 repo=repo,
                 timeout=900,
                 action="dependency installation",
-                env=install_env,
-            )
-            _checked_python_environment_command(
-                run,
-                [
-                    str(python),
-                    "-m",
-                    "pip",
-                    "install",
-                    "--disable-pip-version-check",
-                    "--no-input",
-                    "--no-deps",
-                    "--",
-                    ".",
-                ],
-                repo=repo,
-                timeout=900,
-                action="project installation",
                 env=install_env,
             )
             child_path = str(executable_dir)
@@ -441,6 +428,7 @@ def _provision_python_test_environment(
                 child_path += os.pathsep + inherited_path
             child_env = {
                 "PATH": child_path,
+                "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo))),
                 "VIRTUAL_ENV": str(environment),
                 "PYTHONNOUSERSITE": "1",
                 "PIP_DISABLE_PIP_VERSION_CHECK": "1",
