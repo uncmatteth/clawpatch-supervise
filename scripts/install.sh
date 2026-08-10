@@ -157,6 +157,37 @@ if [[ "$managed_clawpatch" == true && -d "$clawpatch_destination" ]]; then
   echo "Command destination is a directory: $clawpatch_destination" >&2
   exit 2
 fi
+superseded_venv="$("$python_command" - "$supervisor_destination" "$install_root" <<'PY'
+import shlex
+import sys
+from pathlib import Path
+
+wrapper = Path(sys.argv[1])
+install_root = Path(sys.argv[2]).resolve()
+supervisor = None
+if wrapper.is_symlink():
+    supervisor = wrapper.resolve()
+elif wrapper.is_file():
+    try:
+        lines = wrapper.read_text(encoding="utf-8").splitlines()
+        for line in lines:
+            words = shlex.split(line)
+            if len(words) == 3 and words[0] == "exec" and words[2] == "$@":
+                supervisor = Path(words[1]).resolve()
+                break
+    except (OSError, UnicodeError, ValueError):
+        pass
+
+if supervisor is not None and supervisor.name == "clawpatch-supervise":
+    candidate = supervisor.parent.parent
+    if (
+        candidate.name.startswith("venv.")
+        and candidate.parent == install_root
+        and supervisor == candidate / "bin" / "clawpatch-supervise"
+    ):
+        print(candidate)
+PY
+)"
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
 clawpatch_dir="${clawpatch_command%/*}"
 "$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$bin_dir" "$clawpatch_dir" <<'PY'
@@ -215,4 +246,7 @@ PY
   exit "$move_status"
 }
 pending_supervisor_link=""
+if [[ -n "$superseded_venv" && "$superseded_venv" != "$activated_venv" ]]; then
+  rm -rf -- "$superseded_venv"
+fi
 echo "Installed command: $supervisor_destination"

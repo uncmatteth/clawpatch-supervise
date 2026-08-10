@@ -673,6 +673,62 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(list(install_root.iterdir()), [install_root / "venv.previous"])
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_removes_superseded_managed_environment(self) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "install"
+        previous_venv = install_root / "venv.0.1.27.previous"
+        previous_supervisor = previous_venv / "bin" / "clawpatch-supervise"
+        previous_supervisor.parent.mkdir(parents=True)
+        self._write_executable(previous_supervisor, "#!/bin/sh\nexit 0\n")
+        installed_command = root / "installed-bin" / "clawpatch-supervise"
+        installed_command.parent.mkdir()
+        self._write_executable(
+            installed_command,
+            f'#!/bin/sh\nexec {previous_supervisor} "$@"\n',
+        )
+
+        result, _invocations, actual_install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(actual_install_root, install_root)
+        self.assertFalse(previous_venv.exists())
+        environments = list(install_root.glob("venv.*"))
+        self.assertEqual(len(environments), 1)
+        self.assertIn(
+            str(environments[0] / "bin" / "clawpatch-supervise"),
+            installed_command.read_text(encoding="utf-8"),
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_preserves_superseded_environment_outside_install_root(
+        self,
+    ) -> None:
+        root = Path(self._temporary_directory.name)
+        external_venv = root / "external" / "venv.0.1.27.previous"
+        external_supervisor = external_venv / "bin" / "clawpatch-supervise"
+        external_supervisor.parent.mkdir(parents=True)
+        self._write_executable(external_supervisor, "#!/bin/sh\nexit 0\n")
+        installed_command = root / "installed-bin" / "clawpatch-supervise"
+        installed_command.parent.mkdir()
+        self._write_executable(
+            installed_command,
+            f'#!/bin/sh\nexec {external_supervisor} "$@"\n',
+        )
+
+        result, _invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(external_venv.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_rejects_supervisor_command_directory(self) -> None:
         command_directory = (
             Path(self._temporary_directory.name)
