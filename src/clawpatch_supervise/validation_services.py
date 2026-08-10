@@ -25,8 +25,7 @@ _IGNORED_DIRECTORIES = frozenset(
 )
 _TEST_SUFFIXES = frozenset({".cjs", ".js", ".jsx", ".mjs", ".py", ".rb", ".ts", ".tsx"})
 _OFFICIAL_POSTGRES_IMAGE = re.compile(
-    r"^(?:(?:docker\.io/)?library/)?postgres:"
-    r"(?:[1-9][0-9]*(?:\.[0-9]+)?(?:-[A-Za-z0-9_.-]+)?|sha256:[0-9a-f]{64})$"
+    r"^(?:(?:docker\.io/)?library/)?postgres@sha256:[0-9a-f]{64}$"
 )
 _IMAGE_LINE = re.compile(r"(?m)^\s*image:\s*['\"]?([^\s#'\"]+)['\"]?\s*(?:#.*)?$")
 _RESET_ENV = re.compile(r"\b([A-Z][A-Z0-9_]*ALLOW_DATABASE_RESET)\b")
@@ -529,7 +528,7 @@ def _verified_postgres_image(
     if images != [contract.image]:
         raise SafetyError(
             "The resolved Docker Compose PostgreSQL image does not match the exact "
-            "official versioned image declared by the repository."
+            "official digest-pinned image declared by the repository."
         )
     return contract.image
 

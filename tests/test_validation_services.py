@@ -15,11 +15,15 @@ from clawpatch_supervise.validation_services import (
     PythonTestContract,
     _checked,
     _checked_python_environment_command,
+    _compose_contract,
     _provision_python_test_environment,
     _provision_postgres_test_environment,
     _remove_container,
     _run_command,
 )
+
+
+_POSTGRES_DIGEST_IMAGE = "postgres@sha256:" + "a" * 64
 
 
 class FailedSubprocessRedactionTests(unittest.TestCase):
@@ -165,6 +169,47 @@ class DisposablePythonValidationTests(unittest.TestCase):
 
 
 class DisposablePostgresValidationTests(unittest.TestCase):
+    @staticmethod
+    def _write_postgres_contract(root: Path, image: str) -> None:
+        (root / "compose.yaml").write_text(
+            f"services:\n  database:\n    image: {image}\n",
+            encoding="utf-8",
+        )
+        tests = root / "tests"
+        tests.mkdir()
+        (tests / "test_database.py").write_text(
+            "TEST_DATABASE_URL = 'required'\nBTT_ALLOW_DATABASE_RESET = 'required'\n",
+            encoding="utf-8",
+        )
+        (root / "manageroo-validation.toml").write_text(
+            '[postgres]\nurl_env = "TEST_DATABASE_URL"\n'
+            'reset_env = "BTT_ALLOW_DATABASE_RESET"\n',
+            encoding="utf-8",
+        )
+
+    def test_compose_contract_requires_official_postgres_digest_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._write_postgres_contract(root, _POSTGRES_DIGEST_IMAGE)
+
+            contract = _compose_contract(root)
+
+            self.assertIsNotNone(contract)
+            self.assertEqual(contract.image, _POSTGRES_DIGEST_IMAGE)
+
+    def test_compose_contract_rejects_mutable_or_malformed_postgres_image(self) -> None:
+        invalid_images = (
+            "postgres:16",
+            "postgres:sha256:" + "a" * 64,
+            "postgres@sha256:" + "a" * 63,
+        )
+        for image in invalid_images:
+            with self.subTest(image=image), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                self._write_postgres_contract(root, image)
+
+                self.assertIsNone(_compose_contract(root))
+
     @patch.dict(
         "clawpatch_supervise.validation_services.os.environ",
         {
@@ -175,7 +220,7 @@ class DisposablePostgresValidationTests(unittest.TestCase):
     )
     @patch(
         "clawpatch_supervise.validation_services._verified_postgres_image",
-        return_value="postgres:16",
+        return_value=_POSTGRES_DIGEST_IMAGE,
     )
     @patch("clawpatch_supervise.validation_services._compose_contract")
     def test_inherited_reset_capable_database_is_replaced_by_owned_disposable_service(
@@ -183,7 +228,7 @@ class DisposablePostgresValidationTests(unittest.TestCase):
     ) -> None:
         compose_contract.return_value = PostgresTestContract(
             compose_file=Path("compose.yaml"),
-            image="postgres:16",
+            image=_POSTGRES_DIGEST_IMAGE,
             url_env="TEST_DATABASE_URL",
             reset_envs=("BTT_ALLOW_DATABASE_RESET",),
         )
@@ -228,13 +273,15 @@ class DisposablePostgresValidationTests(unittest.TestCase):
                 self.assertEqual(child_env["BTT_ALLOW_DATABASE_RESET"], "true")
 
         self.assertTrue(any(argv[:2] == ["docker", "run"] for argv in calls))
+        docker_run = next(argv for argv in calls if argv[:2] == ["docker", "run"])
+        self.assertEqual(docker_run[-1], _POSTGRES_DIGEST_IMAGE)
         self.assertTrue(any(argv[:3] == ["docker", "rm", "-f"] for argv in calls))
         self.assertEqual(len(env_files), 1)
         self.assertFalse(env_files[0].exists())
 
     @patch(
         "clawpatch_supervise.validation_services._verified_postgres_image",
-        return_value="postgres:16",
+        return_value=_POSTGRES_DIGEST_IMAGE,
     )
     @patch("clawpatch_supervise.validation_services._compose_contract")
     def test_malformed_container_id_output_still_removes_exact_container_name(
@@ -242,7 +289,7 @@ class DisposablePostgresValidationTests(unittest.TestCase):
     ) -> None:
         compose_contract.return_value = PostgresTestContract(
             compose_file=Path("compose.yaml"),
-            image="postgres:16",
+            image=_POSTGRES_DIGEST_IMAGE,
             url_env="TEST_DATABASE_URL",
             reset_envs=("BTT_ALLOW_DATABASE_RESET",),
         )
@@ -276,7 +323,7 @@ class DisposablePostgresValidationTests(unittest.TestCase):
 
     @patch(
         "clawpatch_supervise.validation_services._verified_postgres_image",
-        return_value="postgres:16",
+        return_value=_POSTGRES_DIGEST_IMAGE,
     )
     @patch("clawpatch_supervise.validation_services._compose_contract")
     def test_env_file_cleanup_failure_removes_exact_container_name(
@@ -284,7 +331,7 @@ class DisposablePostgresValidationTests(unittest.TestCase):
     ) -> None:
         compose_contract.return_value = PostgresTestContract(
             compose_file=Path("compose.yaml"),
-            image="postgres:16",
+            image=_POSTGRES_DIGEST_IMAGE,
             url_env="TEST_DATABASE_URL",
             reset_envs=("BTT_ALLOW_DATABASE_RESET",),
         )
@@ -333,7 +380,7 @@ class DisposablePostgresValidationTests(unittest.TestCase):
 
     @patch(
         "clawpatch_supervise.validation_services._verified_postgres_image",
-        return_value="postgres:16",
+        return_value=_POSTGRES_DIGEST_IMAGE,
     )
     @patch("clawpatch_supervise.validation_services._compose_contract")
     def test_startup_timeout_removes_exact_container_name(
@@ -341,7 +388,7 @@ class DisposablePostgresValidationTests(unittest.TestCase):
     ) -> None:
         compose_contract.return_value = PostgresTestContract(
             compose_file=Path("compose.yaml"),
-            image="postgres:16",
+            image=_POSTGRES_DIGEST_IMAGE,
             url_env="TEST_DATABASE_URL",
             reset_envs=("BTT_ALLOW_DATABASE_RESET",),
         )
