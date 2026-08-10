@@ -216,41 +216,23 @@ def _run(
     cwd: Path,
     timeout: int = 1800,
     env: dict[str, str] | None = None,
-    kill_process_group: bool = False,
+    kill_process_group: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     command = _platform_command(argv, platform_name=os.name)
-    if kill_process_group:
-        result = CommandRunner().run(
-            command,
-            cwd=cwd,
-            timeout_seconds=timeout,
-            env=env,
-            kill_process_group=True,
-        )
-        output = result.stdout
-        if result.stderr:
-            output = output + ("\n" if output else "") + result.stderr
-        if result.timed_out:
-            output = output + ("\n" if output else "") + "TIMEOUT"
-        return subprocess.CompletedProcess(command, result.exit_code, output, None)
-    try:
-        return subprocess.run(
-            command,
-            cwd=str(cwd),
-            text=True,
-            encoding="utf-8",
-            errors="surrogateescape",
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=env,
-            shell=False,
-            timeout=timeout,
-        )
-    except subprocess.TimeoutExpired as exc:
-        output = exc.stdout if isinstance(exc.stdout, str) else ""
-        return subprocess.CompletedProcess(command, 124, output + "\nTIMEOUT", None)
-    except OSError as exc:
-        return subprocess.CompletedProcess(command, 127, str(exc), None)
+    result = CommandRunner().run(
+        command,
+        cwd=cwd,
+        timeout_seconds=timeout,
+        env=env,
+        kill_process_group=kill_process_group,
+        errors="surrogateescape",
+    )
+    output = result.stdout
+    if result.stderr:
+        output = output + ("\n" if output else "") + result.stderr
+    if result.timed_out:
+        output = output + ("\n" if output else "") + "TIMEOUT"
+    return subprocess.CompletedProcess(command, result.exit_code, output, None)
 
 
 def _platform_command(argv: list[str], *, platform_name: str) -> list[str]:

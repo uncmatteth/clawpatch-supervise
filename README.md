@@ -173,7 +173,8 @@ The supervisor provides:
 - durable checkpoints outside the repository being repaired;
 - repository-scoped active-process detection for console, script, and `python -m clawpatch_supervise` launches;
 - automatic waiting when another verified run owns the repository;
-- a child-process watchdog that terminates the entire timed-out process group;
+- a child-process watchdog that escalates surviving timed-out process groups from graceful
+  termination to forced termination and proves the group exited before returning;
 - automatic in-process retry and exact-checkpoint resume for transient provider, refusal, quota, and timeout failures;
 - one marked run-owned temporary root, automatic stale-run pruning, and explicit cleanup dry-run/apply commands;
 - optional verified `each` or `final` pushes;

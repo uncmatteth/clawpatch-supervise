@@ -5,10 +5,11 @@ import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import call, patch
 
-from clawpatch_supervise.clawpatch_release import _release_clawpatch_env
+from clawpatch_supervise.clawpatch_release import _release_clawpatch_env, _run
 from clawpatch_supervise.errors import SafetyError
 from clawpatch_supervise.runner import CommandRunner, _terminate_process_group
 
@@ -187,6 +188,42 @@ class WindowsProcessTreeTerminationTests(unittest.TestCase):
 
 class PosixProcessTreeTerminationTests(unittest.TestCase):
     @patch("clawpatch_supervise.runner.os.name", "posix")
+    def test_surviving_group_is_killed_when_parent_communicate_completes(self) -> None:
+        class Process:
+            pid = 4321
+            stdin = None
+            stdout = None
+            stderr = None
+
+            def communicate(self, *, timeout: int) -> tuple[str, str]:
+                return "parent output", ""
+
+        process = Process()
+
+        with (
+            patch(
+                "clawpatch_supervise.runner._posix_process_group_exists",
+                return_value=True,
+            ),
+            patch(
+                "clawpatch_supervise.runner._wait_for_posix_process_group_exit",
+                return_value=True,
+            ) as wait_for_exit,
+            patch("clawpatch_supervise.runner.os.killpg") as killpg,
+        ):
+            stdout, stderr = _terminate_process_group(process)
+
+        self.assertEqual((stdout, stderr), ("parent output", ""))
+        self.assertEqual(
+            killpg.call_args_list,
+            [
+                call(4321, signal.SIGTERM),
+                call(4321, signal.SIGKILL),
+            ],
+        )
+        wait_for_exit.assert_called_once_with(4321)
+
+    @patch("clawpatch_supervise.runner.os.name", "posix")
     def test_unproven_exit_after_sigkill_raises_safety_error(self) -> None:
         class Process:
             pid = 4321
@@ -206,8 +243,15 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
         process = Process()
 
         with (
+            patch(
+                "clawpatch_supervise.runner._wait_for_posix_process_group_exit",
+                return_value=False,
+            ),
             patch("clawpatch_supervise.runner.os.killpg") as killpg,
-            self.assertRaisesRegex(SafetyError, r"termination could not be proven.*PID 4321"),
+            self.assertRaisesRegex(
+                SafetyError,
+                r"termination could not be proven.*process group 4321",
+            ),
         ):
             _terminate_process_group(process)
 
@@ -218,6 +262,46 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
                 call(4321, signal.SIGKILL),
             ],
         )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group integration")
+    def test_release_run_kills_descendant_after_parent_closes_pipes(self) -> None:
+        child_source = (
+            "import os, signal, sys, time\n"
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "open(sys.argv[1], 'w', encoding='utf-8').write('ready\\n')\n"
+            "os.close(0); os.close(1); os.close(2)\n"
+            "time.sleep(1.5)\n"
+            "open(sys.argv[2], 'w', encoding='utf-8').write('escaped\\n')\n"
+        )
+        parent_source = (
+            "import pathlib, subprocess, sys, time\n"
+            "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]])\n"
+            "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
+            "time.sleep(30)\n"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            ready = root / "descendant-ready.txt"
+            sentinel = root / "descendant-wrote.txt"
+
+            result = _run(
+                [
+                    sys.executable,
+                    "-c",
+                    parent_source,
+                    child_source,
+                    str(ready),
+                    str(sentinel),
+                ],
+                cwd=root,
+                timeout=1,
+            )
+
+            self.assertEqual(result.returncode, 124, result.stdout)
+            self.assertIn("TIMEOUT", result.stdout)
+            self.assertTrue(ready.is_file())
+            time.sleep(1.7)
+            self.assertFalse(sentinel.exists())
 
 
 @unittest.skipUnless(os.name == "nt", "Windows command runner only")

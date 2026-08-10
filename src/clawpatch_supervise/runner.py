@@ -4,6 +4,7 @@ import os
 import shutil
 import signal
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
@@ -63,6 +64,25 @@ def _kill_parent_process(process: subprocess.Popen[str]) -> None:
         pass
 
 
+def _posix_process_group_exists(group_id: int) -> bool:
+    try:
+        os.killpg(group_id, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _wait_for_posix_process_group_exit(group_id: int, *, timeout: float = 5) -> bool:
+    deadline = time.monotonic() + timeout
+    while _posix_process_group_exists(group_id):
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(0.05)
+    return True
+
+
 def _terminate_process_group(
     process: subprocess.Popen[str],
     *,
@@ -71,6 +91,7 @@ def _terminate_process_group(
 ) -> tuple[str, str]:
     windows_cleanup_error = ""
     posix_cleanup_error = ""
+    cleanup_timed_out = False
     if os.name == "nt":
         try:
             taskkill = subprocess.run(
@@ -103,6 +124,7 @@ def _terminate_process_group(
         stdout = _prefer_timeout_text(stdout, cleanup_stdout)
         stderr = _prefer_timeout_text(stderr, cleanup_stderr)
     except subprocess.TimeoutExpired as cleanup_timeout:
+        cleanup_timed_out = True
         stdout = _prefer_timeout_text(stdout, cleanup_timeout.stdout)
         stderr = _prefer_timeout_text(stderr, cleanup_timeout.stderr)
         if os.name == "nt":
@@ -111,19 +133,28 @@ def _terminate_process_group(
                 windows_cleanup_error = (
                     "Windows process-tree termination could not be proven after taskkill."
                 )
-        else:
-            try:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
+    if os.name != "nt" and (
+        cleanup_timed_out or _posix_process_group_exists(process.pid)
+    ):
         try:
-            process.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            if os.name != "nt" and process.poll() is None:
-                posix_cleanup_error = (
-                    "POSIX process-group termination could not be proven after SIGKILL; "
-                    f"retained process PID {process.pid}."
-                )
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        if cleanup_timed_out:
+            try:
+                process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                if process.poll() is None:
+                    posix_cleanup_error = (
+                        "POSIX process-group termination could not be proven after SIGKILL; "
+                        f"retained process PID {process.pid}."
+                    )
+        if not _wait_for_posix_process_group_exit(process.pid):
+            posix_cleanup_error = (
+                "POSIX process-group termination could not be proven after SIGKILL; "
+                f"retained process group {process.pid}."
+            )
+    if cleanup_timed_out:
         _close_process_pipes(process)
     if windows_cleanup_error:
         raise SafetyError(windows_cleanup_error)
@@ -189,6 +220,7 @@ class CommandRunner:
         log_name: str | None = None,
         check: bool = False,
         kill_process_group: bool = True,
+        errors: str = "replace",
     ) -> CommandResult:
         """Run a command in an isolated process group by default.
 
@@ -196,6 +228,8 @@ class CommandRunner:
         """
         if not argv or not all(isinstance(item, str) and item for item in argv):
             raise SafetyError("Commands must be non-empty argv arrays.")
+        if errors not in {"replace", "surrogateescape"}:
+            raise SafetyError("Command output decoding must use a supported error handler.")
         log_path = None
         if log_name is not None:
             if self.log_root is not None:
@@ -218,6 +252,7 @@ class CommandRunner:
                     env=process_env,
                     input_text=input_text,
                     timeout_seconds=timeout_seconds,
+                    errors=errors,
                 )
             else:
                 completed = subprocess.run(
@@ -227,7 +262,7 @@ class CommandRunner:
                     input=input_text,
                     text=True,
                     encoding="utf-8",
-                    errors="replace",
+                    errors=errors,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     timeout=timeout_seconds,
@@ -283,6 +318,7 @@ class CommandRunner:
         env: Mapping[str, str],
         input_text: str | None,
         timeout_seconds: int,
+        errors: str,
     ) -> tuple[subprocess.CompletedProcess[str], bool]:
         kwargs: dict = {
             "cwd": str(cwd),
@@ -292,7 +328,7 @@ class CommandRunner:
             "stderr": subprocess.PIPE,
             "text": True,
             "encoding": "utf-8",
-            "errors": "replace",
+            "errors": errors,
             "shell": False,
         }
         if os.name == "nt":
