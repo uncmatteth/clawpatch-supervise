@@ -1,9 +1,11 @@
 ﻿import hashlib
 import os
+import signal
 import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -61,6 +63,7 @@ class InstallerContractTests(unittest.TestCase):
         supervisor_move_fails: bool = False,
         node_version: str = "v22.0.0",
         verify_repo: bool = False,
+        process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
         fake_bin = root / "bin"
@@ -111,8 +114,15 @@ class InstallerContractTests(unittest.TestCase):
             python,
             "#!/bin/sh\n"
             'if [ "$1" = "-" ] && [ "$#" -eq 3 ] && '
-            '[ "$3" = "$CLAWPATCH_SUPERVISE_BIN_DIR/clawpatch-supervise" ] && '
-            '[ "$CLAWPATCH_TEST_SUPERVISOR_MOVE_FAILS" = "true" ]; then exit 29; fi\n'
+            '[ "$3" = "$CLAWPATCH_SUPERVISE_BIN_DIR/clawpatch-supervise" ]; then\n'
+            '  if [ "$CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE" = "true" ]; then\n'
+            '    : > "$CLAWPATCH_TEST_PAUSE_READY"\n'
+            '    while [ ! -e "$CLAWPATCH_TEST_PAUSE_RELEASE" ]; do\n'
+            '      "$CLAWPATCH_TEST_REAL_PYTHON" -c "import time; time.sleep(0.01)"\n'
+            '    done\n'
+            '  fi\n'
+            '  [ "$CLAWPATCH_TEST_SUPERVISOR_MOVE_FAILS" != "true" ] || exit 29\n'
+            "fi\n"
             'if [ "$1" = "-c" ] || [ "$1" = "-" ]; then\n'
             '  exec "$CLAWPATCH_TEST_REAL_PYTHON" "$@"\n'
             "fi\n"
@@ -180,6 +190,9 @@ class InstallerContractTests(unittest.TestCase):
                     supervisor_move_fails
                 ).lower(),
                 "CLAWPATCH_TEST_NODE_VERSION": node_version,
+                "CLAWPATCH_TEST_PAUSE_READY": str(root / "activation-ready"),
+                "CLAWPATCH_TEST_PAUSE_RELEASE": str(root / "activation-release"),
+                "CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE": "false",
                 "PATH": str(fake_bin),
             }
         )
@@ -189,12 +202,15 @@ class InstallerContractTests(unittest.TestCase):
         if verify_repo:
             environment["CLAWPATCH_SUPERVISE_VERIFY_REPO"] = str(root)
         installer_path = REPOSITORY_ROOT / "scripts" / "install.sh"
-        result = self._run_installer_process(
-            platform_name="Linux/macOS",
-            installer_path=installer_path,
-            argv=[str(installer_path)],
-            environment=environment,
-        )
+        if process_runner is None:
+            result = self._run_installer_process(
+                platform_name="Linux/macOS",
+                installer_path=installer_path,
+                argv=[str(installer_path)],
+                environment=environment,
+            )
+        else:
+            result = process_runner(installer_path, environment)
         invocations = (
             invocation_log.read_text(encoding="utf-8").splitlines()
             if invocation_log.exists()
@@ -739,7 +755,83 @@ class InstallerContractTests(unittest.TestCase):
         )
         self.assertEqual(
             sorted(path.name for path in install_root.iterdir()),
-            ["clawpatch"],
+            [".install.lock", "clawpatch"],
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_serializes_activation_and_interrupted_rollback(
+        self,
+    ) -> None:
+        interrupted_returncode = None
+
+        def run_concurrently(
+            installer_path: Path, environment: dict[str, str]
+        ) -> subprocess.CompletedProcess[str]:
+            nonlocal interrupted_returncode
+            first_environment = environment.copy()
+            first_environment["CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE"] = "true"
+            first = subprocess.Popen(
+                [str(installer_path)],
+                env=first_environment,
+                start_new_session=True,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            ready = Path(environment["CLAWPATCH_TEST_PAUSE_READY"])
+            deadline = time.monotonic() + 10
+            while not ready.exists() and time.monotonic() < deadline:
+                if first.poll() is not None:
+                    self.fail(
+                        f"first installer exited before activation: {first.stderr.read()}"
+                    )
+                time.sleep(0.01)
+            self.assertTrue(ready.exists(), "first installer did not reach activation")
+
+            second = subprocess.Popen(
+                [str(installer_path)],
+                env=environment,
+                stderr=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            time.sleep(0.2)
+            self.assertIsNone(
+                second.poll(), "second installer bypassed the activation lock"
+            )
+
+            os.killpg(first.pid, signal.SIGTERM)
+            first.communicate(timeout=10)
+            interrupted_returncode = first.returncode
+            try:
+                second_stdout, second_stderr = second.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                second.kill()
+                second.communicate()
+                self.fail("second installer did not acquire the released activation lock")
+            return subprocess.CompletedProcess(
+                [str(installer_path)],
+                second.returncode,
+                second_stdout,
+                second_stderr,
+            )
+
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            process_runner=run_concurrently,
+        )
+
+        self.assertNotEqual(interrupted_returncode, 0)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(invocations, [])
+        environments = list(install_root.glob("venv.*"))
+        self.assertEqual(len(environments), 1)
+        installed_command = install_root.parent / "installed-bin" / "clawpatch-supervise"
+        self.assertIn(
+            str(environments[0] / "bin" / "clawpatch-supervise"),
+            installed_command.read_text(encoding="utf-8"),
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")

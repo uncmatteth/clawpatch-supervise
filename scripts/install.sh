@@ -19,6 +19,7 @@ previous_supervisor_command=""
 previous_clawpatch_command=""
 activation_started=false
 activation_complete=false
+install_lock_held=false
 supervisor_destination=""
 clawpatch_destination=""
 
@@ -49,6 +50,9 @@ cleanup() {
   [[ -z "$staging_venv" ]] || rm -rf "$staging_venv"
   [[ -z "$staging_clawpatch_root" ]] || rm -rf "$staging_clawpatch_root"
   [[ -z "$download_root" ]] || rm -rf "$download_root"
+  if [[ "$install_lock_held" == true ]]; then
+    exec 9>&-
+  fi
   exit "$exit_status"
 }
 trap cleanup EXIT
@@ -176,7 +180,15 @@ if [[ -n "$verify_repo" ]]; then
 fi
 printf '%s\n' "$clawpatch_installed_version"
 
-mkdir -p "$bin_dir"
+mkdir -p "$install_root" "$bin_dir"
+exec 9>"$install_root/.install.lock"
+"$python_command" - 9 <<'PY'
+import fcntl
+import sys
+
+fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX)
+PY
+install_lock_held=true
 supervisor_destination="$bin_dir/clawpatch-supervise"
 clawpatch_destination="$bin_dir/clawpatch"
 if [[ -d "$supervisor_destination" ]]; then
