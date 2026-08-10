@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from clawpatch_supervise.clawpatch_protocol import RepairAction
 from clawpatch_supervise.clawpatch_release import (
     _final_closure,
     _load_release_progress,
@@ -192,7 +193,7 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
-    def test_external_manual_loop_advances_zero_file_uncertain_without_empty_commit(
+    def test_external_manual_loop_stops_zero_file_uncertain_with_checkpoint(
         self,
         execute_fix,
         _processes,
@@ -214,29 +215,36 @@ class ClawpatchPartialProgressTests(unittest.TestCase):
                 False,
             )
 
-            record, pushed, continuations = _process_finding_until_fixed(
-                repo,
-                "fnd_overlap",
-                inspected={"finding": {"id": "fnd_overlap", "status": "open"}},
-                env={},
-                push_mode="each",
-                branch=branch,
-                pushed=False,
-                state_root=state_root,
-                require_project_gates=False,
-                advance_uncertain=True,
-            )
+            with self.assertRaisesRegex(
+                _UnresolvedFinding,
+                "uncertain without an applied source repair",
+            ) as stopped:
+                _process_finding_until_fixed(
+                    repo,
+                    "fnd_overlap",
+                    inspected={"finding": {"id": "fnd_overlap", "status": "open"}},
+                    env={},
+                    push_mode="each",
+                    branch=branch,
+                    pushed=False,
+                    state_root=state_root,
+                    require_project_gates=False,
+                    advance_uncertain=True,
+                )
             final_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
+            checkpoint = _load_release_progress(repo, state_root=state_root)
 
         self.assertEqual(execute_fix.call_count, 1)
         self.assertEqual(final_head, original_head)
-        self.assertEqual(record["commit"], "")
-        self.assertTrue(record["deferred_uncertain"])
-        self.assertFalse(pushed)
-        self.assertEqual(continuations, 0)
-        self.assertIsNone(_load_release_progress(repo, state_root=state_root))
+        self.assertEqual(stopped.exception.outcome, "uncertain-no-progress")
+        self.assertEqual(stopped.exception.repair_action, RepairAction.STOP_TERMINAL)
+        self.assertEqual(checkpoint["finding_id"], "fnd_overlap")
+        self.assertEqual(checkpoint["phase"], "stopped")
+        self.assertEqual(checkpoint["owned_paths"], [])
+        self.assertEqual(checkpoint["temporary_commit"], "")
+        self.assertEqual(checkpoint["last_action"], RepairAction.STOP_TERMINAL.value)
         push_and_verify.assert_not_called()
 
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")

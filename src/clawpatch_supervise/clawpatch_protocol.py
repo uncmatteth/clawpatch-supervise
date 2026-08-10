@@ -119,7 +119,7 @@ def decide_repair_transition(
         return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "open")
     if revalidation_outcome == "false-positive":
         return RepairDecision(RepairAction.DISCARD_AND_CONTINUE, "false-positive")
-    if revalidation_outcome == "uncertain" and advance_uncertain:
+    if revalidation_outcome == "uncertain" and advance_uncertain and has_source_progress:
         return RepairDecision(RepairAction.COMMIT_AND_ADVANCE, "uncertain-recorded")
     if revalidation_outcome == "uncertain" and has_source_progress:
         return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "uncertain-with-source-progress")

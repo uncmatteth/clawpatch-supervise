@@ -3848,6 +3848,24 @@ def _process_finding_until_fixed(
                     }
                 )
             return record, pushed, continuations
+        if revalidation_decision.action is RepairAction.STOP_TERMINAL:
+            _stop_finding_iteration(
+                repo,
+                finding_id=finding_id,
+                branch=branch,
+                original_head=original_head,
+                temporary_commit=temporary_commit,
+                seen_states=seen_states,
+                state_root=state_root,
+                repair_action=revalidation_decision.action,
+            )
+            raise _UnresolvedFinding(
+                "Clawpatch returned uncertain without an applied source repair; "
+                "the finding remains stopped at its durable checkpoint.",
+                finding_id=finding_id,
+                outcome="uncertain-no-progress",
+                repair_action=revalidation_decision.action,
+            )
         if revalidation_decision.action is not RepairAction.FINALIZE:
             _stop_finding_iteration(
                 repo,

@@ -189,7 +189,7 @@ The supervisor provides:
 |---|---|
 | `fixed` with a verified repair | Create one exact-path repair commit, push if requested, continue. |
 | `open` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
-| `uncertain` from the external unattended command | Commit the exact applied repair (if any), push when requested, continue to the next open finding, and revalidate retained uncertain findings during final closure and every later plain run. A still-uncertain result remains labeled uncertain. |
+| `uncertain` from the external unattended command | Commit the exact applied repair, push when requested, continue to the next open finding, and revalidate retained uncertain findings during final closure and every later plain run. If no source repair was applied, retain a stopped checkpoint and do not advance. A still-uncertain result remains labeled uncertain. |
 | `uncertain` from strict library/Manageroo mode | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
 | `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with new `open` or `uncertain` evidence. |
 | `fix` exits `6` without another source diff | Revalidate the code already present. If ClawPatch now proves it `fixed`, continue without demanding a duplicate edit or empty commit. |
