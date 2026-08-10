@@ -2132,7 +2132,7 @@ def _attempt_base_preserves_owned_source(
     return unchanged.returncode == 0
 
 
-def _checkpoint_later_applied_attempt(
+def _checkpoint_same_finding_later_applied_attempt(
     repo: Path,
     progress_record: dict[str, Any],
     *,
@@ -2241,6 +2241,190 @@ def _checkpoint_later_applied_attempt(
         "inspection": inspected,
         "owned_paths": source_paths,
     }
+
+
+def _checkpoint_cross_finding_applied_attempt(
+    repo: Path,
+    progress_record: dict[str, Any],
+    *,
+    env: dict[str, str] | None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any] | None:
+    """Adopt one uniquely proven applied attempt for a newer finding.
+
+    Patch files only narrow the candidate set. ``clawpatch show`` must independently
+    return the same attempt before any checkpoint ownership is changed.
+    """
+    if progress_record.get("phase") != "stopped" or env is None:
+        return None
+    source_paths = _source_paths(repo)
+    if not source_paths:
+        return None
+    checkpoint_finding = str(progress_record.get("finding_id", ""))
+    checkpoint_time = _parse_checkpoint_time(progress_record.get("updated_at"))
+    if checkpoint_time is None:
+        return None
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    patch_root = repo / ".clawpatch" / "patches"
+    if patch_root.is_symlink() or not patch_root.is_dir():
+        return None
+    try:
+        patch_paths = sorted(patch_root.iterdir(), key=lambda path: path.name)
+    except OSError:
+        return None
+    candidates: list[dict[str, Any]] = []
+    seen_attempts: set[str] = set()
+    for patch_path in patch_paths:
+        if patch_path.suffix != ".json":
+            continue
+        if patch_path.is_symlink() or not patch_path.is_file():
+            return None
+        try:
+            candidate = json.loads(patch_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if not isinstance(candidate, dict):
+            return None
+        files_changed = candidate.get("filesChanged")
+        if (
+            not isinstance(files_changed, list)
+            or any(not isinstance(path, str) or not path for path in files_changed)
+            or sorted(files_changed) != source_paths
+        ):
+            continue
+        try:
+            _validate_attempt_paths_syntax(files_changed)
+        except SafetyError:
+            return None
+        finding_ids = candidate.get("findingIds")
+        patch_attempt_id = candidate.get("patchAttemptId")
+        git_record = candidate.get("git")
+        updated_at = _parse_checkpoint_time(candidate.get("updatedAt"))
+        if (
+            candidate.get("status") != "applied"
+            or not isinstance(finding_ids, list)
+            or len(finding_ids) != 1
+            or not isinstance(finding_ids[0], str)
+            or not _FINDING_ID.fullmatch(finding_ids[0])
+            or finding_ids[0] == checkpoint_finding
+            or not isinstance(patch_attempt_id, str)
+            or not patch_attempt_id
+            or not isinstance(git_record, dict)
+            or updated_at is None
+            or updated_at <= checkpoint_time
+            or not _attempt_base_preserves_owned_source(
+                repo,
+                attempt_base=git_record.get("baseSha"),
+                current_head=current_head,
+                owned_paths=source_paths,
+            )
+        ):
+            continue
+        if patch_attempt_id in seen_attempts:
+            return None
+        try:
+            if any(
+                (repo / path).is_symlink()
+                or not (repo / path).is_file()
+                or datetime.fromtimestamp((repo / path).stat().st_mtime, timezone.utc) > updated_at
+                for path in source_paths
+            ):
+                continue
+        except OSError:
+            continue
+        seen_attempts.add(patch_attempt_id)
+        candidates.append(candidate)
+    if len(candidates) != 1:
+        return None
+    recorded = candidates[0]
+    finding_id = str(recorded["findingIds"][0])
+    inspected = _show_finding(
+        repo,
+        finding_id,
+        env=env,
+        required_status=None,
+        progress=progress,
+        current=1,
+        total="?",
+    )
+    if inspected["finding"].get("id") != finding_id or inspected["finding"].get("status") not in {
+        "open",
+        "uncertain",
+        "fixed",
+        "false-positive",
+    }:
+        return None
+    matching_attempts = []
+    recorded_updated_at = _parse_checkpoint_time(recorded.get("updatedAt"))
+    for attempt in inspected["patchAttempts"]:
+        if not isinstance(attempt, dict):
+            continue
+        git_record = attempt.get("git")
+        files_changed = attempt.get("filesChanged")
+        confirmed_updated_at = _parse_checkpoint_time(attempt.get("updatedAt"))
+        if (
+            attempt.get("patchAttemptId") == recorded["patchAttemptId"]
+            and attempt.get("status") == "applied"
+            and attempt.get("findingIds") == [finding_id]
+            and isinstance(files_changed, list)
+            and all(isinstance(path, str) and path for path in files_changed)
+            and sorted(files_changed) == source_paths
+            and confirmed_updated_at is not None
+            and confirmed_updated_at == recorded_updated_at
+            and confirmed_updated_at > checkpoint_time
+            and isinstance(git_record, dict)
+            and _attempt_base_preserves_owned_source(
+                repo,
+                attempt_base=git_record.get("baseSha"),
+                current_head=current_head,
+                owned_paths=source_paths,
+            )
+        ):
+            try:
+                edited_after_confirmation = any(
+                    (repo / path).is_symlink()
+                    or not (repo / path).is_file()
+                    or datetime.fromtimestamp((repo / path).stat().st_mtime, timezone.utc)
+                    > confirmed_updated_at
+                    for path in source_paths
+                )
+            except OSError:
+                continue
+            if not edited_after_confirmation:
+                matching_attempts.append(attempt)
+    if len(matching_attempts) != 1:
+        return None
+    _validate_attempt_paths(repo, source_paths)
+    return {
+        "finding_id": finding_id,
+        "patch_attempt": matching_attempts[0],
+        "patch_attempts": matching_attempts,
+        "inspection": inspected,
+        "owned_paths": source_paths,
+    }
+
+
+def _checkpoint_later_applied_attempt(
+    repo: Path,
+    progress_record: dict[str, Any],
+    *,
+    inspected: dict[str, Any],
+    env: dict[str, str] | None = None,
+    progress: Callable[[dict[str, Any]], None] | None = None,
+) -> dict[str, Any] | None:
+    same_finding = _checkpoint_same_finding_later_applied_attempt(
+        repo,
+        progress_record,
+        inspected=inspected,
+    )
+    if same_finding is not None:
+        return same_finding
+    return _checkpoint_cross_finding_applied_attempt(
+        repo,
+        progress_record,
+        env=env,
+        progress=progress,
+    )
 
 
 def _checkpoint_fixed_without_source(
@@ -5074,28 +5258,42 @@ def _release_sweep_locked(
         if (
             durable_progress is not None
             and preexisting_source
-            and durable_progress["head_before"] != head_before
-            and durable_progress.get("owned_source_fingerprint")
-            and not _checkpoint_proves_exact_source(
-                root,
-                durable_progress,
-                preexisting_source,
+            and (
+                sorted(str(path) for path in durable_progress["owned_paths"])
+                != preexisting_source
+                or not durable_progress.get("owned_source_fingerprint")
+                or not _checkpoint_proves_exact_source(
+                    root,
+                    durable_progress,
+                    preexisting_source,
+                )
             )
         ):
-            checkpoint_inspection = _show_finding(
-                root,
-                str(durable_progress["finding_id"]),
-                env=env,
-                required_status=None,
-                progress=progress,
-                current=1,
-                total="?",
-            )
-            later_applied = _checkpoint_later_applied_attempt(
+            later_applied = _checkpoint_cross_finding_applied_attempt(
                 root,
                 durable_progress,
-                inspected=checkpoint_inspection,
+                env=env,
+                progress=progress,
             )
+            if (
+                later_applied is None
+                and durable_progress["head_before"] != head_before
+                and durable_progress.get("owned_source_fingerprint")
+            ):
+                checkpoint_inspection = _show_finding(
+                    root,
+                    str(durable_progress["finding_id"]),
+                    env=env,
+                    required_status=None,
+                    progress=progress,
+                    current=1,
+                    total="?",
+                )
+                later_applied = _checkpoint_same_finding_later_applied_attempt(
+                    root,
+                    durable_progress,
+                    inspected=checkpoint_inspection,
+                )
             if later_applied is not None:
                 recovered_paths = list(later_applied["owned_paths"])
                 recovered_attempt = later_applied["patch_attempt"]
@@ -5107,7 +5305,7 @@ def _release_sweep_locked(
                 )
                 durable_progress = _write_release_progress(
                     root,
-                    finding_id=str(durable_progress["finding_id"]),
+                    finding_id=str(later_applied["finding_id"]),
                     branch=str(durable_progress["branch"]),
                     head_before=head_before,
                     phase="stopped",
@@ -5269,6 +5467,27 @@ def _release_sweep_locked(
                     else:
                         _clear_release_progress(root, state_root=state_root)
                         durable_progress = None
+    if (
+        integration_mode == "external"
+        and durable_progress is not None
+        and preexisting_source
+        and (
+            sorted(str(path) for path in durable_progress["owned_paths"]) != preexisting_source
+            or not durable_progress.get("owned_source_fingerprint")
+            or not _checkpoint_proves_exact_source(root, durable_progress, preexisting_source)
+        )
+    ):
+        if sorted(str(path) for path in durable_progress["owned_paths"]) != preexisting_source:
+            conflict = (
+                "Interrupted Clawpatch release progress no longer owns the exact current "
+                "source paths"
+            )
+        else:
+            conflict = (
+                "Interrupted Clawpatch release progress cannot prove exact checkpoint-owned "
+                "source content"
+            )
+        raise RepositoryBusyError(conflict + "; waiting without discarding them.")
     if durable_progress is not None and _rebuilt_generation_owns_checkpoint_source(
         root, durable_progress
     ):
@@ -5329,14 +5548,16 @@ def _release_sweep_locked(
                 root,
                 durable_progress,
                 inspected=checkpoint_inspection,
+                env=env,
+                progress=progress,
             )
             if later_applied is not None:
                 recovered_paths = list(later_applied["owned_paths"])
                 durable_progress = _write_release_progress(
                     root,
-                    finding_id=str(durable_progress["finding_id"]),
+                    finding_id=str(later_applied["finding_id"]),
                     branch=str(durable_progress["branch"]),
-                    head_before=str(durable_progress["head_before"]),
+                    head_before=_git_text(root, ["git", "rev-parse", "HEAD"]),
                     phase="stopped",
                     owned_paths=recovered_paths,
                     last_action=str(durable_progress.get("last_action", "")),

@@ -213,7 +213,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 
 - **Repository ownership stays clear.** Fresh runs exclude Git submodules and their descendants from ClawPatch review, so the queue repairs code owned by the target repository instead of editing a dependency checkout.
 - **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
-- **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary.
+- **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary. If a stale checkpoint names an older finding, the plain external command may rebind it to exactly one newer applied attempt only when the complete dirty path set, preserved attempt base, attempt time, and an independent `clawpatch show` result all agree. Zero or multiple matches wait without adopting or touching the files.
 - **Stale checkpoint wrappers recover in one command.** If committed work advances HEAD while the only dirty paths still exactly match a modern stopped checkpoint, but their bytes no longer match its fingerprint, the normal command preserves the complete ambiguous tree under a local-only `refs/clawpatch-supervise/recovery/...` ref, writes an external recovery receipt, restores current HEAD, retires only the stale wrapper, and continues the existing ClawPatch queue. It never pushes the recovery ref or absorbs unrelated paths.
 - **Published updates do not strand the next plain run.** When pushing is enabled and the current branch has no source changes, a strictly behind local HEAD is fast-forwarded to the stable live origin commit with local Git hooks disabled. A clean strictly ahead local HEAD is accepted for the authorized push path. Diverged, detached, missing, moving, or source-dirty branches still stop safely.
 - **Empty stop markers do not strand open findings.** If a stopped checkpoint owns no source, has no temporary commit, and ClawPatch still reports the exact finding open at the same HEAD, the supervisor retires only that empty wrapper. `clawpatch next` must return the same finding before its fix is attempted again.
@@ -269,6 +269,13 @@ own finding state. Recovery refs are never included in normal branch pushes.
 Repeated local iterations can create different temporary commit IDs for the same repair. Resume
 accepts an older attempt boundary only when its finding, parent, owned paths, and complete Git tree
 independently match the checkpoint; a merely similar or different repair remains a safety stop.
+
+Manual progress can also supersede a stopped wrapper with a newer finding. The plain external
+command scans recorded patch attempts only to identify candidates, requires exactly one applied
+attempt whose complete file set is the current dirty set and whose base still preserves those
+paths, rejects files edited after that attempt, and then verifies the same record through
+`clawpatch show`. Only that proof can replace the stale finding ID. Ambiguous, unrelated, malformed,
+or unconfirmed state remains untouched while the process waits and retries.
 
 If later committed release work leaves the source tree clean, a verified stopped checkpoint may
 become only a stale recovery wrapper. The supervisor retires that wrapper automatically only when
@@ -408,7 +415,7 @@ The release version is declared once as `clawpatch_supervise.__version__`; setup
 
 ## Project status
 
-Current release: **0.1.28 alpha**.
+Current release: **0.1.29 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

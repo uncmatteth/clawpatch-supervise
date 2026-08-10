@@ -256,7 +256,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         output = StringIO()
         with tempfile.TemporaryDirectory() as temp:
             loop = Path(temp) / "loop"
-            loop.symlink_to(loop)
+            try:
+                loop.symlink_to(loop)
+            except (NotImplementedError, OSError) as exc:
+                self.skipTest(f"file symlinks are unavailable: {exc}")
 
             with redirect_stdout(output):
                 code = main(["doctor", "--repo", str(loop)], heartbeat_seconds=0)
@@ -501,6 +504,9 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             self.assertNotIn(control, rendered)
 
     def test_startup_repository_path_output_escapes_controls(self):
+        if os.name == "nt":
+            self.skipTest("Windows rejects control characters in path components")
+
         @contextmanager
         def fake_provision(_repo: Path, *, progress, temporary_root: Path):
             yield {}
@@ -545,7 +551,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         self.assertEqual(result, 0)
         state_root.assert_called_once_with(repo.expanduser().resolve())
-        self.assertEqual(output.getvalue().strip(), r"/tmp/example-state\nCOMPLETE: forged")
+        self.assertEqual(output.getvalue().strip(), _terminal_safe(expected))
 
     def test_python_validation_environment_lifecycle_is_visible(self):
         self.assertEqual(

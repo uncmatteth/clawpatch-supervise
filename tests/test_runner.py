@@ -186,6 +186,7 @@ class WindowsProcessTreeTerminationTests(unittest.TestCase):
         self.assertTrue(process.killed)
 
 
+@unittest.skipUnless(os.name == "posix", "POSIX process-group behavior")
 class PosixProcessTreeTerminationTests(unittest.TestCase):
     @patch("clawpatch_supervise.runner.os.name", "posix")
     def test_surviving_group_is_killed_when_parent_communicate_completes(self) -> None:

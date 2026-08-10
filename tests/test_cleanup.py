@@ -194,6 +194,14 @@ class CleanupCommandTests(unittest.TestCase):
             outside.mkdir()
             sentinel = outside / "keep.txt"
             sentinel.write_text("outside\n", encoding="utf-8")
+            probe = root / "symlink-probe"
+            try:
+                probe.symlink_to(outside, target_is_directory=True)
+                probe.unlink()
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("directory symlink privilege is unavailable")
+                raise
             self._mark(candidate, pid=999_999_999, created_unix=0)
             original_remove = cleanup_module._remove_exact_owned_run
 
