@@ -87,6 +87,22 @@ def version(value):
 raise SystemExit(version(sys.argv[1]) < version(sys.argv[2]))
 PY
 }
+
+resolve_executable() {
+  local command_path
+  command_path="$(type -P -- "$1" 2>/dev/null)" || return 1
+  "$python_command" - "$command_path" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+path = Path(os.path.abspath(sys.argv[1]))
+if not path.is_file() or not os.access(path, os.X_OK):
+    raise SystemExit(1)
+print(path)
+PY
+}
+
 command -v node >/dev/null 2>&1 || {
   echo "Node.js 22 or newer is required." >&2
   exit 2
@@ -98,9 +114,9 @@ if [[ -z "$node_major" || "$node_major" -lt 22 ]]; then
 fi
 
 managed_clawpatch=false
-if command -v clawpatch >/dev/null 2>&1 && \
-  compatible_clawpatch "$(command -v clawpatch)"; then
-  clawpatch_command="$(command -v clawpatch)"
+if clawpatch_command="$(resolve_executable clawpatch)" && \
+  compatible_clawpatch "$clawpatch_command"; then
+  :
 else
   command -v npm >/dev/null 2>&1 || {
     echo "npm is required to install ClawPatch." >&2

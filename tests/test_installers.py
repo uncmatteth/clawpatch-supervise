@@ -31,6 +31,7 @@ class InstallerContractTests(unittest.TestCase):
         installer_path: Path,
         argv: list[str],
         environment: dict[str, str],
+        cwd: Path | None = None,
         timeout_seconds: float = INSTALLER_TIMEOUT_SECONDS,
     ) -> subprocess.CompletedProcess[str]:
         try:
@@ -38,6 +39,7 @@ class InstallerContractTests(unittest.TestCase):
                 argv,
                 capture_output=True,
                 check=False,
+                cwd=cwd,
                 env=environment,
                 text=True,
                 timeout=timeout_seconds,
@@ -63,6 +65,8 @@ class InstallerContractTests(unittest.TestCase):
         supervisor_move_fails: bool = False,
         node_version: str = "v22.0.0",
         verify_repo: bool = False,
+        relative_path: bool = False,
+        exported_clawpatch_function: bool = False,
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
@@ -193,9 +197,13 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_PAUSE_READY": str(root / "activation-ready"),
                 "CLAWPATCH_TEST_PAUSE_RELEASE": str(root / "activation-release"),
                 "CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE": "false",
-                "PATH": str(fake_bin),
+                "PATH": fake_bin.name if relative_path else str(fake_bin),
             }
         )
+        if exported_clawpatch_function:
+            environment["BASH_FUNC_clawpatch%%"] = (
+                "() {  printf '%s\\n' \"$CLAWPATCH_TEST_CLAWPATCH_VERSION\"\n}"
+            )
         environment.pop("CLAWPATCH_SUPERVISE_SHA256", None)
         if source_sha256 is not None:
             environment["CLAWPATCH_SUPERVISE_SHA256"] = source_sha256
@@ -208,6 +216,7 @@ class InstallerContractTests(unittest.TestCase):
                 installer_path=installer_path,
                 argv=[str(installer_path)],
                 environment=environment,
+                cwd=root if relative_path else None,
             )
         else:
             result = process_runner(installer_path, environment)
@@ -470,6 +479,36 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(invocations, [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_exported_clawpatch_function(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+            npm_mode="missing",
+            exported_clawpatch_function=True,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("npm is required to install ClawPatch.", result.stderr)
+        self.assertEqual(invocations, [])
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_canonicalizes_clawpatch_from_relative_path(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="missing",
+            relative_path=True,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(invocations, [])
+        wrapper = install_root.parent / "installed-bin" / "clawpatch-supervise"
+        wrapper_text = wrapper.read_text(encoding="utf-8")
+        self.assertIn(str(install_root.parent / "bin"), wrapper_text)
+        self.assertNotIn("export PATH=bin:", wrapper_text)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_isolates_mismatched_clawpatch_version(self) -> None:
