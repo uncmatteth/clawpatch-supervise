@@ -313,27 +313,39 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                     self.assertNotIn(control, rendered)
 
     def test_heartbeat_rendering_escapes_controls(self):
-        lines = _heartbeat_lines(
-            {
-                "phase": "review\nCOMPLETE: forged",
-                "current": 1,
-                "total": 2,
-                "attempt": "1\r",
-                "max_attempts": "2\t",
-                "finding_id": "fnd\x1b[2J",
-                "command": "clawpatch review\x9b31m\x07",
-                "changed": 100,
-            },
-            watchdog_seconds=900,
-            now=105,
-        )
-        rendered = "\n".join(lines)
+        attack = "value\nforged\r\t\x1b[2J\x1b]0;spoofed\x07\x9b31m"
+        escaped_attack = r"value\nforged\r\t\x1b[2J\x1b]0;spoofed\x07\x9b31m"
+        snapshot = {
+            "phase": "review",
+            "current": 1,
+            "total": 2,
+            "attempt": 1,
+            "max_attempts": 2,
+            "finding_id": "fnd_example",
+            "command": "clawpatch review",
+            "changed": 100,
+        }
 
-        self.assertIn(r"review\nCOMPLETE: forged attempt 1\r/2\t fnd\x1b[2J", rendered)
-        self.assertIn(r"$ clawpatch review\x9b31m\x07", rendered)
-        self.assertNotIn("\nCOMPLETE: forged", rendered)
-        for control in ("\x07", "\r", "\t", "\x1b", "\x9b"):
-            self.assertNotIn(control, rendered)
+        for field in (
+            "phase",
+            "current",
+            "total",
+            "attempt",
+            "max_attempts",
+            "finding_id",
+            "command",
+        ):
+            with self.subTest(field=field):
+                lines = _heartbeat_lines(
+                    {**snapshot, field: attack},
+                    watchdog_seconds=900,
+                    now=105,
+                )
+                rendered = "\n".join(lines)
+
+                self.assertIn(escaped_attack, rendered)
+                for control in ("\nforged", "\x07", "\r", "\t", "\x1b", "\x9b"):
+                    self.assertNotIn(control, rendered)
 
     def test_cleanup_path_output_escapes_controls(self):
         output = StringIO()
