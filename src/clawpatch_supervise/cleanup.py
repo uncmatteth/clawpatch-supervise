@@ -190,7 +190,11 @@ def _lsof_path_has_live_reference(candidate: Path) -> bool | None:
         return None
     if any(line[1:].isdigit() for line in result.stdout.splitlines() if line.startswith("p")):
         return True
-    if result.returncode == 1 and not result.stdout.strip() and not result.stderr.strip():
+    # lsof uses status 1 for "no matching open files".  It may still emit
+    # unrelated mount warnings on stderr (for example, inaccessible Docker
+    # namespaces); those warnings do not turn an empty candidate result into
+    # an inconclusive probe.
+    if result.returncode == 1 and not result.stdout.strip():
         return False
     return None
 
@@ -228,7 +232,9 @@ def _path_has_live_reference(candidate: Path) -> bool | None:
                 continue
             if target == candidate_text or target.startswith(prefix):
                 return True
-    return None if inspection_inconclusive else False
+    if inspection_inconclusive:
+        return _lsof_path_has_live_reference(candidate)
+    return False
 
 
 def _owned_marker(candidate: Path) -> dict[str, object] | None:

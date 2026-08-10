@@ -347,6 +347,21 @@ class CleanupCommandTests(unittest.TestCase):
                 child.wait(timeout=5)
 
     @unittest.skipUnless(os.name == "posix", "POSIX lsof fallback")
+    def test_lsof_no_match_ignores_unrelated_mount_warnings(self) -> None:
+        result = subprocess.CompletedProcess(
+            args=["lsof"],
+            returncode=1,
+            stdout="",
+            stderr="lsof: WARNING: can't stat() an unrelated mount\n",
+        )
+
+        with (
+            patch("clawpatch_supervise.cleanup.shutil.which", return_value="/usr/bin/lsof"),
+            patch("clawpatch_supervise.cleanup.subprocess.run", return_value=result),
+        ):
+            self.assertFalse(cleanup_module._lsof_path_has_live_reference(Path("/candidate")))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX lsof fallback")
     def test_cleanup_without_proc_preserves_directory_referenced_by_live_process(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
@@ -430,6 +445,10 @@ class CleanupCommandTests(unittest.TestCase):
                 patch("clawpatch_supervise.cleanup._PROC_ROOT", proc_root),
                 patch.object(Path, "iterdir", autospec=True, side_effect=inspect_directory),
                 patch.object(Path, "resolve", autospec=True, side_effect=resolve_link),
+                patch(
+                    "clawpatch_supervise.cleanup._lsof_path_has_live_reference",
+                    return_value=None,
+                ) as lsof_probe,
                 patch("clawpatch_supervise.cleanup.shutil.rmtree") as remove_tree,
             ):
                 report = cleanup_owned_runs(
@@ -441,6 +460,7 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertTrue(candidate.is_dir())
             self.assertEqual([entry.status for entry in report.entries], ["UNSAFE"])
             self.assertEqual(report.removed, 0)
+            lsof_probe.assert_called_once_with(candidate)
             remove_tree.assert_not_called()
 
     def test_cleanup_refuses_symlinked_root_without_touching_target(self) -> None:
