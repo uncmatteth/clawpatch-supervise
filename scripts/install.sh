@@ -79,12 +79,25 @@ import re
 import sys
 
 def version(value):
-    match = re.search(r"(\d+)\.(\d+)\.(\d+)", value)
+    match = re.search(
+        r"(?<![0-9A-Za-z.-])"
+        r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
+        r"(-(?:0|[1-9]\d*|[A-Za-z-][0-9A-Za-z-]*)"
+        r"(?:\.(?:0|[1-9]\d*|[A-Za-z-][0-9A-Za-z-]*))*)?"
+        r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
+        r"(?![0-9A-Za-z.-])",
+        value,
+    )
     if not match:
         raise SystemExit(1)
-    return tuple(map(int, match.groups()))
+    return tuple(map(int, match.groups()[:3])), match.group(4) is not None
 
-raise SystemExit(version(sys.argv[1]) < version(sys.argv[2]))
+actual, actual_is_prerelease = version(sys.argv[1])
+minimum, minimum_is_prerelease = version(sys.argv[2])
+raise SystemExit(
+    actual < minimum
+    or (actual == minimum and actual_is_prerelease and not minimum_is_prerelease)
+)
 PY
 }
 
