@@ -159,6 +159,18 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(json.loads(output.getvalue()), report)
         doctor.assert_called_once_with(Path(".").resolve())
 
+    def test_doctor_reports_repository_resolution_failure(self):
+        output = StringIO()
+        with tempfile.TemporaryDirectory() as temp:
+            loop = Path(temp) / "loop"
+            loop.symlink_to(loop)
+
+            with redirect_stdout(output):
+                code = main(["doctor", "--repo", str(loop)], heartbeat_seconds=0)
+
+        self.assertEqual(code, 2)
+        self.assertIn("NOT READY: Could not resolve repository path", output.getvalue())
+
     def test_same_finding_continuation_says_the_repair_is_still_broken(self):
         self.assertEqual(
             _render_event(

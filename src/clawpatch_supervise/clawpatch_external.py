@@ -388,7 +388,12 @@ def main(
         doctor_parser.add_argument("--repo", default=".")
         doctor_args = doctor_parser.parse_args(raw_argv[1:])
         try:
-            report, _env_overrides = runtime_doctor(Path(doctor_args.repo).resolve())
+            repo = Path(doctor_args.repo).resolve()
+        except (OSError, RuntimeError) as exc:
+            print(f"NOT READY: Could not resolve repository path {doctor_args.repo!r}: {exc}")
+            return 2
+        try:
+            report, _env_overrides = runtime_doctor(repo)
         except SafetyError as exc:
             print(f"NOT READY: {exc}")
             return 2
