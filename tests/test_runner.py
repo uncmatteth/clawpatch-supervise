@@ -21,28 +21,17 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
             "AWS_SECRET_ACCESS_KEY": "aws-secret",
             "NPM_TOKEN": "registry-secret",
             "SSH_AUTH_SOCK": "/tmp/host-agent.sock",
+            "CLAWPATCH_TEST_AMBIENT_SENTINEL": "must-not-be-inherited",
         },
     )
     def test_process_group_uses_exact_sanitized_release_environment(self) -> None:
         child_env = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
-        credential_names = (
-            "DATABASE_URL",
-            "BTT_ALLOW_DATABASE_RESET",
-            "GITHUB_TOKEN",
-            "AWS_SECRET_ACCESS_KEY",
-            "NPM_TOKEN",
-            "SSH_AUTH_SOCK",
-        )
 
         result = CommandRunner().run(
             [
                 sys.executable,
                 "-c",
-                (
-                    "import json, os; "
-                    "names = json.loads(" + repr(json.dumps(credential_names)) + "); "
-                    "print(json.dumps(sorted(name for name in names if name in os.environ)))"
-                ),
+                "import json, os; print(json.dumps(dict(os.environ), sort_keys=True))",
             ],
             cwd=Path.cwd(),
             timeout_seconds=30,
@@ -51,7 +40,8 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
         )
 
         self.assertEqual(result.exit_code, 0, result.stderr)
-        self.assertEqual(json.loads(result.stdout), [])
+        self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", child_env)
+        self.assertEqual(json.loads(result.stdout), child_env)
 
 
 class CommandRunnerLoggingTests(unittest.TestCase):
