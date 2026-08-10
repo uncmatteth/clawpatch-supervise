@@ -446,8 +446,8 @@ def main(
     args = parser.parse_args(raw_argv)
     if args.timeout_minutes < 1:
         parser.error("--timeout-minutes must be at least 1")
-    if not math.isfinite(args.retry_seconds) or args.retry_seconds < 0:
-        parser.error("--retry-seconds must be a finite non-negative number")
+    if not math.isfinite(args.retry_seconds) or args.retry_seconds <= 0:
+        parser.error("--retry-seconds must be a finite positive number")
     try:
         repo = Path(args.repo).resolve()
     except (OSError, RuntimeError) as exc:
@@ -523,8 +523,7 @@ def main(
                     f"checking again in {args.retry_seconds:g}s.\n{exc}",
                     flush=True,
                 )
-                if args.retry_seconds:
-                    time.sleep(args.retry_seconds)
+                time.sleep(args.retry_seconds)
         resolved_fresh = _resolve_fresh_mode(repo, args.fresh, progress=display)
         def report_blocked_cleanup(path: Path, _error: OSError) -> None:
             print(
@@ -598,8 +597,7 @@ def main(
                         flush=True,
                     )
                 resolved_fresh = False
-                if args.retry_seconds:
-                    time.sleep(args.retry_seconds)
+                time.sleep(args.retry_seconds)
     except ClawpatchStop as exc:
         print("\n🛑💥🤬 FUCK. SUPERVISOR STOPPED SAFELY.", flush=True)
         print(f"\nSTOPPED: {exc}", flush=True)

@@ -363,7 +363,7 @@ ClawPatch owns the findings and repairs. The supervisor owns the reliable journe
 --fresh                     explicitly reset only clean project source and rebuild the queue
 --resume-stopped            resume existing state or one exact stopped checkpoint
 --timeout-minutes N         watchdog for each ClawPatch child; default 15
---retry-seconds N           wait before an automatic transient/busy retry; default 30
+--retry-seconds N           positive wait before an automatic transient/busy retry; default 30
 --print-state-path          print the external checkpoint/proof directory and exit
 --publish-clawpatch-state   explicitly commit safe generated ClawPatch state
 ```

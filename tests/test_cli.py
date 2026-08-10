@@ -101,11 +101,11 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, 0)
         self.assertEqual(output.getvalue().strip(), f"clawpatch-supervise {__version__}")
 
-    def test_plain_command_rejects_non_finite_retry_delays(self):
+    def test_plain_command_rejects_non_positive_or_non_finite_retry_delays(self):
         def unexpected_preflight(_repo: Path):
             raise AssertionError("preflight must not run for an invalid retry delay")
 
-        for value in ("nan", "inf"):
+        for value in ("-1", "0", "nan", "inf"):
             with self.subTest(value=value):
                 error = StringIO()
                 with self.assertRaises(SystemExit) as raised, redirect_stderr(error):
@@ -116,7 +116,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
                 self.assertEqual(raised.exception.code, 2)
                 self.assertIn(
-                    "--retry-seconds must be a finite non-negative number",
+                    "--retry-seconds must be a finite positive number",
                     error.getvalue(),
                 )
 
@@ -762,7 +762,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             redirect_stdout(output),
         ):
             code = main(
-                ["--repo", ".", "--retry-seconds", "0"],
+                ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=fake_sweep,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
@@ -792,7 +792,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             redirect_stdout(StringIO()) as output,
         ):
             code = main(
-                ["--repo", ".", "--retry-seconds", "0"],
+                ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=lambda _repo, **_kwargs: {
                     "ok": True,
                     "finding_count": 0,
@@ -827,7 +827,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             redirect_stdout(StringIO()) as output,
         ):
             code = main(
-                ["--repo", ".", "--retry-seconds", "0"],
+                ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=fake_sweep,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
