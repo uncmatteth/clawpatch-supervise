@@ -80,12 +80,22 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         os.environ,
         {
             "DATABASE_URL": "postgresql://production.invalid/live",
+            "BTT_ALLOW_DATABASE_RESET": "ambient-reset-enabled",
             "GITHUB_TOKEN": "github-secret",
+            "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "NPM_TOKEN": "registry-secret",
+            "SSH_AUTH_SOCK": "/tmp/host-agent.sock",
             "CLAWPATCH_TEST_AMBIENT_SENTINEL": "must-not-be-inherited",
         },
     )
     def test_state_query_uses_exact_sanitized_release_environment(self):
-        expected = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
+        validation_overrides = {
+            "CLAWPATCH_TEST_VALIDATION_OVERRIDE": "owned-validation-override"
+        }
+        expected = _release_clawpatch_env(
+            trusted_host_codex_sandbox_bypass=False,
+            child_env_overrides=validation_overrides,
+        )
 
         result = _run_state_query(
             Path.cwd(),
@@ -94,9 +104,29 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 "-c",
                 "import json, os; print(json.dumps(dict(os.environ), sort_keys=True))",
             ],
+            preflight_env_overrides=validation_overrides,
         )
 
+        sensitive_environment = {
+            "DATABASE_URL": "postgresql://production.invalid/live",
+            "BTT_ALLOW_DATABASE_RESET": "ambient-reset-enabled",
+            "GITHUB_TOKEN": "github-secret",
+            "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "NPM_TOKEN": "registry-secret",
+            "SSH_AUTH_SOCK": "/tmp/host-agent.sock",
+        }
+        for name, value in sensitive_environment.items():
+            self.assertNotIn(name, expected)
+            self.assertNotIn(name, result)
+            self.assertNotIn(value, json.dumps(expected))
+            self.assertNotIn(value, json.dumps(result))
         self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", expected)
+        self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", result)
+        self.assertEqual(
+            result["CLAWPATCH_TEST_VALIDATION_OVERRIDE"],
+            "owned-validation-override",
+        )
+        self.assertEqual(result.get("PATH"), os.environ.get("PATH"))
         self.assertEqual(result, expected)
 
     def test_state_query_failure_reports_bounded_stdout_and_stderr(self):

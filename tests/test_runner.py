@@ -18,7 +18,7 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
         os.environ,
         {
             "DATABASE_URL": "postgresql://production.invalid/live",
-            "BTT_ALLOW_DATABASE_RESET": "true",
+            "BTT_ALLOW_DATABASE_RESET": "ambient-reset-enabled",
             "GITHUB_TOKEN": "github-secret",
             "AWS_SECRET_ACCESS_KEY": "aws-secret",
             "NPM_TOKEN": "registry-secret",
@@ -27,7 +27,12 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
         },
     )
     def test_process_group_uses_exact_sanitized_release_environment(self) -> None:
-        child_env = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
+        child_env = _release_clawpatch_env(
+            trusted_host_codex_sandbox_bypass=False,
+            child_env_overrides={
+                "CLAWPATCH_TEST_VALIDATION_OVERRIDE": "owned-validation-override"
+            },
+        )
 
         result = CommandRunner().run(
             [
@@ -42,8 +47,28 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
         )
 
         self.assertEqual(result.exit_code, 0, result.stderr)
+        observed_env = json.loads(result.stdout)
+        sensitive_environment = {
+            "DATABASE_URL": "postgresql://production.invalid/live",
+            "BTT_ALLOW_DATABASE_RESET": "ambient-reset-enabled",
+            "GITHUB_TOKEN": "github-secret",
+            "AWS_SECRET_ACCESS_KEY": "aws-secret",
+            "NPM_TOKEN": "registry-secret",
+            "SSH_AUTH_SOCK": "/tmp/host-agent.sock",
+        }
+        for name, value in sensitive_environment.items():
+            self.assertNotIn(name, child_env)
+            self.assertNotIn(name, observed_env)
+            self.assertNotIn(value, json.dumps(child_env))
+            self.assertNotIn(value, result.stdout)
         self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", child_env)
-        self.assertEqual(json.loads(result.stdout), child_env)
+        self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", observed_env)
+        self.assertEqual(
+            observed_env["CLAWPATCH_TEST_VALIDATION_OVERRIDE"],
+            "owned-validation-override",
+        )
+        self.assertEqual(observed_env.get("PATH"), os.environ.get("PATH"))
+        self.assertEqual(observed_env, child_env)
 
 
 class CommandRunnerLoggingTests(unittest.TestCase):
