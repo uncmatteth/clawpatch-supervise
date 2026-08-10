@@ -151,6 +151,79 @@ class CleanupCommandTests(unittest.TestCase):
                 {"run-blocked": "BLOCKED", "run-removable": "STALE"},
             )
 
+    def test_cleanup_apply_refuses_unowned_directory_replaced_after_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-replaced"
+            original = cleanup_root / "run-original"
+            self._mark(candidate, pid=999_999_999, created_unix=0)
+            original_remove = cleanup_module._remove_exact_owned_run
+
+            def replace_then_remove(path: Path, root: Path) -> None:
+                path.rename(original)
+                path.mkdir()
+                (path / "keep.txt").write_text("replacement\n", encoding="utf-8")
+                original_remove(path, root)
+
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup._remove_exact_owned_run",
+                    side_effect=replace_then_remove,
+                ),
+                self.assertRaisesRegex(SafetyError, "failed its ownership check"),
+            ):
+                cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+            self.assertEqual(
+                (candidate / "keep.txt").read_text(encoding="utf-8"),
+                "replacement\n",
+            )
+            self.assertTrue(original.is_dir())
+
+    def test_cleanup_apply_refuses_symlink_replaced_after_classification(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-replaced"
+            original = cleanup_root / "run-original"
+            outside = root / "outside"
+            outside.mkdir()
+            sentinel = outside / "keep.txt"
+            sentinel.write_text("outside\n", encoding="utf-8")
+            self._mark(candidate, pid=999_999_999, created_unix=0)
+            original_remove = cleanup_module._remove_exact_owned_run
+
+            def replace_then_remove(path: Path, cleanup_path: Path) -> None:
+                path.rename(original)
+                path.symlink_to(outside, target_is_directory=True)
+                original_remove(path, cleanup_path)
+
+            try:
+                with (
+                    patch(
+                        "clawpatch_supervise.cleanup._remove_exact_owned_run",
+                        side_effect=replace_then_remove,
+                    ),
+                    self.assertRaisesRegex(SafetyError, "no longer a safe directory"),
+                ):
+                    cleanup_owned_runs(
+                        apply=True,
+                        root=cleanup_root,
+                        stale_after_seconds=0,
+                    )
+            except OSError as exc:
+                if getattr(exc, "winerror", None) == 1314:
+                    self.skipTest("directory symlink privilege is unavailable")
+                raise
+
+            self.assertTrue(candidate.is_symlink())
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "outside\n")
+            self.assertTrue(original.is_dir())
+
     def test_supervisor_run_routes_temporary_files_into_owned_directory_then_removes_it(
         self,
     ) -> None:
