@@ -28,6 +28,7 @@ from .clawpatch_release import (
 from .cleanup import cleanup_owned_runs, owned_run_directory
 from .errors import RepositoryBusyError, SafetyError
 from .runner import CommandRunner
+from .util import redact_text
 from .validation_services import provision_disposable_validation_environment
 
 
@@ -53,10 +54,12 @@ def _run_state_query(
         kill_process_group=True,
     )
     if result.exit_code != 0:
+        stdout = redact_text(result.stdout)[-4000:]
+        stderr = redact_text(result.stderr)[-4000:]
         raise SafetyError(
             "Could not prove whether existing ClawPatch state is clean; preserving it.\n"
-            f"stdout:\n{result.stdout[-4000:]}\n"
-            f"stderr:\n{result.stderr[-4000:]}"
+            f"stdout:\n{stdout}\n"
+            f"stderr:\n{stderr}"
         )
     return _parse_json_output(result.stdout, command=" ".join(argv[1:]))
 

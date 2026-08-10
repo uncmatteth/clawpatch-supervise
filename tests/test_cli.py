@@ -153,6 +153,39 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertNotIn("discarded stdout", message)
         self.assertNotIn("discarded stderr", message)
 
+    def test_state_query_failure_redacts_bounded_stdout_and_stderr(self):
+        repo = Path("/tmp/example-repository")
+        argv = ["clawpatch", "status", "--json"]
+        completed = SimpleNamespace(
+            exit_code=2,
+            stdout=("o" * 8000) + "\ntoken=stdout-secret",
+            stderr=(
+                ("e" * 8000)
+                + "\nAuthorization: Bearer bearer-secret"
+                + "\npassword=stderr-secret"
+            ),
+        )
+
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external.CommandRunner.run",
+                return_value=completed,
+            ),
+            self.assertRaises(SafetyError) as raised,
+        ):
+            _run_state_query(repo, argv)
+
+        message = str(raised.exception)
+        stdout_diagnostic, stderr_diagnostic = message.split("\nstderr:\n", 1)
+        stdout_diagnostic = stdout_diagnostic.split("\nstdout:\n", 1)[1]
+        self.assertLessEqual(len(stdout_diagnostic), 4000)
+        self.assertLessEqual(len(stderr_diagnostic), 4000)
+        self.assertIn("token=<REDACTED>", stdout_diagnostic)
+        self.assertIn("Authorization: Bearer <REDACTED>", stderr_diagnostic)
+        self.assertIn("password=<REDACTED>", stderr_diagnostic)
+        for secret in ("stdout-secret", "bearer-secret", "stderr-secret"):
+            self.assertNotIn(secret, message)
+
     def test_version_is_available_without_running_clawpatch(self):
         output = StringIO()
         with self.assertRaises(SystemExit) as raised, redirect_stdout(output):
