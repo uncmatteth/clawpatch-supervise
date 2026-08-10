@@ -281,6 +281,32 @@ if supervisor is not None and supervisor.name == "clawpatch-supervise":
         print(candidate)
 PY
 )"
+superseded_clawpatch_root=""
+if [[ "$managed_clawpatch" == true ]]; then
+  superseded_clawpatch_root="$("$python_command" - "$clawpatch_destination" "$install_root" <<'PY'
+import os
+import sys
+from pathlib import Path
+
+command = Path(sys.argv[1])
+install_root = Path(sys.argv[2]).resolve()
+if command.is_symlink():
+    clawpatch = Path(os.readlink(command))
+    if not clawpatch.is_absolute():
+        clawpatch = command.parent / clawpatch
+    clawpatch = Path(os.path.abspath(clawpatch))
+    candidate = clawpatch.parent.parent.parent
+    if (
+        candidate.name.startswith("clawpatch.")
+        and not candidate.is_symlink()
+        and candidate.is_dir()
+        and candidate.parent.resolve() == install_root
+        and clawpatch == candidate / "node_modules" / ".bin" / "clawpatch"
+    ):
+        print(candidate)
+PY
+)"
+fi
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
 clawpatch_dir="${clawpatch_command%/*}"
 "$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$bin_dir" "$clawpatch_dir" <<'PY'
@@ -354,9 +380,13 @@ PY
 }
 pending_supervisor_link=""
 activation_complete=true
+activated_clawpatch_root="$staging_clawpatch_root"
 staging_venv=""
 staging_clawpatch_root=""
 if [[ -n "$superseded_venv" && "$superseded_venv" != "$activated_venv" ]]; then
   rm -rf -- "$superseded_venv"
+fi
+if [[ -n "$superseded_clawpatch_root" && "$superseded_clawpatch_root" != "$activated_clawpatch_root" ]]; then
+  rm -rf -- "$superseded_clawpatch_root"
 fi
 echo "Installed command: $supervisor_destination"

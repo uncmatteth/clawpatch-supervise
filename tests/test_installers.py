@@ -1051,6 +1051,44 @@ class InstallerContractTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_removes_superseded_managed_clawpatch_root(self) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "install"
+        previous_root = install_root / "clawpatch.previous"
+        previous_package_command = (
+            previous_root / "node_modules" / "clawpatch" / "bin" / "clawpatch"
+        )
+        previous_package_command.parent.mkdir(parents=True)
+        self._write_executable(
+            previous_package_command, "#!/bin/sh\nprintf '0.7.1\\n'\n"
+        )
+        previous_clawpatch = previous_root / "node_modules" / ".bin" / "clawpatch"
+        previous_clawpatch.parent.mkdir()
+        previous_clawpatch.symlink_to(Path("../clawpatch/bin/clawpatch"))
+        unrelated_directory = install_root / "unrelated"
+        unrelated_directory.mkdir()
+        installed_clawpatch = root / "installed-bin" / "clawpatch"
+        installed_clawpatch.parent.mkdir()
+        installed_clawpatch.symlink_to(previous_clawpatch)
+
+        result, invocations, actual_install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            clawpatch_command=previous_clawpatch,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(actual_install_root, install_root)
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
+        self.assertFalse(previous_root.exists())
+        self.assertTrue(staged_root.exists())
+        self.assertTrue(unrelated_directory.exists())
+        self.assertEqual(
+            installed_clawpatch.resolve(),
+            (staged_root / "node_modules" / ".bin" / "clawpatch").resolve(),
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_preserves_superseded_environment_outside_install_root(
         self,
     ) -> None:
