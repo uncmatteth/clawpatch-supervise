@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import os
 import json
+import os
+import sys
 import tempfile
 import tomllib
 import unittest
@@ -19,7 +20,11 @@ from clawpatch_supervise.clawpatch_external import (
     main,
 )
 from clawpatch_supervise.clawpatch_protocol import RepairAction, classify_clawpatch_failure
-from clawpatch_supervise.clawpatch_release import ClawpatchCommandFailure, ClawpatchStop
+from clawpatch_supervise.clawpatch_release import (
+    ClawpatchCommandFailure,
+    ClawpatchStop,
+    _release_clawpatch_env,
+)
 from clawpatch_supervise.errors import RepositoryBusyError, SafetyError
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -66,8 +71,32 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             argv,
             cwd=repo,
             timeout_seconds=120,
+            env=_release_clawpatch_env(trusted_host_codex_sandbox_bypass=False),
             kill_process_group=True,
         )
+
+    @patch.dict(
+        os.environ,
+        {
+            "DATABASE_URL": "postgresql://production.invalid/live",
+            "GITHUB_TOKEN": "github-secret",
+            "CLAWPATCH_TEST_AMBIENT_SENTINEL": "must-not-be-inherited",
+        },
+    )
+    def test_state_query_uses_exact_sanitized_release_environment(self):
+        expected = _release_clawpatch_env(trusted_host_codex_sandbox_bypass=False)
+
+        result = _run_state_query(
+            Path.cwd(),
+            [
+                sys.executable,
+                "-c",
+                "import json, os; print(json.dumps(dict(os.environ), sort_keys=True))",
+            ],
+        )
+
+        self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", expected)
+        self.assertEqual(result, expected)
 
     def test_state_query_failure_reports_bounded_stdout_and_stderr(self):
         repo = Path("/tmp/example-repository")

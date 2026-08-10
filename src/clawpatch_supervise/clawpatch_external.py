@@ -17,6 +17,7 @@ from .clawpatch_release import (
     ClawpatchCommandFailure,
     ClawpatchStop,
     _parse_json_output,
+    _release_clawpatch_env,
     _source_paths,
     external_state_root,
     release_sweep,
@@ -39,6 +40,7 @@ def _run_state_query(repo: Path, argv: list[str]) -> dict[str, Any]:
         argv,
         cwd=repo,
         timeout_seconds=120,
+        env=_release_clawpatch_env(trusted_host_codex_sandbox_bypass=False),
         kill_process_group=True,
     )
     if result.exit_code != 0:
