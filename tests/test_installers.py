@@ -200,7 +200,7 @@ class InstallerContractTests(unittest.TestCase):
     ) -> Path:
         self.assertEqual(len(invocations), 1)
         prefix = "install --prefix "
-        suffix = " --no-fund --no-audit clawpatch@latest"
+        suffix = f" --no-fund --no-audit clawpatch@{CLAWPATCH_VERSION}"
         self.assertTrue(invocations[0].startswith(prefix), invocations)
         self.assertTrue(invocations[0].endswith(suffix), invocations)
         staged_root = Path(invocations[0][len(prefix) : -len(suffix)])
@@ -294,9 +294,9 @@ class InstallerContractTests(unittest.TestCase):
                 "@echo off\n"
                 'echo %*>>"%CLAWPATCH_TEST_LOG%"\n'
                 'if /I "%CLAWPATCH_TEST_NPM_MODE%"=="fail-clawpatch" '
-                'if /I "%1"=="install" if /I "%~6"=="clawpatch@latest" exit /b 23\n'
+                f'if /I "%1"=="install" if /I "%~6"=="clawpatch@{CLAWPATCH_VERSION}" exit /b 23\n'
                 'if /I "%1"=="install" if /I "%2"=="--prefix" '
-                'if /I "%~6"=="clawpatch@latest" (\n'
+                f'if /I "%~6"=="clawpatch@{CLAWPATCH_VERSION}" (\n'
                 '  mkdir "%~3\\node_modules\\.bin"\n'
                 '  copy /Y "%CLAWPATCH_TEST_INSTALLED_COMMAND_STUB%" '
                 '"%~3\\node_modules\\.bin\\clawpatch.cmd" >nul\n'
@@ -843,6 +843,12 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertIn(f"CLAWPATCH_SUPERVISE_VERSION:-{__version__}", linux)
         self.assertIn(f'[string]$Version = "{__version__}"', windows)
+        self.assertIn(f'readonly release_clawpatch_version="{CLAWPATCH_VERSION}"', linux)
+        self.assertIn('"clawpatch@$release_clawpatch_version"', linux)
+        self.assertIn(f'"clawpatch@$ReleaseClawPatchVersion"', windows)
+        self.assertIn(f'$ReleaseClawPatchVersion = "{CLAWPATCH_VERSION}"', windows)
+        self.assertNotIn("clawpatch@latest", linux)
+        self.assertNotIn("clawpatch@latest", windows)
         self.assertIn("& $wrapper doctor --repo", windows)
         self.assertNotIn("& $supervisor doctor --repo", windows)
 
@@ -934,7 +940,7 @@ class InstallerContractTests(unittest.TestCase):
             invocations,
             [
                 f"install --prefix {install_root / 'clawpatch'} --no-fund "
-                "--no-audit clawpatch@latest"
+                f"--no-audit clawpatch@{CLAWPATCH_VERSION}"
             ],
         )
 
@@ -997,7 +1003,7 @@ class InstallerContractTests(unittest.TestCase):
             [
                 (
                     f"install --prefix {install_root / 'clawpatch'} --no-fund "
-                    "--no-audit clawpatch@latest"
+                    f"--no-audit clawpatch@{CLAWPATCH_VERSION}"
                 ),
             ],
         )
@@ -1040,7 +1046,7 @@ class InstallerContractTests(unittest.TestCase):
             invocations,
             [
                 f"install --prefix {_install_root / 'clawpatch'} --no-fund "
-                "--no-audit clawpatch@latest"
+                f"--no-audit clawpatch@{CLAWPATCH_VERSION}"
             ],
         )
 

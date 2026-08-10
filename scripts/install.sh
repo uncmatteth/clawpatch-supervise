@@ -8,6 +8,7 @@ bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 verify_repo="${CLAWPATCH_SUPERVISE_VERIFY_REPO:-}"
 readonly minimum_clawpatch_version="0.7.2"
+readonly release_clawpatch_version="0.7.2"
 readonly release_sha256_0_1_28="150773b2714f84f30638fca7ab1896ae1b14042f0d4ef2d9c3cab9fc0acfa5d5"
 download_root=""
 staging_venv=""
@@ -75,7 +76,8 @@ else
   }
   mkdir -p "$install_root"
   staging_clawpatch_root="$(mktemp -d "$install_root/clawpatch.XXXXXX")"
-  npm install --prefix "$staging_clawpatch_root" --no-fund --no-audit "clawpatch@latest"
+  npm install --prefix "$staging_clawpatch_root" --no-fund --no-audit \
+    "clawpatch@$release_clawpatch_version"
   clawpatch_command="$staging_clawpatch_root/node_modules/.bin/clawpatch"
   test -x "$clawpatch_command" || {
     echo "ClawPatch installation did not create its command." >&2

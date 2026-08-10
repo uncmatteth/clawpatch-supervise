@@ -11,6 +11,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $MinimumClawPatchVersion = [version]"0.7.2"
+$ReleaseClawPatchVersion = "0.7.2"
 $ReleaseSha256_0_1_28 = "150773b2714f84f30638fca7ab1896ae1b14042f0d4ef2d9c3cab9fc0acfa5d5"
 function Find-PathApplication {
     param([string[]]$Names)
@@ -118,7 +119,7 @@ if ($null -ne $clawpatch -and (Test-CompatibleClawPatch $clawpatch @("--version"
 
 if ($null -eq $clawpatch) {
     $clawpatchRoot = Join-Path $InstallRoot "clawpatch"
-    & $npmPath install --prefix $clawpatchRoot --no-fund --no-audit "clawpatch@latest"
+    & $npmPath install --prefix $clawpatchRoot --no-fund --no-audit "clawpatch@$ReleaseClawPatchVersion"
     if ($LASTEXITCODE -ne 0) {
         throw "npm could not install ClawPatch."
     }
