@@ -6,6 +6,7 @@ import math
 import sys
 import threading
 import time
+import unicodedata
 from contextlib import AbstractContextManager
 from pathlib import Path
 from typing import Any, Callable
@@ -125,6 +126,10 @@ def _terminal_safe(value: Any) -> str:
             escaped.append(r"\t")
         elif codepoint < 0x20 or 0x7F <= codepoint <= 0x9F:
             escaped.append(f"\\x{codepoint:02x}")
+        elif unicodedata.category(character) == "Cf":
+            width = 4 if codepoint <= 0xFFFF else 8
+            prefix = "u" if width == 4 else "U"
+            escaped.append(f"\\{prefix}{codepoint:0{width}x}")
         else:
             escaped.append(character)
     return "".join(escaped)

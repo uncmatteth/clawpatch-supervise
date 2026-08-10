@@ -17,6 +17,7 @@ from clawpatch_supervise.clawpatch_external import (
     _heartbeat_lines,
     _render_event,
     _run_state_query,
+    _terminal_safe,
     main,
 )
 from clawpatch_supervise.clawpatch_protocol import RepairAction, classify_clawpatch_failure
@@ -299,6 +300,35 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertNotIn("\nSTOPPED: forged", rendered)
         for control in ("\x07", "\r", "\x1b", "\x9b"):
             self.assertNotIn(control, rendered)
+
+    def test_terminal_safe_escapes_unicode_format_controls(self):
+        bidi_controls = "".join(chr(codepoint) for codepoint in range(0x202A, 0x202F))
+        bidi_controls += "".join(chr(codepoint) for codepoint in range(0x2066, 0x206A))
+
+        self.assertEqual(
+            _terminal_safe(f"café 猫 {bidi_controls}\U000e0001"),
+            "café 猫 "
+            r"\u202a\u202b\u202c\u202d\u202e"
+            r"\u2066\u2067\u2068\u2069\U000e0001",
+        )
+        rendered = _render_event(
+            {
+                "phase": "finding",
+                "current": 1,
+                "total": 1,
+                "inspection": {
+                    "finding": {
+                        "title": "safe.py\u202egnorw",
+                        "id": "fnd_one",
+                        "severity": "low",
+                        "category": "security",
+                    }
+                },
+            }
+        )
+
+        self.assertIn(r"title: safe.py\u202egnorw", rendered)
+        self.assertNotIn("\u202e", rendered)
 
     def test_general_event_rendering_escapes_controls_in_all_field_shapes(self):
         events = [
