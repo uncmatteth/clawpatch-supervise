@@ -28,7 +28,13 @@ _POSTGRES_DIGEST_IMAGE = "postgres@sha256:" + "a" * 64
 
 class FailedSubprocessRedactionTests(unittest.TestCase):
     def test_validation_command_failures_redact_stdout_and_stderr(self) -> None:
-        secrets = ("stdout-secret", "bearer-secret", "stderr-secret")
+        secrets = (
+            "stdout-secret",
+            "bearer-secret",
+            "stderr-secret",
+            "userinfo-secret",
+            "query-secret",
+        )
 
         def run(
             argv: list[str],
@@ -40,8 +46,10 @@ class FailedSubprocessRedactionTests(unittest.TestCase):
             return subprocess.CompletedProcess(
                 argv,
                 9,
-                f"token={secrets[0]}\nAuthorization: Bearer {secrets[1]}",
-                f"password={secrets[2]}",
+                f"token={secrets[0]}\nAuthorization: Bearer {secrets[1]}\n"
+                f"https://alice:{secrets[3]}@stdout.invalid/repository",
+                f"password={secrets[2]}\n"
+                f"https://stderr.invalid/repository?api_key={secrets[4]}&mode=read",
             )
 
         attempts = (
@@ -75,6 +83,9 @@ class FailedSubprocessRedactionTests(unittest.TestCase):
 
             message = str(raised.exception)
             self.assertIn("<REDACTED>", message)
+            self.assertIn("stdout.invalid/repository", message)
+            self.assertIn("stderr.invalid/repository", message)
+            self.assertIn("mode=read", message)
             for secret in secrets:
                 self.assertNotIn(secret, message)
 

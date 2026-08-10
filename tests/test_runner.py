@@ -92,6 +92,43 @@ class CommandRunnerLoggingTests(unittest.TestCase):
             payload = json.loads((log_root / "valid-slug.json").read_text(encoding="utf-8"))
             self.assertEqual(payload["stdout"].strip(), "logged")
 
+    def test_credential_urls_are_redacted_from_results_and_logs(self) -> None:
+        userinfo_secret = "userinfo-secret"
+        query_secret = "query-secret"
+        stdout_url = f"https://alice:{userinfo_secret}@example.invalid/repository"
+        stderr_url = (
+            f"https://example.invalid/repository?token={query_secret}&mode=read"
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_root = root / "logs"
+
+            result = CommandRunner(log_root=log_root).run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; print(sys.argv[1]); print(sys.argv[2], file=sys.stderr)",
+                    stdout_url,
+                    stderr_url,
+                ],
+                cwd=root,
+                log_name="credential-urls",
+            )
+
+            payload = json.loads(
+                (log_root / "credential-urls.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(result.exit_code, 0, result.stderr)
+            self.assertIn("https://<REDACTED>@example.invalid/repository", result.stdout)
+            self.assertIn(
+                "https://example.invalid/repository?token=<REDACTED>&mode=read",
+                result.stderr,
+            )
+            for serialized in (json.dumps(result.to_dict()), json.dumps(payload)):
+                self.assertNotIn(userinfo_secret, serialized)
+                self.assertNotIn(query_secret, serialized)
+                self.assertIn("example.invalid/repository", serialized)
+
 
 class WindowsProcessTreeTerminationTests(unittest.TestCase):
     @patch("clawpatch_supervise.runner.os.name", "nt")

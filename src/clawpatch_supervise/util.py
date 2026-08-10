@@ -42,6 +42,9 @@ _PEM_PRIVATE_KEY_RE = re.compile(
     r"-----END (?P=kind)-----",
     re.DOTALL,
 )
+_URL_USERINFO_RE = re.compile(
+    r"(?i)(?P<scheme>\b[a-z][a-z0-9+.-]*://)[^/?#\s@]+@"
+)
 _SECRET_PAIR_RE = re.compile(
     rf'''(?ix)
     (?P<prefix>["']?(?:[a-z0-9_-]*[_-])?{_SECRET_PAIR_NAME_PATTERN}(?:[_-][a-z0-9_-]*)?["']?\s*[:=]\s*)
@@ -50,7 +53,7 @@ _SECRET_PAIR_RE = re.compile(
         |
         '(?:\\.|[^'\\])*'
         |
-        [^\s,;}}]+
+        [^\s,;}}&#"']+
     )
     '''
 )
@@ -63,6 +66,10 @@ _WINDOWS_ABSOLUTE_RE = re.compile(r"^[A-Za-z]:/")
 
 def _redact_scalar_text(text: str) -> str:
     redacted = _PEM_PRIVATE_KEY_RE.sub("<REDACTED>", text)
+    redacted = _URL_USERINFO_RE.sub(
+        lambda match: f"{match.group('scheme')}<REDACTED>@",
+        redacted,
+    )
     redacted = _AUTHORIZATION_SCHEME_RE.sub(
         lambda match: (
             f"{match.group('prefix')}{match.group('scheme')}"
