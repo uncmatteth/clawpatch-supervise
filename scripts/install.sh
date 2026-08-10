@@ -85,6 +85,8 @@ command -v "$python_command" >/dev/null 2>&1 || {
   echo "Python 3.11 or newer is required." >&2
   exit 2
 }
+install_root="$("$python_command" -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$install_root")"
+bin_dir="$("$python_command" -c 'import os, sys; print(os.path.abspath(sys.argv[1]))' "$bin_dir")"
 command -v git >/dev/null 2>&1 || {
   echo "Git is required." >&2
   exit 2

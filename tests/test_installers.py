@@ -511,6 +511,51 @@ class InstallerContractTests(unittest.TestCase):
         self.assertNotIn("export PATH=bin:", wrapper_text)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_normalizes_relative_install_paths(self) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "relative-install"
+        bin_dir = root / "relative-bin"
+
+        def install_from_root(
+            installer_path: Path, environment: dict[str, str]
+        ) -> subprocess.CompletedProcess[str]:
+            environment["CLAWPATCH_SUPERVISE_HOME"] = install_root.name
+            environment["CLAWPATCH_SUPERVISE_BIN_DIR"] = bin_dir.name
+            return self._run_installer_process(
+                platform_name="Linux/macOS",
+                installer_path=installer_path,
+                argv=[str(installer_path)],
+                environment=environment,
+                cwd=root,
+            )
+
+        result, _invocations, _default_install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+            process_runner=install_from_root,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        unrelated_directory = root / "unrelated"
+        unrelated_directory.mkdir()
+        installed_result = subprocess.run(
+            [str(bin_dir / "clawpatch-supervise"), "doctor"],
+            capture_output=True,
+            check=False,
+            cwd=unrelated_directory,
+            text=True,
+        )
+        self.assertEqual(installed_result.returncode, 0, installed_result.stderr)
+        clawpatch_result = subprocess.run(
+            [str(bin_dir / "clawpatch"), "--version"],
+            capture_output=True,
+            check=False,
+            cwd=unrelated_directory,
+            text=True,
+        )
+        self.assertEqual(clawpatch_result.returncode, 0, clawpatch_result.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_isolates_mismatched_clawpatch_version(self) -> None:
         result, invocations, install_root = self._run_linux_installer(
             clawpatch_present=True,
