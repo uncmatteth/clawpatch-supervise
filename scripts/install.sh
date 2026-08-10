@@ -11,6 +11,7 @@ readonly minimum_clawpatch_version="0.7.2"
 readonly release_sha256_0_1_28="150773b2714f84f30638fca7ab1896ae1b14042f0d4ef2d9c3cab9fc0acfa5d5"
 download_root=""
 staging_venv=""
+staging_clawpatch_root=""
 pending_supervisor_link=""
 pending_clawpatch_link=""
 
@@ -18,6 +19,7 @@ cleanup() {
   [[ -z "$pending_supervisor_link" ]] || rm -f "$pending_supervisor_link"
   [[ -z "$pending_clawpatch_link" ]] || rm -f "$pending_clawpatch_link"
   [[ -z "$staging_venv" ]] || rm -rf "$staging_venv"
+  [[ -z "$staging_clawpatch_root" ]] || rm -rf "$staging_clawpatch_root"
   [[ -z "$download_root" ]] || rm -rf "$download_root"
 }
 trap cleanup EXIT
@@ -62,6 +64,7 @@ if [[ -z "$node_major" || "$node_major" -lt 22 ]]; then
   exit 2
 fi
 
+managed_clawpatch=false
 if command -v clawpatch >/dev/null 2>&1 && \
   compatible_clawpatch "$(command -v clawpatch)"; then
   clawpatch_command="$(command -v clawpatch)"
@@ -70,13 +73,15 @@ else
     echo "npm is required to install ClawPatch." >&2
     exit 2
   }
-  clawpatch_root="$install_root/clawpatch"
-  npm install --prefix "$clawpatch_root" --no-fund --no-audit "clawpatch@latest"
-  clawpatch_command="$clawpatch_root/node_modules/.bin/clawpatch"
+  mkdir -p "$install_root"
+  staging_clawpatch_root="$(mktemp -d "$install_root/clawpatch.XXXXXX")"
+  npm install --prefix "$staging_clawpatch_root" --no-fund --no-audit "clawpatch@latest"
+  clawpatch_command="$staging_clawpatch_root/node_modules/.bin/clawpatch"
   test -x "$clawpatch_command" || {
     echo "ClawPatch installation did not create its command." >&2
     exit 2
   }
+  managed_clawpatch=true
 fi
 if ! compatible_clawpatch "$clawpatch_command"; then
   echo "ClawPatch $minimum_clawpatch_version or newer is required." >&2
@@ -148,7 +153,7 @@ if [[ -d "$supervisor_destination" ]]; then
   echo "Command destination is a directory: $supervisor_destination" >&2
   exit 2
 fi
-if [[ "$clawpatch_command" == "$install_root/clawpatch/"* && -d "$clawpatch_destination" ]]; then
+if [[ "$managed_clawpatch" == true && -d "$clawpatch_destination" ]]; then
   echo "Command destination is a directory: $clawpatch_destination" >&2
   exit 2
 fi
@@ -175,9 +180,30 @@ content = "\n".join(
 Path(destination).write_text(content, encoding="utf-8")
 os.chmod(destination, 0o755)
 PY
+if [[ "$managed_clawpatch" == true ]]; then
+  pending_clawpatch_link="$(mktemp "$bin_dir/.clawpatch.XXXXXX")"
+  ln -sfn "$clawpatch_command" "$pending_clawpatch_link"
+fi
 # Stop EXIT cleanup from removing either valid target once activation begins.
 activated_venv="$staging_venv"
 staging_venv=""
+activated_clawpatch_root="$staging_clawpatch_root"
+staging_clawpatch_root=""
+if [[ "$managed_clawpatch" == true ]]; then
+  "$python_command" - "$pending_clawpatch_link" "$clawpatch_destination" <<'PY' || {
+import os
+import sys
+
+os.replace(sys.argv[1], sys.argv[2])
+PY
+    move_status=$?
+    staging_venv="$activated_venv"
+    staging_clawpatch_root="$activated_clawpatch_root"
+    exit "$move_status"
+  }
+  pending_clawpatch_link=""
+  clawpatch_command="$clawpatch_destination"
+fi
 "$python_command" - "$pending_supervisor_link" "$supervisor_destination" <<'PY' || {
 import os
 import sys
@@ -189,16 +215,4 @@ PY
   exit "$move_status"
 }
 pending_supervisor_link=""
-if [[ "$clawpatch_command" == "$install_root/clawpatch/"* ]]; then
-  pending_clawpatch_link="$(mktemp "$bin_dir/.clawpatch.XXXXXX")"
-  ln -sfn "$clawpatch_command" "$pending_clawpatch_link"
-  "$python_command" - "$pending_clawpatch_link" "$clawpatch_destination" <<'PY'
-import os
-import sys
-
-os.replace(sys.argv[1], sys.argv[2])
-PY
-  pending_clawpatch_link=""
-  clawpatch_command="$clawpatch_destination"
-fi
 echo "Installed command: $supervisor_destination"

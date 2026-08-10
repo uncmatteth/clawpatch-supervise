@@ -25,6 +25,7 @@ class InstallerContractTests(unittest.TestCase):
         *,
         clawpatch_present: bool,
         clawhub_present: bool,
+        clawpatch_command: Path | None = None,
         clawpatch_version: str = CLAWPATCH_VERSION,
         clawhub_version: str = CLAWHUB_VERSION,
         npm_mode: str = "success",
@@ -74,7 +75,7 @@ class InstallerContractTests(unittest.TestCase):
             "exit 0\n",
         )
         if clawpatch_present:
-            (fake_bin / "clawpatch").symlink_to(command_stub)
+            (fake_bin / "clawpatch").symlink_to(clawpatch_command or command_stub)
         if clawhub_present:
             (fake_bin / "clawhub").symlink_to(command_stub)
 
@@ -167,6 +168,19 @@ class InstallerContractTests(unittest.TestCase):
             else []
         )
         return result, invocations, install_root
+
+    def _assert_staged_clawpatch_install(
+        self, invocations: list[str], install_root: Path
+    ) -> Path:
+        self.assertEqual(len(invocations), 1)
+        prefix = "install --prefix "
+        suffix = " --no-fund --no-audit clawpatch@latest"
+        self.assertTrue(invocations[0].startswith(prefix), invocations)
+        self.assertTrue(invocations[0].endswith(suffix), invocations)
+        staged_root = Path(invocations[0][len(prefix) : -len(suffix)])
+        self.assertEqual(staged_root.parent, install_root)
+        self.assertTrue(staged_root.name.startswith("clawpatch."), staged_root)
+        return staged_root
 
     @staticmethod
     def _write_batch(path: Path, content: str) -> None:
@@ -391,13 +405,7 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            invocations,
-            [
-                f"install --prefix {install_root}/clawpatch --no-fund "
-                "--no-audit clawpatch@latest"
-            ],
-        )
+        self._assert_staged_clawpatch_install(invocations, install_root)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_installs_missing_dependencies_and_finds_them(self) -> None:
@@ -407,15 +415,7 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            invocations,
-            [
-                (
-                    f"install --prefix {install_root}/clawpatch --no-fund "
-                    "--no-audit clawpatch@latest"
-                ),
-            ],
-        )
+        self._assert_staged_clawpatch_install(invocations, install_root)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_uses_user_local_clawpatch_when_global_prefix_is_unwritable(
@@ -428,20 +428,12 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            invocations,
-            [
-                (
-                    f"install --prefix {install_root}/clawpatch --no-fund "
-                    "--no-audit clawpatch@latest"
-                )
-            ],
-        )
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
         installed_command = install_root.parent / "installed-bin" / "clawpatch"
         self.assertTrue(installed_command.is_symlink())
         self.assertEqual(
             installed_command.resolve(),
-            (install_root / "clawpatch/node_modules/.bin/clawpatch").resolve(),
+            (staged_root / "node_modules/.bin/clawpatch").resolve(),
         )
         self.assertIn(CLAWPATCH_VERSION, result.stdout.splitlines())
 
@@ -454,13 +446,7 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            invocations,
-            [
-                f"install --prefix {install_root}/clawpatch --no-fund "
-                "--no-audit clawpatch@latest"
-            ],
-        )
+        self._assert_staged_clawpatch_install(invocations, install_root)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_requires_npm_when_clawpatch_is_missing(self) -> None:
@@ -496,15 +482,8 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 23)
-        self.assertEqual(
-            invocations,
-            [
-                (
-                    f"install --prefix {install_root}/clawpatch --no-fund "
-                    "--no-audit clawpatch@latest"
-                )
-            ],
-        )
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
+        self.assertFalse(staged_root.exists())
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_never_invokes_npm_for_clawhub(self) -> None:
@@ -599,6 +578,63 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("Artifact SHA-256 mismatch", result.stderr)
         self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_preserves_managed_clawpatch_when_artifact_validation_fails(
+        self,
+    ) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "install"
+        previous_clawpatch = (
+            install_root / "clawpatch" / "node_modules" / ".bin" / "clawpatch"
+        )
+        previous_clawpatch.parent.mkdir(parents=True)
+        self._write_executable(
+            previous_clawpatch,
+            "#!/bin/sh\nprintf '0.7.1\\n'\n",
+        )
+        installed_bin = root / "installed-bin"
+        installed_bin.mkdir()
+        installed_clawpatch = installed_bin / "clawpatch"
+        installed_clawpatch.symlink_to(previous_clawpatch)
+        installed_supervisor = installed_bin / "clawpatch-supervise"
+        previous_wrapper = (
+            "#!/bin/sh\n"
+            f'export PATH="{previous_clawpatch.parent}:$PATH"\n'
+            'if [ "$1" = "--dependency-version" ]; then exec clawpatch --version; fi\n'
+            "printf '0.1.20\\n'\n"
+        )
+        self._write_executable(installed_supervisor, previous_wrapper)
+        wheel = root / "clawpatch-supervise.whl"
+        wheel.write_bytes(b"tampered wheel")
+
+        result, invocations, actual_install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            clawpatch_command=previous_clawpatch,
+            source_package=wheel,
+            source_sha256="0" * 64,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Artifact SHA-256 mismatch", result.stderr)
+        self.assertEqual(actual_install_root, install_root)
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
+        self.assertFalse(staged_root.exists())
+        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch)
+        self.assertEqual(installed_supervisor.read_text(encoding="utf-8"), previous_wrapper)
+        dependency = subprocess.run(
+            [str(installed_supervisor), "--dependency-version"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(dependency.returncode, 0, dependency.stderr)
+        self.assertEqual(dependency.stdout.strip(), "0.7.1")
+        self.assertEqual(
+            sorted(path.name for path in install_root.iterdir()),
+            ["clawpatch"],
+        )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_preserves_working_command_when_upgrade_validation_fails(
