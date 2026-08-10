@@ -809,6 +809,60 @@ class InstallerContractTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_retains_backup_when_rollback_restore_fails(self) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "install"
+        previous_clawpatch = (
+            install_root / "clawpatch" / "node_modules" / ".bin" / "clawpatch"
+        )
+        previous_clawpatch.parent.mkdir(parents=True)
+        self._write_executable(previous_clawpatch, "#!/bin/sh\nprintf '0.7.1\\n'\n")
+        installed_bin = root / "installed-bin"
+        installed_bin.mkdir()
+        installed_clawpatch = installed_bin / "clawpatch"
+        installed_clawpatch.symlink_to(previous_clawpatch)
+
+        def fail_clawpatch_restore(
+            installer_path: Path, environment: dict[str, str]
+        ) -> subprocess.CompletedProcess[str]:
+            fake_mv = Path(environment["PATH"]) / "mv"
+            real_mv = fake_mv.resolve()
+            fake_mv.unlink()
+            self._write_executable(
+                fake_mv,
+                "#!/bin/sh\n"
+                'case "$2" in\n'
+                '  */.clawpatch.previous.*) exit 30 ;;\n'
+                "esac\n"
+                f'exec "{real_mv}" "$@"\n',
+            )
+            return self._run_installer_process(
+                platform_name="Linux/macOS",
+                installer_path=installer_path,
+                argv=[str(installer_path)],
+                environment=environment,
+            )
+
+        result, invocations, actual_install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            clawpatch_command=previous_clawpatch,
+            supervisor_move_fails=True,
+            process_runner=fail_clawpatch_restore,
+        )
+
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(actual_install_root, install_root)
+        self.assertFalse(self._assert_staged_clawpatch_install(invocations, install_root).exists())
+        retained_backups = list(installed_bin.glob(".clawpatch.previous.*"))
+        self.assertEqual(len(retained_backups), 1)
+        retained_backup = retained_backups[0]
+        self.assertTrue(retained_backup.is_symlink())
+        self.assertEqual(retained_backup.resolve(), previous_clawpatch)
+        self.assertIn(str(retained_backup), result.stderr)
+        self.assertIn("Rollback failed", result.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_serializes_activation_and_interrupted_rollback(
         self,
     ) -> None:

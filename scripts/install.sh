@@ -25,33 +25,53 @@ clawpatch_destination=""
 
 cleanup() {
   local exit_status=$?
+  local rollback_failed=false
+  local retain_previous_supervisor_command=false
+  local retain_previous_clawpatch_command=false
   trap - EXIT
   set +e
   if [[ "$activation_started" == true && "$activation_complete" != true ]]; then
     if [[ -n "$previous_supervisor_command" ]]; then
       if [[ -e "$previous_supervisor_command" || -L "$previous_supervisor_command" ]]; then
-        mv -f "$previous_supervisor_command" "$supervisor_destination"
-      else
-        rm -f "$supervisor_destination"
+        if ! mv -f "$previous_supervisor_command" "$supervisor_destination"; then
+          echo "Rollback failed for $supervisor_destination; previous command retained at $previous_supervisor_command" >&2
+          rollback_failed=true
+          retain_previous_supervisor_command=true
+        fi
+      elif ! rm -f "$supervisor_destination"; then
+        echo "Rollback failed to remove $supervisor_destination" >&2
+        rollback_failed=true
       fi
     fi
     if [[ -n "$previous_clawpatch_command" ]]; then
       if [[ -e "$previous_clawpatch_command" || -L "$previous_clawpatch_command" ]]; then
-        mv -f "$previous_clawpatch_command" "$clawpatch_destination"
-      else
-        rm -f "$clawpatch_destination"
+        if ! mv -f "$previous_clawpatch_command" "$clawpatch_destination"; then
+          echo "Rollback failed for $clawpatch_destination; previous command retained at $previous_clawpatch_command" >&2
+          rollback_failed=true
+          retain_previous_clawpatch_command=true
+        fi
+      elif ! rm -f "$clawpatch_destination"; then
+        echo "Rollback failed to remove $clawpatch_destination" >&2
+        rollback_failed=true
       fi
     fi
   fi
   [[ -z "$pending_supervisor_link" ]] || rm -f "$pending_supervisor_link"
   [[ -z "$pending_clawpatch_link" ]] || rm -f "$pending_clawpatch_link"
-  [[ -z "$previous_supervisor_command" ]] || rm -f "$previous_supervisor_command"
-  [[ -z "$previous_clawpatch_command" ]] || rm -f "$previous_clawpatch_command"
+  if [[ "$retain_previous_supervisor_command" != true && -n "$previous_supervisor_command" ]]; then
+    rm -f "$previous_supervisor_command"
+  fi
+  if [[ "$retain_previous_clawpatch_command" != true && -n "$previous_clawpatch_command" ]]; then
+    rm -f "$previous_clawpatch_command"
+  fi
   [[ -z "$staging_venv" ]] || rm -rf "$staging_venv"
   [[ -z "$staging_clawpatch_root" ]] || rm -rf "$staging_clawpatch_root"
   [[ -z "$download_root" ]] || rm -rf "$download_root"
   if [[ "$install_lock_held" == true ]]; then
     exec 9>&-
+  fi
+  if [[ "$rollback_failed" == true ]]; then
+    exit_status=1
   fi
   exit "$exit_status"
 }
