@@ -58,7 +58,7 @@ from clawpatch_supervise.clawpatch_release import (
     runtime_doctor,
     release_sweep,
 )
-from clawpatch_supervise.errors import GateFailure, SafetyError
+from clawpatch_supervise.errors import GateFailure, RepositoryBusyError, SafetyError
 
 
 def _hold_clawpatch_release_lock(repo: str, acquired, release) -> None:
@@ -1437,6 +1437,164 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             self.assertEqual(
                 _require_synchronized_remote_branch(repo, branch),
                 local_head,
+            )
+
+    def test_pushable_branch_merges_clean_divergent_histories_before_fixing(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            publisher = root / "publisher"
+            remote = root / "remote.git"
+            repo.mkdir()
+            self.init_repo(repo)
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo, check=True)
+
+            (repo / "local-only.txt").write_text("local\n", encoding="utf-8")
+            subprocess.run(["git", "add", "local-only.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "local only"], cwd=repo, check=True)
+            local_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            subprocess.run(
+                ["git", "clone", "-q", "--branch", branch, str(remote), str(publisher)],
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=publisher, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=publisher,
+                check=True,
+            )
+            (publisher / "remote-only.txt").write_text("remote\n", encoding="utf-8")
+            subprocess.run(["git", "add", "remote-only.txt"], cwd=publisher, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "remote only"], cwd=publisher, check=True)
+            subprocess.run(["git", "push", "-q", "origin", branch], cwd=publisher, check=True)
+            remote_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=publisher, text=True
+            ).strip()
+            events = []
+
+            merged = _require_synchronized_remote_branch(repo, branch, progress=events.append)
+
+            self.assertNotEqual(merged, local_head)
+            for ancestor in (local_head, remote_head):
+                result = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", ancestor, merged],
+                    cwd=repo,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0)
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "status", "--porcelain"], cwd=repo, text=True
+                ),
+                "",
+            )
+            self.assertTrue(any(event.get("phase") == "git-sync" for event in events))
+
+    def test_dirty_remote_mismatch_waits_instead_of_stopping_terminally(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            publisher = root / "publisher"
+            remote = root / "remote.git"
+            repo.mkdir()
+            self.init_repo(repo)
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "clone", "-q", "--branch", branch, str(remote), str(publisher)],
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=publisher, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=publisher,
+                check=True,
+            )
+            (publisher / "remote.txt").write_text("remote\n", encoding="utf-8")
+            subprocess.run(["git", "add", "remote.txt"], cwd=publisher, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "remote"], cwd=publisher, check=True)
+            subprocess.run(["git", "push", "-q", "origin", branch], cwd=publisher, check=True)
+            (repo / "dirty.txt").write_text("preserve me\n", encoding="utf-8")
+
+            with self.assertRaises(RepositoryBusyError):
+                _require_synchronized_remote_branch(repo, branch)
+
+            self.assertEqual((repo / "dirty.txt").read_text(encoding="utf-8"), "preserve me\n")
+
+    def test_conflicting_divergent_histories_restore_exact_tree_and_wait(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            publisher = root / "publisher"
+            remote = root / "remote.git"
+            repo.mkdir()
+            self.init_repo(repo)
+            subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
+            subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "push", "-u", "origin", branch], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "clone", "-q", "--branch", branch, str(remote), str(publisher)],
+                check=True,
+            )
+            subprocess.run(["git", "config", "user.name", "Test"], cwd=publisher, check=True)
+            subprocess.run(
+                ["git", "config", "user.email", "test@example.com"],
+                cwd=publisher,
+                check=True,
+            )
+
+            (repo / "tracked.txt").write_text("local\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "local conflict"], cwd=repo, check=True)
+            local_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            local_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
+            ).strip()
+
+            (publisher / "tracked.txt").write_text("remote\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.txt"], cwd=publisher, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "remote conflict"],
+                cwd=publisher,
+                check=True,
+            )
+            subprocess.run(["git", "push", "-q", "origin", branch], cwd=publisher, check=True)
+
+            with self.assertRaisesRegex(RepositoryBusyError, "merge conflicts"):
+                _require_synchronized_remote_branch(repo, branch)
+
+            self.assertEqual(
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
+                local_head,
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
+                ).strip(),
+                local_tree,
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "status", "--porcelain"], cwd=repo, text=True
+                ),
+                "",
             )
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
