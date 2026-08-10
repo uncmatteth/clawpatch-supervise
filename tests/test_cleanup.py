@@ -321,6 +321,47 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertIn("removed=0", output.getvalue())
             lsof_probe.assert_called_once_with(candidate)
 
+    @unittest.skipUnless(os.name == "posix", "POSIX proc inspection")
+    def test_cleanup_fails_closed_when_live_process_proc_links_are_inaccessible(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-unproven"
+            self._mark(candidate, pid=999_999_999, created_unix=0)
+            proc_root = root / "proc"
+            process = proc_root / "1234"
+            descriptor_root = process / "fd"
+            descriptor_root.mkdir(parents=True)
+            original_iterdir = Path.iterdir
+            original_resolve = Path.resolve
+
+            def inspect_directory(path: Path):
+                if path == descriptor_root:
+                    raise PermissionError("descriptor inspection denied")
+                return original_iterdir(path)
+
+            def resolve_link(path: Path, *args, **kwargs):
+                if path == process / "cwd":
+                    raise PermissionError("cwd inspection denied")
+                return original_resolve(path, *args, **kwargs)
+
+            with (
+                patch("clawpatch_supervise.cleanup._PROC_ROOT", proc_root),
+                patch.object(Path, "iterdir", autospec=True, side_effect=inspect_directory),
+                patch.object(Path, "resolve", autospec=True, side_effect=resolve_link),
+                patch("clawpatch_supervise.cleanup.shutil.rmtree") as remove_tree,
+            ):
+                report = cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+            self.assertTrue(candidate.is_dir())
+            self.assertEqual([entry.status for entry in report.entries], ["UNSAFE"])
+            self.assertEqual(report.removed, 0)
+            remove_tree.assert_not_called()
+
     def test_cleanup_refuses_symlinked_root_without_touching_target(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

@@ -155,23 +155,33 @@ def _path_has_live_reference(candidate: Path) -> bool | None:
         return _lsof_path_has_live_reference(candidate)
     candidate_text = str(candidate.resolve())
     prefix = candidate_text + os.sep
-    for process in _PROC_ROOT.iterdir():
+    inspection_inconclusive = False
+    try:
+        processes = list(_PROC_ROOT.iterdir())
+    except OSError:
+        return None
+    for process in processes:
         if not process.name.isdigit():
             continue
         links = [process / "cwd", process / "root", process / "exe"]
         descriptor_root = process / "fd"
         try:
             links.extend(descriptor_root.iterdir())
+        except FileNotFoundError:
+            continue
         except OSError:
-            pass
+            inspection_inconclusive = True
         for link in links:
             try:
                 target = str(link.resolve())
+            except FileNotFoundError:
+                continue
             except (OSError, RuntimeError):
+                inspection_inconclusive = True
                 continue
             if target == candidate_text or target.startswith(prefix):
                 return True
-    return False
+    return None if inspection_inconclusive else False
 
 
 def _owned_marker(candidate: Path) -> dict[str, object] | None:
