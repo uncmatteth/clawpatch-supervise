@@ -6,12 +6,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from clawpatch_supervise import __version__
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 CLAWPATCH_VERSION = "0.7.2"
 CLAWHUB_VERSION = "0.19.1"
+INSTALLER_TIMEOUT_SECONDS = 300
 
 
 class InstallerContractTests(unittest.TestCase):
@@ -19,6 +21,30 @@ class InstallerContractTests(unittest.TestCase):
     def _write_executable(path: Path, content: str) -> None:
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
+
+    def _run_installer_process(
+        self,
+        *,
+        platform_name: str,
+        installer_path: Path,
+        argv: list[str],
+        environment: dict[str, str],
+        timeout_seconds: float = INSTALLER_TIMEOUT_SECONDS,
+    ) -> subprocess.CompletedProcess[str]:
+        try:
+            return subprocess.run(
+                argv,
+                capture_output=True,
+                check=False,
+                env=environment,
+                text=True,
+                timeout=timeout_seconds,
+            )
+        except subprocess.TimeoutExpired as exc:
+            self.fail(
+                f"{platform_name} installer timed out after {timeout_seconds:g} seconds: "
+                f"{installer_path}"
+            )
 
     def _run_linux_installer(
         self,
@@ -155,12 +181,12 @@ class InstallerContractTests(unittest.TestCase):
             environment["CLAWPATCH_SUPERVISE_SHA256"] = source_sha256
         if verify_repo:
             environment["CLAWPATCH_SUPERVISE_VERIFY_REPO"] = str(root)
-        result = subprocess.run(
-            [str(REPOSITORY_ROOT / "scripts" / "install.sh")],
-            capture_output=True,
-            check=False,
-            env=environment,
-            text=True,
+        installer_path = REPOSITORY_ROOT / "scripts" / "install.sh"
+        result = self._run_installer_process(
+            platform_name="Linux/macOS",
+            installer_path=installer_path,
+            argv=[str(installer_path)],
+            environment=environment,
         )
         invocations = (
             invocation_log.read_text(encoding="utf-8").splitlines()
@@ -329,8 +355,11 @@ class InstallerContractTests(unittest.TestCase):
             "-BinDir $env:CLAWPATCH_TEST_BIN_DIR "
             "-Sha256 $env:CLAWPATCH_TEST_SOURCE_SHA256"
         )
-        result = subprocess.run(
-            [
+        installer_path = REPOSITORY_ROOT / "scripts" / "install.ps1"
+        result = self._run_installer_process(
+            platform_name="Windows",
+            installer_path=installer_path,
+            argv=[
                 powershell,
                 "-NoProfile",
                 "-NonInteractive",
@@ -339,10 +368,7 @@ class InstallerContractTests(unittest.TestCase):
                 "-Command",
                 command,
             ],
-            capture_output=True,
-            check=False,
-            env=environment,
-            text=True,
+            environment=environment,
         )
         invocations = (
             [line.replace('"', "") for line in invocation_log.read_text().splitlines()]
@@ -356,6 +382,33 @@ class InstallerContractTests(unittest.TestCase):
 
     def tearDown(self) -> None:
         self._temporary_directory.cleanup()
+
+    def test_installer_timeout_reports_platform_and_installer_path(self) -> None:
+        for platform_name, installer_path in (
+            ("Linux/macOS", REPOSITORY_ROOT / "scripts" / "install.sh"),
+            ("Windows", REPOSITORY_ROOT / "scripts" / "install.ps1"),
+        ):
+            with self.subTest(platform=platform_name):
+                with (
+                    patch.object(
+                        subprocess,
+                        "run",
+                        side_effect=subprocess.TimeoutExpired([str(installer_path)], 0.01),
+                    ) as run,
+                    self.assertRaises(AssertionError) as raised,
+                ):
+                    self._run_installer_process(
+                        platform_name=platform_name,
+                        installer_path=installer_path,
+                        argv=[str(installer_path)],
+                        environment={},
+                        timeout_seconds=0.01,
+                    )
+
+                self.assertIn(platform_name, str(raised.exception))
+                self.assertIn(str(installer_path), str(raised.exception))
+                self.assertIn("0.01 seconds", str(raised.exception))
+                self.assertEqual(run.call_args.kwargs["timeout"], 0.01)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_does_not_install_dependencies_that_are_present(self) -> None:
