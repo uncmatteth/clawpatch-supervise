@@ -345,8 +345,10 @@ def _require_synchronized_remote_branch(
         raise SafetyError(f"Origin has no branch refs/heads/{branch}; synchronization is unproven.")
     if remote != local:
         if _source_paths(repo):
-            raise SafetyError(
-                f"Local HEAD {local!r} is not synchronized with origin/{branch} at {remote!r}."
+            raise RepositoryBusyError(
+                f"Local HEAD {local!r} and origin/{branch} at {remote!r} cannot be "
+                "reconciled while preserved source changes are present. Waiting without "
+                "discarding either history or the worktree."
             )
         _must_run(
             ["git", "fetch", "--no-tags", "origin", f"refs/heads/{branch}"],
@@ -375,9 +377,73 @@ def _require_synchronized_remote_branch(
             timeout=60,
         )
         if ancestor.returncode:
-            raise SafetyError(
-                f"Local HEAD {local!r} is not synchronized with origin/{branch} at {remote!r}."
+            if progress is not None:
+                progress(
+                    {
+                        "phase": "git-sync",
+                        "current": "?",
+                        "total": "?",
+                        "command": f"git merge --no-ff --no-edit {remote}",
+                        "detail": f"merge clean divergent {branch} and origin/{branch}",
+                        "attempt": 1,
+                        "max_attempts": 1,
+                    }
+                )
+            _require_branch(repo, branch, phase="remote synchronization")
+            local_before_merge = local
+            with tempfile.TemporaryDirectory(prefix="clawpatch-supervise-empty-hooks-") as hooks:
+                merged = _run(
+                    [
+                        "git",
+                        "-c",
+                        "commit.gpgSign=false",
+                        "-c",
+                        f"core.hooksPath={hooks}",
+                        "merge",
+                        "--no-ff",
+                        "--no-edit",
+                        remote,
+                    ],
+                    cwd=repo,
+                    timeout=300,
+                )
+            if merged.returncode:
+                _must_run(["git", "merge", "--abort"], cwd=repo, timeout=120)
+                restored = _git_text(repo, ["git", "rev-parse", "HEAD"])
+                if restored != local or _source_paths(repo):
+                    raise SafetyError(
+                        "Automatic divergent-history merge failed and exact pre-merge state "
+                        "could not be restored."
+                    )
+                raise RepositoryBusyError(
+                    f"Local HEAD {local!r} and origin/{branch} at {remote!r} have merge "
+                    "conflicts. The supervisor restored the exact local tree and will wait "
+                    "without choosing either side."
+                )
+            _require_branch(repo, branch, phase="remote synchronization")
+            local = _git_text(repo, ["git", "rev-parse", "HEAD"])
+            if _source_paths(repo):
+                raise SafetyError("Automatic divergent-history merge left source changes.")
+            for ancestor_sha in (local_before_merge, remote):
+                included = _run(
+                    ["git", "merge-base", "--is-ancestor", ancestor_sha, local],
+                    cwd=repo,
+                    timeout=60,
+                )
+                if included.returncode:
+                    raise SafetyError(
+                        "Automatic divergent-history merge did not preserve both histories."
+                    )
+            final_remote_line = _git_text(
+                repo, ["git", "ls-remote", "origin", f"refs/heads/{branch}"]
             )
+            final_remote = final_remote_line.split()[0] if final_remote_line else ""
+            if final_remote != remote:
+                raise RepositoryBusyError(
+                    f"Origin/{branch} changed during divergent-history reconciliation; "
+                    "waiting to retry from the preserved merged history."
+                )
+            return local
         if progress is not None:
             progress(
                 {
@@ -4769,6 +4835,7 @@ def release_sweep(
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
     advance_uncertain: bool = False,
+    wait_on_preserved_source: bool = False,
 ) -> dict[str, Any]:
     """Automate Clawpatch's documented one-finding workflow without automatic triage."""
     root = _git_root(repo)
@@ -4786,6 +4853,7 @@ def release_sweep(
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
             advance_uncertain=advance_uncertain,
+            wait_on_preserved_source=wait_on_preserved_source,
         )
     with _release_sweep_lock(root):
         return _release_sweep_locked(
@@ -4801,6 +4869,7 @@ def release_sweep(
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
             advance_uncertain=advance_uncertain,
+            wait_on_preserved_source=wait_on_preserved_source,
         )
 
 
@@ -4818,6 +4887,7 @@ def _release_sweep_locked(
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
     advance_uncertain: bool = False,
+    wait_on_preserved_source: bool = False,
     _fixed_point_generation: int = 1,
     _fixed_point_seen_trees: tuple[str, ...] = (),
     _prior_results: tuple[dict[str, Any], ...] = (),
@@ -4878,6 +4948,16 @@ def _release_sweep_locked(
     )
     if integration_mode == "external":
         _migrate_legacy_external_progress(root, state_root=state_root)
+    if (
+        fresh
+        and integration_mode == "external"
+        and wait_on_preserved_source
+        and _source_paths(root)
+    ):
+        raise RepositoryBusyError(
+            "Automatic fresh review found preserved project source changes; waiting without "
+            "discarding them."
+        )
     if fresh:
         _prepare_fresh_release(
             root,
@@ -5161,10 +5241,13 @@ def _release_sweep_locked(
         durable_progress = None
         preexisting_source = _source_paths(root)
     if preexisting_source and durable_progress is None:
-        raise SafetyError(
-            "Clawpatch release sweep found pre-existing source changes: "
+        message = (
+            "Clawpatch release sweep found preserved pre-existing source changes: "
             + ", ".join(preexisting_source)
         )
+        if integration_mode == "external":
+            raise RepositoryBusyError(message + "; waiting without discarding them.")
+        raise SafetyError(message)
     if durable_progress is not None and branch not in {"auto", "current", current_branch}:
         raise SafetyError(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."

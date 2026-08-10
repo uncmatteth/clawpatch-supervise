@@ -566,6 +566,7 @@ def main(
                         integration_mode="external",
                         child_env_overrides=child_env_overrides,
                         advance_uncertain=True,
+                        wait_on_preserved_source=args.fresh is None,
                     )
                     break
                 except ClawpatchStop as exc:
