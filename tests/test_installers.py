@@ -11,6 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from _process_tree_test_support import assert_blocked_descendant_exited
 from clawpatch_supervise import __version__
 from clawpatch_supervise.runner import CommandRunner
 
@@ -451,18 +452,20 @@ class InstallerContractTests(unittest.TestCase):
         root = Path(self._temporary_directory.name)
         installer_path = root / "timeout-installer"
         ready = root / "descendant-ready.txt"
+        release = root / "descendant-release.txt"
         escaped = root / "descendant-wrote.txt"
         child_source = (
             "import os, signal, sys, time\n"
             "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-            "open(sys.argv[1], 'w', encoding='utf-8').write('ready\\n')\n"
+            "open(sys.argv[1], 'w', encoding='utf-8').write(f'{os.getpid()} {os.getpgrp()}\\n')\n"
             "os.close(0); os.close(1); os.close(2)\n"
-            "time.sleep(1)\n"
-            "open(sys.argv[2], 'w', encoding='utf-8').write('escaped\\n')\n"
+            "while not os.path.exists(sys.argv[2]): time.sleep(0.01)\n"
+            "open(sys.argv[3], 'w', encoding='utf-8').write('escaped\\n')\n"
         )
         parent_source = (
             "import pathlib, subprocess, sys, time\n"
-            "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]])\n"
+            "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], "
+            "sys.argv[3], sys.argv[4]])\n"
             "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
             "time.sleep(30)\n"
         )
@@ -477,6 +480,7 @@ class InstallerContractTests(unittest.TestCase):
                     parent_source,
                     child_source,
                     str(ready),
+                    str(release),
                     str(escaped),
                 ],
                 environment=os.environ.copy(),
@@ -488,8 +492,11 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn(str(installer_path), str(raised.exception))
         self.assertIn("0.2 seconds", str(raised.exception))
         self.assertTrue(ready.is_file())
-        time.sleep(1.2)
-        self.assertFalse(escaped.exists())
+        assert_blocked_descendant_exited(
+            ready=ready,
+            release=release,
+            sentinel=escaped,
+        )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_does_not_install_dependencies_that_are_present(self) -> None:

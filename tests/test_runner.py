@@ -9,6 +9,7 @@ import time
 import unittest
 from unittest.mock import call, patch
 
+from _process_tree_test_support import assert_blocked_descendant_exited
 from clawpatch_supervise.clawpatch_release import _release_clawpatch_env, _run
 from clawpatch_supervise.errors import SafetyError
 from clawpatch_supervise.runner import CommandRunner, _terminate_process_group
@@ -269,20 +270,22 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
         child_source = (
             "import os, signal, sys, time\n"
             "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
-            "open(sys.argv[1], 'w', encoding='utf-8').write('ready\\n')\n"
+            "open(sys.argv[1], 'w', encoding='utf-8').write(f'{os.getpid()} {os.getpgrp()}\\n')\n"
             "os.close(0); os.close(1); os.close(2)\n"
-            "time.sleep(1.5)\n"
-            "open(sys.argv[2], 'w', encoding='utf-8').write('escaped\\n')\n"
+            "while not os.path.exists(sys.argv[2]): time.sleep(0.01)\n"
+            "open(sys.argv[3], 'w', encoding='utf-8').write('escaped\\n')\n"
         )
         parent_source = (
             "import pathlib, subprocess, sys, time\n"
-            "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], sys.argv[3]])\n"
+            "subprocess.Popen([sys.executable, '-c', sys.argv[1], sys.argv[2], "
+            "sys.argv[3], sys.argv[4]])\n"
             "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
             "time.sleep(30)\n"
         )
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             ready = root / "descendant-ready.txt"
+            release = root / "descendant-release.txt"
             sentinel = root / "descendant-wrote.txt"
 
             result = _run(
@@ -292,6 +295,7 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
                     parent_source,
                     child_source,
                     str(ready),
+                    str(release),
                     str(sentinel),
                 ],
                 cwd=root,
@@ -301,8 +305,11 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
             self.assertEqual(result.returncode, 124, result.stdout)
             self.assertIn("TIMEOUT", result.stdout)
             self.assertTrue(ready.is_file())
-            time.sleep(1.7)
-            self.assertFalse(sentinel.exists())
+            assert_blocked_descendant_exited(
+                ready=ready,
+                release=release,
+                sentinel=sentinel,
+            )
 
 
 @unittest.skipUnless(os.name == "nt", "Windows command runner only")
