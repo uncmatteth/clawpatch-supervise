@@ -312,6 +312,38 @@ def _require_branch(repo: Path, expected: str, *, phase: str) -> None:
         )
 
 
+def _clawpatch_state_fingerprint(root: Path) -> str:
+    digest = hashlib.sha256()
+    pending = [(root, ".")]
+    while pending:
+        path, relative = pending.pop()
+        metadata = path.lstat()
+        encoded_relative = os.fsencode(relative)
+        digest.update(len(encoded_relative).to_bytes(8, "big"))
+        digest.update(encoded_relative)
+        if stat.S_ISLNK(metadata.st_mode):
+            target = os.fsencode(os.readlink(path))
+            digest.update(b"L")
+            digest.update(len(target).to_bytes(8, "big"))
+            digest.update(target)
+        elif stat.S_ISDIR(metadata.st_mode):
+            digest.update(b"D")
+            children = sorted(path.iterdir(), key=lambda item: os.fsencode(item.name))
+            pending.extend(
+                (child, f"{relative}/{child.name}") for child in reversed(children)
+            )
+        elif stat.S_ISREG(metadata.st_mode):
+            file_digest = hashlib.sha256()
+            with path.open("rb") as handle:
+                for block in iter(lambda: handle.read(1024 * 1024), b""):
+                    file_digest.update(block)
+            digest.update(b"F")
+            digest.update(file_digest.digest())
+        else:
+            raise SafetyError("ClawPatch state contains an unsupported filesystem entry.")
+    return digest.hexdigest()
+
+
 def _hard_reset_preserving_clawpatch_state(repo: Path, target: str) -> None:
     state_root = repo / ".clawpatch"
     if state_root.is_symlink() or (state_root.exists() and not state_root.is_dir()):
@@ -322,17 +354,50 @@ def _hard_reset_preserving_clawpatch_state(repo: Path, target: str) -> None:
         _must_run(["git", "reset", "--hard", target], cwd=repo, timeout=120)
         return
 
-    with tempfile.TemporaryDirectory(prefix="clawpatch-supervise-state-recovery-") as temp:
-        snapshot = Path(temp) / "clawpatch"
+    recovery_root = Path(tempfile.mkdtemp(prefix="clawpatch-supervise-state-recovery-"))
+    snapshot = recovery_root / "clawpatch"
+    try:
         shutil.copytree(state_root, snapshot, symlinks=True)
+        snapshot_fingerprint = _clawpatch_state_fingerprint(snapshot)
+    except BaseException:
+        shutil.rmtree(recovery_root, ignore_errors=True)
+        raise
+
+    restored = False
+    try:
         try:
             _must_run(["git", "reset", "--hard", target], cwd=repo, timeout=120)
         finally:
-            if state_root.is_symlink() or state_root.is_file():
-                state_root.unlink()
-            elif state_root.exists():
-                shutil.rmtree(state_root)
-            shutil.copytree(snapshot, state_root, symlinks=True)
+            try:
+                with tempfile.TemporaryDirectory(
+                    prefix=".clawpatch-restore-", dir=repo
+                ) as staging_root:
+                    staged_state = Path(staging_root) / "clawpatch"
+                    shutil.copytree(snapshot, staged_state, symlinks=True)
+                    if _clawpatch_state_fingerprint(staged_state) != snapshot_fingerprint:
+                        raise SafetyError(
+                            "The staged ClawPatch state does not match its recovery snapshot."
+                        )
+                    if state_root.is_symlink() or (
+                        state_root.exists() and not state_root.is_dir()
+                    ):
+                        state_root.unlink()
+                    elif state_root.exists():
+                        shutil.rmtree(state_root)
+                    staged_state.rename(state_root)
+                    if _clawpatch_state_fingerprint(state_root) != snapshot_fingerprint:
+                        raise SafetyError(
+                            "The restored ClawPatch state does not match its recovery snapshot."
+                        )
+            except (OSError, SafetyError) as exc:
+                raise SafetyError(
+                    "ClawPatch state restoration failed; recovery snapshot retained at "
+                    f"{snapshot}: {exc}"
+                ) from exc
+            restored = True
+    finally:
+        if restored:
+            shutil.rmtree(recovery_root)
 
 
 def _require_synchronized_remote_branch(

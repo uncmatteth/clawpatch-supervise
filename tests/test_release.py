@@ -4,6 +4,7 @@ import hashlib
 import json
 import multiprocessing
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -28,6 +29,7 @@ from clawpatch_supervise.clawpatch_release import (
     _execute_fix,
     _external_state_home,
     _fix_command,
+    _hard_reset_preserving_clawpatch_state,
     _is_clawpatch_argv,
     _load_release_progress,
     _map_repository,
@@ -1798,6 +1800,59 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 _require_synchronized_remote_branch(repo, branch)
 
             self.assertEqual((repo / "dirty.txt").read_text(encoding="utf-8"), "preserve me\n")
+
+    def test_failed_clawpatch_state_restore_retains_recovery_snapshot(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repo"
+            repo.mkdir()
+            state_root = repo / ".clawpatch"
+            state_root.mkdir()
+            (state_root / "project.json").write_text(
+                '{"queue":"local-active"}\n', encoding="utf-8"
+            )
+            original_copytree = shutil.copytree
+            snapshot: Path | None = None
+            copy_count = 0
+
+            def copytree(source: Path, destination: Path, **kwargs):
+                nonlocal copy_count, snapshot
+                copy_count += 1
+                if copy_count == 1:
+                    snapshot = Path(destination)
+                    return original_copytree(source, destination, **kwargs)
+                raise OSError("injected restore copy failure")
+
+            def reset(_argv: list[str], **_kwargs) -> str:
+                shutil.rmtree(state_root)
+                state_root.mkdir()
+                (state_root / "project.json").write_text(
+                    '{"queue":"remote-stale"}\n', encoding="utf-8"
+                )
+                return ""
+
+            with (
+                patch(
+                    "clawpatch_supervise.clawpatch_release.shutil.copytree",
+                    side_effect=copytree,
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._must_run",
+                    side_effect=reset,
+                ),
+                self.assertRaisesRegex(
+                    SafetyError,
+                    "recovery snapshot.*injected restore copy failure",
+                ),
+            ):
+                _hard_reset_preserving_clawpatch_state(repo, "remote")
+
+            self.assertIsNotNone(snapshot)
+            self.addCleanup(shutil.rmtree, snapshot.parent, ignore_errors=True)
+            self.assertTrue(snapshot.is_dir())
+            self.assertEqual(
+                (snapshot / "project.json").read_text(encoding="utf-8"),
+                '{"queue":"local-active"}\n',
+            )
 
     def test_conflicting_divergent_histories_preserve_local_ref_and_follow_remote(self):
         with tempfile.TemporaryDirectory() as temp:
