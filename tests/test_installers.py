@@ -1396,9 +1396,10 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
+        normalized_stderr = " ".join(result.stderr.split())
         self.assertIn(
             f"expected clawpatch-supervise {__version__}, found clawpatch-supervise 0.1.20",
-            result.stderr,
+            normalized_stderr,
         )
         self.assertFalse(
             (install_root.parent / "installed-bin" / "clawpatch-supervise.cmd").exists()
