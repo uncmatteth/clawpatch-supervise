@@ -1789,7 +1789,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
             self.assertEqual((repo / "dirty.txt").read_text(encoding="utf-8"), "preserve me\n")
 
-    def test_conflicting_divergent_histories_restore_exact_tree_and_wait(self):
+    def test_conflicting_divergent_histories_preserve_local_ref_and_follow_remote(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = root / "repo"
@@ -1797,6 +1797,22 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             remote = root / "remote.git"
             repo.mkdir()
             self.init_repo(repo)
+            state_root = repo / ".clawpatch"
+            state_root.mkdir()
+            (state_root / "project.json").write_text(
+                '{"queue":"base"}\n', encoding="utf-8"
+            )
+            (state_root / "obsolete.json").write_text("base\n", encoding="utf-8")
+            subprocess.run(
+                ["git", "add", "-f", ".clawpatch/project.json", ".clawpatch/obsolete.json"],
+                cwd=repo,
+                check=True,
+            )
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "tracked clawpatch state"],
+                cwd=repo,
+                check=True,
+            )
             subprocess.run(["git", "init", "--bare", "-q", str(remote)], check=True)
             subprocess.run(["git", "remote", "add", "origin", str(remote)], cwd=repo, check=True)
             branch = subprocess.check_output(
@@ -1820,37 +1836,77 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             local_head = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=repo, text=True
             ).strip()
-            local_tree = subprocess.check_output(
-                ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
-            ).strip()
+            (state_root / "project.json").write_text(
+                '{"queue":"local-active"}\n', encoding="utf-8"
+            )
+            (state_root / "obsolete.json").unlink()
+            (state_root / "new-attempt.json").write_text("active\n", encoding="utf-8")
 
             (publisher / "tracked.txt").write_text("remote\n", encoding="utf-8")
+            (publisher / ".clawpatch" / "project.json").write_text(
+                '{"queue":"remote-stale"}\n', encoding="utf-8"
+            )
             subprocess.run(["git", "add", "tracked.txt"], cwd=publisher, check=True)
+            subprocess.run(
+                ["git", "add", "-f", ".clawpatch/project.json"],
+                cwd=publisher,
+                check=True,
+            )
             subprocess.run(
                 ["git", "commit", "-q", "-m", "remote conflict"],
                 cwd=publisher,
                 check=True,
             )
             subprocess.run(["git", "push", "-q", "origin", branch], cwd=publisher, check=True)
+            remote_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=publisher, text=True
+            ).strip()
+            remote_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=publisher, text=True
+            ).strip()
 
-            with self.assertRaisesRegex(RepositoryBusyError, "merge conflicts"):
-                _require_synchronized_remote_branch(repo, branch)
+            aligned = _require_synchronized_remote_branch(repo, branch)
 
+            self.assertEqual(aligned, remote_head)
             self.assertEqual(
                 subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
-                local_head,
+                remote_head,
             )
             self.assertEqual(
                 subprocess.check_output(
                     ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
                 ).strip(),
-                local_tree,
+                remote_tree,
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    [
+                        "git",
+                        "rev-parse",
+                        f"refs/clawpatch-supervise/recovery/diverged-history/{local_head}",
+                    ],
+                    cwd=repo,
+                    text=True,
+                ).strip(),
+                local_head,
             )
             self.assertEqual(
                 subprocess.check_output(
                     ["git", "status", "--porcelain"], cwd=repo, text=True
-                ),
-                "",
+                ).splitlines(),
+                [
+                    " D .clawpatch/obsolete.json",
+                    " M .clawpatch/project.json",
+                ],
+            )
+            self.assertEqual(
+                (state_root / "project.json").read_text(encoding="utf-8"),
+                '{"queue":"local-active"}\n',
+            )
+            self.assertFalse((state_root / "obsolete.json").exists())
+            self.assertEqual(
+                (state_root / "new-attempt.json").read_text(encoding="utf-8"),
+                "active\n",
             )
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")

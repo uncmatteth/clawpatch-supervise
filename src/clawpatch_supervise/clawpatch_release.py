@@ -312,6 +312,29 @@ def _require_branch(repo: Path, expected: str, *, phase: str) -> None:
         )
 
 
+def _hard_reset_preserving_clawpatch_state(repo: Path, target: str) -> None:
+    state_root = repo / ".clawpatch"
+    if state_root.is_symlink() or (state_root.exists() and not state_root.is_dir()):
+        raise SafetyError(
+            "Divergent-history recovery requires .clawpatch to be a safe repository directory."
+        )
+    if not state_root.is_dir():
+        _must_run(["git", "reset", "--hard", target], cwd=repo, timeout=120)
+        return
+
+    with tempfile.TemporaryDirectory(prefix="clawpatch-supervise-state-recovery-") as temp:
+        snapshot = Path(temp) / "clawpatch"
+        shutil.copytree(state_root, snapshot, symlinks=True)
+        try:
+            _must_run(["git", "reset", "--hard", target], cwd=repo, timeout=120)
+        finally:
+            if state_root.is_symlink() or state_root.is_file():
+                state_root.unlink()
+            elif state_root.exists():
+                shutil.rmtree(state_root)
+            shutil.copytree(snapshot, state_root, symlinks=True)
+
+
 def _require_synchronized_remote_branch(
     repo: Path,
     branch: str,
@@ -392,18 +415,72 @@ def _require_synchronized_remote_branch(
                     timeout=300,
                 )
             if merged.returncode:
-                _must_run(["git", "merge", "--abort"], cwd=repo, timeout=120)
+                merge_head = _run(
+                    ["git", "rev-parse", "--verify", "-q", "MERGE_HEAD"],
+                    cwd=repo,
+                    timeout=60,
+                )
+                if merge_head.returncode == 0:
+                    _must_run(["git", "merge", "--abort"], cwd=repo, timeout=120)
                 restored = _git_text(repo, ["git", "rev-parse", "HEAD"])
                 if restored != local or _source_paths(repo):
                     raise SafetyError(
                         "Automatic divergent-history merge failed and exact pre-merge state "
                         "could not be restored."
                     )
-                raise RepositoryBusyError(
-                    f"Local HEAD {local!r} and origin/{branch} at {remote!r} have merge "
-                    "conflicts. The supervisor restored the exact local tree and will wait "
-                    "without choosing either side."
+                recovery_ref = (
+                    "refs/clawpatch-supervise/recovery/diverged-history/" + local
                 )
+                existing_recovery = _run(
+                    ["git", "rev-parse", "--verify", recovery_ref],
+                    cwd=repo,
+                    timeout=60,
+                )
+                if existing_recovery.returncode:
+                    _must_run(
+                        ["git", "update-ref", recovery_ref, local],
+                        cwd=repo,
+                        timeout=60,
+                    )
+                elif existing_recovery.stdout.strip() != local:
+                    raise SafetyError(
+                        "Divergent-history recovery ref points to unexpected local history."
+                    )
+                if _git_text(repo, ["git", "rev-parse", recovery_ref]) != local:
+                    raise SafetyError("Divergent local history could not be preserved.")
+                final_remote_line = _git_text(
+                    repo, ["git", "ls-remote", "origin", f"refs/heads/{branch}"]
+                )
+                final_remote = final_remote_line.split()[0] if final_remote_line else ""
+                if final_remote != remote:
+                    raise RepositoryBusyError(
+                        f"Origin/{branch} changed during divergent-history recovery; "
+                        "retrying from the preserved local history."
+                    )
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "git-sync",
+                            "current": "?",
+                            "total": "?",
+                            "command": f"preserve {local}; align {branch} to {remote}",
+                            "detail": (
+                                "preserve conflicting local history in a recovery ref; "
+                                f"continue from origin/{branch}"
+                            ),
+                            "attempt": 1,
+                            "max_attempts": 1,
+                            "preserved_ref": recovery_ref,
+                        }
+                    )
+                _hard_reset_preserving_clawpatch_state(repo, remote)
+                _require_branch(repo, branch, phase="divergent-history recovery")
+                aligned = _git_text(repo, ["git", "rev-parse", "HEAD"])
+                if aligned != remote or _source_paths(repo):
+                    raise SafetyError(
+                        "Divergent-history recovery did not leave the exact remote source tree."
+                    )
+                return aligned
             _require_branch(repo, branch, phase="remote synchronization")
             local = _git_text(repo, ["git", "rev-parse", "HEAD"])
             if _source_paths(repo):
