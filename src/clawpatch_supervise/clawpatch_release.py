@@ -1985,7 +1985,7 @@ def _checkpoint_completed_commit(
     repo: Path,
     progress: dict[str, Any],
 ) -> str:
-    if progress.get("phase") != "stopped":
+    if progress.get("phase") not in {"stopped", "finalized"}:
         return ""
     old_head = progress.get("head_before")
     owned_paths = progress.get("owned_paths")
@@ -5427,6 +5427,37 @@ def _release_sweep_locked(
                     }
                 )
             durable_progress = None
+        if (
+            durable_progress is not None
+            and durable_progress["phase"] == "finalized"
+            and not preexisting_source
+        ):
+            completed_commit = _checkpoint_completed_commit(root, durable_progress)
+            if completed_commit:
+                completed_finding = str(durable_progress["finding_id"])
+                if progress is not None:
+                    progress(
+                        {
+                            "phase": "reset-recovery",
+                            "current": "?",
+                            "total": "?",
+                            "finding_id": completed_finding,
+                            "command": (
+                                "retire completed checkpoint after interrupted push; "
+                                "keep its committed repair and reconcile the remote"
+                            ),
+                            "attempt": 1,
+                            "max_attempts": 1,
+                            "owned_paths": [],
+                            "commit": completed_commit,
+                        }
+                    )
+                _clear_release_progress(root, state_root=state_root)
+                report["finalized_checkpoint_recovery"] = {
+                    "finding_id": completed_finding,
+                    "commit": completed_commit,
+                }
+                durable_progress = None
         if durable_progress is not None and _rebuilt_generation_supersedes_empty_checkpoint(
             root, durable_progress
         ):
