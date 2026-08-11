@@ -191,6 +191,16 @@ try {
     }
 }
 
+$supervisorVersionOutput = @(& $supervisor --version)
+if ($LASTEXITCODE -ne 0) {
+    throw "The installed supervisor command failed its version check."
+}
+$expectedSupervisorVersion = "clawpatch-supervise $Version"
+$supervisorInstalledVersion = [string]($supervisorVersionOutput | Select-Object -First 1)
+if ($supervisorVersionOutput.Count -ne 1 -or $supervisorInstalledVersion -cne $expectedSupervisorVersion) {
+    throw "Installed supervisor version mismatch: expected $expectedSupervisorVersion, found $supervisorInstalledVersion."
+}
+
 New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
 
 $wrapper = Join-Path $BinDir "clawpatch-supervise.cmd"
@@ -216,7 +226,7 @@ if ($AddToPath) {
     }
 }
 
-& $supervisor --version
+Write-Output $supervisorInstalledVersion
 if (-not [string]::IsNullOrWhiteSpace($VerifyRepo)) {
     & $wrapper doctor --repo (Resolve-Path -LiteralPath $VerifyRepo).Path
     if ($LASTEXITCODE -ne 0) {

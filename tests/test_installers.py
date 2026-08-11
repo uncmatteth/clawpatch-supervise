@@ -63,6 +63,7 @@ class InstallerContractTests(unittest.TestCase):
         npm_mode: str = "success",
         source_package: Path | str = REPOSITORY_ROOT,
         source_sha256: str | None = None,
+        supervisor_version: str = __version__,
         supervisor_version_fails: bool = False,
         supervisor_move_fails: bool = False,
         node_version: str = "v22.0.0",
@@ -93,7 +94,7 @@ class InstallerContractTests(unittest.TestCase):
             '  clawhub:--cli-version) printf "%s\\n" "$CLAWPATCH_TEST_CLAWHUB_VERSION" ;;\n'
             '  clawpatch-supervise:--version)\n'
             '    [ "$CLAWPATCH_TEST_SUPERVISOR_VERSION_FAILS" != "true" ] || exit 26\n'
-            '    printf "0.1.21\\n" ;;\n'
+            '    printf "clawpatch-supervise %s\\n" "$CLAWPATCH_TEST_SUPERVISOR_VERSION" ;;\n'
             '  clawpatch-supervise:doctor)\n'
             '    command -v clawpatch >/dev/null 2>&1 || exit 27\n'
             '    clawpatch --version >/dev/null 2>&1 || exit 28 ;;\n'
@@ -206,6 +207,7 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_SUPERVISOR_VERSION_FAILS": str(
                     supervisor_version_fails
                 ).lower(),
+                "CLAWPATCH_TEST_SUPERVISOR_VERSION": supervisor_version,
                 "CLAWPATCH_TEST_SUPERVISOR_MOVE_FAILS": str(
                     supervisor_move_fails
                 ).lower(),
@@ -279,6 +281,7 @@ class InstallerContractTests(unittest.TestCase):
         node_version: str = "v22.0.0",
         source_package: Path | str = REPOSITORY_ROOT,
         source_sha256: str = "",
+        supervisor_version: str = __version__,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
         fake_bin = root / "bin with spaces"
@@ -315,7 +318,7 @@ class InstallerContractTests(unittest.TestCase):
         self._write_batch(
             supervisor_stub,
             "@echo off\n"
-            f'if "%1"=="--version" echo {__version__}\n'
+            'if "%1"=="--version" echo clawpatch-supervise %CLAWPATCH_TEST_SUPERVISOR_VERSION%\n'
             'if "%1"=="doctor" where clawpatch.cmd >nul || exit /b 27\n'
             "exit /b 0\n",
         )
@@ -392,6 +395,7 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
                 "CLAWPATCH_TEST_VENV_PYTHON_STUB": str(venv_python_stub),
                 "CLAWPATCH_TEST_SUPERVISOR_STUB": str(supervisor_stub),
+                "CLAWPATCH_TEST_SUPERVISOR_VERSION": supervisor_version,
                 "CLAWPATCH_TEST_PYTHON_VERSION_FAILS": str(python_version_fails).lower(),
                 "CLAWPATCH_TEST_NODE_VERSION": node_version,
                 "CLAWPATCH_TEST_SOURCE": str(source_package),
@@ -1060,6 +1064,25 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(list(install_root.iterdir()), [install_root / "venv.previous"])
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_stale_supervisor_candidate_before_activation(
+        self,
+    ) -> None:
+        result, _invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            supervisor_version="0.1.20",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn(
+            f"expected clawpatch-supervise {__version__}, found clawpatch-supervise 0.1.20",
+            result.stderr,
+        )
+        self.assertFalse((install_root.parent / "installed-bin" / "clawpatch-supervise").exists())
+        self.assertEqual(list(install_root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_retains_superseded_managed_environment_for_active_processes(
         self,
     ) -> None:
@@ -1331,6 +1354,26 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("PYTHONUTF8=1", wrapper_text)
         self.assertIn("PYTHONIOENCODING=utf-8", wrapper_text)
         self.assertIn("NODE_DISABLE_COMPILE_CACHE=1", wrapper_text)
+
+    @unittest.skipUnless(os.name == "nt", "Windows installer test")
+    def test_windows_installer_rejects_stale_supervisor_candidate_before_activation(
+        self,
+    ) -> None:
+        result, _invocations, install_root = self._run_windows_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            supervisor_version="0.1.20",
+        )
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn(
+            f"expected clawpatch-supervise {__version__}, found clawpatch-supervise 0.1.20",
+            result.stderr,
+        )
+        self.assertFalse(
+            (install_root.parent / "installed-bin" / "clawpatch-supervise.cmd").exists()
+        )
 
     @unittest.skipUnless(os.name == "nt", "Windows installer test")
     def test_windows_installer_keeps_newer_clawpatch(self) -> None:
