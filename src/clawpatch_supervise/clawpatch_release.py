@@ -5203,11 +5203,38 @@ def _release_sweep_locked(
     resumed_checkpoint_kind = "stopped applied attempt"
     if durable_progress is not None:
         if durable_progress["branch"] != current_branch:
-            raise SafetyError(
-                "Interrupted Clawpatch release progress is bound to branch "
-                f"{durable_progress['branch']!r}, not {current_branch!r}."
-            )
-        if _rebuilt_generation_supersedes_empty_checkpoint(root, durable_progress):
+            retired_branch = str(durable_progress["branch"])
+            retired_finding = str(durable_progress["finding_id"])
+            retired_paths = list(durable_progress["owned_paths"])
+            _clear_release_progress(root, state_root=state_root)
+            report["retired_branch_progress"] = {
+                "branch": retired_branch,
+                "current_branch": current_branch,
+                "finding_id": retired_finding,
+                "owned_paths": retired_paths,
+            }
+            if progress is not None:
+                progress(
+                    {
+                        "phase": "reset-recovery",
+                        "current": "?",
+                        "total": "?",
+                        "finding_id": retired_finding,
+                        "command": (
+                            "retire interrupted progress from a different branch; "
+                            "continue on the current branch without changing source"
+                        ),
+                        "attempt": 1,
+                        "max_attempts": 1,
+                        "owned_paths": retired_paths,
+                        "retired_branch": retired_branch,
+                        "current_branch": current_branch,
+                    }
+                )
+            durable_progress = None
+        if durable_progress is not None and _rebuilt_generation_supersedes_empty_checkpoint(
+            root, durable_progress
+        ):
             reset_finding = str(durable_progress["finding_id"])
             if progress is not None:
                 progress(

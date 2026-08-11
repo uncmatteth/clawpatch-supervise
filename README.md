@@ -96,7 +96,7 @@ clawpatch-supervise `
   --timeout-minutes 15
 ```
 
-From a target repository, bare `clawpatch-supervise` uses the current branch, pushes each verified repair, and processes the queue without a start-mode prompt. It resumes any exact stopped checkpoint automatically, preserves an open queue, revalidates every retained uncertain finding, and starts a fresh full review automatically only when both the existing queue and project source are proven clean. Clean divergent local and remote histories are merged automatically with hooks and signing disabled; a dirty or conflicting reconciliation waits and retries without discarding either side. If active edits no longer match a stale checkpoint, the external command also waits without adopting, resetting, or committing those edits; once their owner leaves a clean committed tree, checkpoint recovery and queue processing continue. Another active run also makes the command wait, and transient provider, refusal, quota, or timeout failures retry from durable state every 30 seconds until they succeed or the operator interrupts the command. Use `--push none` for verified local commits without publication. `--fresh` still explicitly requires a clean queue and clean source; `--resume-stopped` remains available only as a compatibility override that forbids an automatic fresh start.
+From a target repository, bare `clawpatch-supervise` uses the current branch, pushes each verified repair, and processes the queue without a start-mode prompt. It resumes any exact stopped checkpoint automatically, preserves an open queue, revalidates every retained uncertain finding, and starts a fresh full review automatically only when both the existing queue and project source are proven clean. Interrupted progress recorded for a different branch is retired automatically, without switching branches or changing source, so stale release-sweep state cannot block supervision on the current branch. Clean divergent local and remote histories are merged automatically with hooks and signing disabled; a dirty or conflicting reconciliation waits and retries without discarding either side. If active edits no longer match a stale checkpoint, the external command also waits without adopting, resetting, or committing those edits; once their owner leaves a clean committed tree, checkpoint recovery and queue processing continue. Another active run also makes the command wait, and transient provider, refusal, quota, or timeout failures retry from durable state every 30 seconds until they succeed or the operator interrupts the command. Use `--push none` for verified local commits without publication. `--fresh` still explicitly requires a clean queue and clean source; `--resume-stopped` remains available only as a compatibility override that forbids an automatic fresh start.
 
 The supervisor resolves `--repo` to one canonical path before preflight and uses that same path for the entire run, so retargeting a repository symlink cannot redirect later repair work.
 
@@ -415,7 +415,7 @@ The release version is declared once as `clawpatch_supervise.__version__`; setup
 
 ## Project status
 
-Current release: **0.1.30 alpha**.
+Current release: **0.1.31 alpha**.
 
 The state and safety contracts are intentionally strict. If the supervisor cannot prove that a repair, checkpoint, branch, process, or commit belongs to the current finding, it preserves the evidence and refuses to guess.
 

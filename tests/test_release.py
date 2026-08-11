@@ -5889,6 +5889,55 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertFalse(final_closure.call_args.kwargs["resolve_uncertain"])
         self.assertTrue(final_closure.call_args.kwargs["refresh_retained_uncertain"])
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_stale_progress_from_another_branch_is_retired_without_blocking_supervise(
+        self, _version, _processes, json_clawpatch, final_closure
+    ):
+        progress_events = []
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            _write_release_progress(
+                repo,
+                finding_id="fnd_old",
+                branch="clawpatch/release-sweep-old",
+                head_before=head,
+                phase="stopped",
+                owned_paths=[],
+            )
+            json_clawpatch.side_effect = [
+                {"activeLocks": 0, "lockFiles": 0, "openFindings": 0},
+                {"features": 4},
+                {"dryRun": True, "wouldReview": 4, "jobs": 4},
+                {"reviewed": 4, "findings": 0},
+                {"dryRun": True, "wouldReview": 0, "jobs": 4},
+                {"finding": None, "status": "open", "next": "clawpatch report --status open"},
+            ]
+            final_closure.return_value = {"pushed": False}
+
+            report = release_sweep(
+                repo,
+                apply=True,
+                branch="current",
+                publish_clawpatch_state=True,
+                advance_uncertain=True,
+                progress=progress_events.append,
+            )
+
+            self.assertIsNone(_load_release_progress(repo))
+
+        self.assertEqual(report["retired_branch_progress"]["branch"], "clawpatch/release-sweep-old")
+        self.assertEqual(report["retired_branch_progress"]["current_branch"], "main")
+        self.assertTrue(
+            any(event.get("phase") == "reset-recovery" for event in progress_events)
+        )
+
     @patch("clawpatch_supervise.clawpatch_release._prepare_fresh_release")
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
