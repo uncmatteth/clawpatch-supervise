@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import os
@@ -8,6 +9,7 @@ import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
@@ -24,6 +26,7 @@ _PROC_ROOT = Path("/proc")
 _CURRENT_TEMPORARY_ROOT: ContextVar[Path | None] = ContextVar(
     "clawpatch_supervise_temporary_root", default=None
 )
+_CLEANUP_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -329,18 +332,152 @@ def cleanup_owned_runs(
 
 
 def _remove_exact_owned_run(candidate: Path, cleanup_root: Path) -> None:
-    if candidate.is_symlink() or not candidate.is_dir():
+    with _serialized_cleanup_root(cleanup_root):
+        _remove_exact_owned_run_locked(candidate, cleanup_root)
+
+
+def _remove_exact_owned_run_locked(candidate: Path, cleanup_root: Path) -> None:
+    metadata = candidate.lstat()
+    if not stat.S_ISDIR(metadata.st_mode):
         raise SafetyError("The supervisor-owned run directory is no longer a safe directory.")
     if candidate.resolve().parent != cleanup_root.resolve() or _owned_marker(candidate) is None:
         raise SafetyError("The supervisor-owned run directory failed its ownership check.")
-    live_reference = _path_has_live_reference(candidate)
-    if live_reference is None:
-        raise SafetyError(
-            "Could not prove that no live process references the supervisor-owned run directory."
+    identity = (metadata.st_dev, metadata.st_ino)
+    if identity == (0, 0):
+        raise SafetyError("Could not establish the supervisor-owned run directory identity.")
+
+    quarantine = cleanup_root / f".cleanup-{secrets.token_hex(12)}"
+    quarantine.mkdir(mode=0o700)
+    claimed = quarantine / candidate.name
+
+    def claimed_is_exact_owned_run() -> bool:
+        try:
+            claimed_metadata = claimed.lstat()
+        except OSError:
+            return False
+        return (
+            stat.S_ISDIR(claimed_metadata.st_mode)
+            and (claimed_metadata.st_dev, claimed_metadata.st_ino) == identity
+            and _owned_marker(claimed) is not None
         )
-    if live_reference:
-        raise SafetyError("A live process still references the supervisor-owned run directory.")
-    shutil.rmtree(candidate)
+
+    try:
+        candidate.rename(claimed)
+        if not claimed_is_exact_owned_run():
+            raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+        live_reference = _path_has_live_reference(claimed)
+        if live_reference is None:
+            raise SafetyError(
+                "Could not prove that no live process references the supervisor-owned run directory."
+            )
+        if live_reference:
+            raise SafetyError("A live process still references the supervisor-owned run directory.")
+        if not claimed_is_exact_owned_run():
+            raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+        _remove_exact_directory(claimed, identity)
+    except BaseException as error:
+        if claimed.exists() or claimed.is_symlink():
+            if candidate.exists() or candidate.is_symlink():
+                error.add_note(
+                    f"The claimed supervisor-owned run directory was retained at {claimed}."
+                )
+            else:
+                try:
+                    claimed.rename(candidate)
+                except OSError as restore_error:
+                    error.add_note(
+                        "The claimed supervisor-owned run directory could not be restored: "
+                        f"{restore_error}"
+                    )
+        raise
+
+
+@contextmanager
+def _serialized_cleanup_root(cleanup_root: Path) -> Iterator[None]:
+    with _CLEANUP_LOCK:
+        descriptor = None
+        if os.name == "posix":
+            import fcntl
+
+            flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_CLOEXEC", 0)
+            descriptor = os.open(cleanup_root, flags)
+            try:
+                fcntl.flock(descriptor, fcntl.LOCK_EX)
+            except BaseException:
+                os.close(descriptor)
+                raise
+        try:
+            yield
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+
+def _remove_exact_directory(path: Path, identity: tuple[int, int]) -> None:
+    required_dir_fd_functions = (os.open, os.stat, os.unlink)
+    if os.scandir not in os.supports_fd or any(
+        function not in os.supports_dir_fd for function in required_dir_fd_functions
+    ):
+        raise OSError(
+            errno.ENOTSUP,
+            "The platform cannot remove this run through a stable directory handle.",
+            str(path),
+        )
+
+    flags = (
+        os.O_RDONLY
+        | getattr(os, "O_DIRECTORY", 0)
+        | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    parent_descriptor = os.open(path.parent, flags)
+    try:
+        directory_descriptor = os.open(path.name, flags, dir_fd=parent_descriptor)
+        try:
+            metadata = os.fstat(directory_descriptor)
+            if (metadata.st_dev, metadata.st_ino) != identity:
+                raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+            _empty_directory_descriptor(directory_descriptor, flags)
+            current = os.stat(path.name, dir_fd=parent_descriptor, follow_symlinks=False)
+            if (current.st_dev, current.st_ino) != identity:
+                raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+            # POSIX has no unprivileged identity-conditional rmdir operation.
+            # Retain this exact inode under its random quarantine name rather
+            # than risk deleting a replacement installed after this check.
+        finally:
+            os.close(directory_descriptor)
+    finally:
+        os.close(parent_descriptor)
+
+
+def _empty_directory_descriptor(directory_descriptor: int, flags: int) -> None:
+    with os.scandir(directory_descriptor) as entries:
+        for entry in entries:
+            metadata = entry.stat(follow_symlinks=False)
+            if stat.S_ISDIR(metadata.st_mode):
+                child_descriptor = os.open(entry.name, flags, dir_fd=directory_descriptor)
+                try:
+                    opened = os.fstat(child_descriptor)
+                    if (opened.st_dev, opened.st_ino) != (metadata.st_dev, metadata.st_ino):
+                        raise SafetyError(
+                            "The supervisor-owned run directory changed during cleanup."
+                        )
+                    _empty_directory_descriptor(child_descriptor, flags)
+                finally:
+                    os.close(child_descriptor)
+                current = os.stat(
+                    entry.name,
+                    dir_fd=directory_descriptor,
+                    follow_symlinks=False,
+                )
+                if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
+                    raise SafetyError(
+                        "The supervisor-owned run directory changed during cleanup."
+                    )
+                # The same identity-conditional rmdir limitation applies to
+                # nested directories, so retain the now-empty exact inode.
+            else:
+                os.unlink(entry.name, dir_fd=directory_descriptor)
 
 
 @contextmanager

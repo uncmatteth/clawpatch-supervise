@@ -42,6 +42,14 @@ class CleanupCommandTests(unittest.TestCase):
             encoding="utf-8",
         )
 
+    def _assert_retained_directory_quarantine(self, cleanup_root: Path) -> None:
+        quarantines = list(cleanup_root.iterdir())
+        self.assertEqual(len(quarantines), 1)
+        self.assertTrue(quarantines[0].name.startswith(".cleanup-"))
+        retained = list(quarantines[0].rglob("*"))
+        self.assertTrue(retained)
+        self.assertTrue(all(path.is_dir() for path in retained))
+
     def test_cleanup_dry_run_reports_owned_stale_directory_without_deleting_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
@@ -232,6 +240,91 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertEqual(sentinel.read_text(encoding="utf-8"), "outside\n")
             self.assertTrue(original.is_dir())
 
+    def test_cleanup_apply_preserves_replacement_created_during_final_liveness_check(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-replaced"
+            original = cleanup_root / "run-original"
+            self._mark(candidate, pid=999_999_999, created_unix=0)
+            probes = 0
+
+            def replace_during_final_probe(path: Path) -> bool:
+                nonlocal probes
+                probes += 1
+                if probes == 2:
+                    path.rename(original)
+                    path.mkdir()
+                    (path / "keep.txt").write_text("replacement\n", encoding="utf-8")
+                return False
+
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup._path_has_live_reference",
+                    side_effect=replace_during_final_probe,
+                ),
+                self.assertRaisesRegex(SafetyError, "changed during cleanup"),
+            ):
+                cleanup_owned_runs(apply=True, root=cleanup_root, stale_after_seconds=0)
+
+            self.assertEqual(probes, 2)
+            self.assertEqual(
+                (candidate / "keep.txt").read_text(encoding="utf-8"),
+                "replacement\n",
+            )
+            self.assertTrue(original.is_dir())
+
+    def test_cleanup_preserves_nested_replacement_created_after_final_identity_check(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            candidate = Path(temp) / "run-owned"
+            nested = candidate / "nested"
+            original = candidate / "nested-original"
+            nested.mkdir(parents=True)
+            candidate_metadata = candidate.lstat()
+            original_stat = cleanup_module.os.stat
+            replacement_identity: tuple[int, int] | None = None
+
+            def replace_after_stat(path, *args, **kwargs):
+                nonlocal replacement_identity
+                result = original_stat(path, *args, **kwargs)
+                if (
+                    path == nested.name
+                    and kwargs.get("dir_fd") is not None
+                    and replacement_identity is None
+                ):
+                    nested.rename(original)
+                    nested.mkdir()
+                    metadata = nested.lstat()
+                    replacement_identity = (metadata.st_dev, metadata.st_ino)
+                return result
+
+            with patch.object(
+                cleanup_module.os,
+                "stat",
+                side_effect=replace_after_stat,
+            ) as checked_stat:
+                supported_dir_fd = {*cleanup_module.os.supports_dir_fd, checked_stat}
+                with patch.object(
+                    cleanup_module.os,
+                    "supports_dir_fd",
+                    supported_dir_fd,
+                ):
+                    cleanup_module._remove_exact_directory(
+                        candidate,
+                        (candidate_metadata.st_dev, candidate_metadata.st_ino),
+                    )
+
+            self.assertIsNotNone(replacement_identity)
+            replacement_metadata = nested.lstat()
+            self.assertEqual(
+                (replacement_metadata.st_dev, replacement_metadata.st_ino),
+                replacement_identity,
+            )
+            self.assertTrue(original.is_dir())
+
     def test_supervisor_run_routes_temporary_files_into_owned_directory_then_removes_it(
         self,
     ) -> None:
@@ -280,7 +373,7 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertEqual(child_env["PYTHONUTF8"], "1")
             self.assertEqual(child_env["PYTHONIOENCODING"], "utf-8")
             self.assertTrue(cleanup_root.is_dir())
-            self.assertEqual(list(cleanup_root.iterdir()), [])
+            self._assert_retained_directory_quarantine(cleanup_root)
 
     def test_completed_run_warns_instead_of_stopping_when_windows_blocks_temp_cleanup(
         self,
