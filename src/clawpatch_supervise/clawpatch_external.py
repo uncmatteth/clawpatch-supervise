@@ -496,7 +496,7 @@ def main(
     if not math.isfinite(args.retry_seconds) or args.retry_seconds <= 0:
         parser.error("--retry-seconds must be a finite positive number")
     try:
-        repo = Path(args.repo).resolve(strict=True)
+        repo = Path(args.repo).resolve(strict=not args.print_state_path)
     except (OSError, RuntimeError) as exc:
         print(
             "STOPPED: Could not resolve repository path "
