@@ -1171,6 +1171,62 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(len(preflight_calls), 2)
         self.assertIn("WAITING FOR THE ACTIVE RUN", output.getvalue())
 
+    def test_busy_exception_output_escapes_terminal_controls(self):
+        calls = []
+
+        def fake_preflight(_repo: Path):
+            calls.append(True)
+            if len(calls) == 1:
+                raise RepositoryBusyError(
+                    "busy\x1b[2J\nSTOPPED: forged\r\x9b31m\u202ereversed"
+                )
+            return None
+
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(StringIO()) as output,
+        ):
+            code = main(
+                ["--repo", ".", "--retry-seconds", "0.001"],
+                run_sweep=lambda _repo, **_kwargs: {
+                    "ok": True,
+                    "finding_count": 0,
+                    "open_findings": 0,
+                    "git_head": "abc",
+                },
+                ensure_repository_idle=fake_preflight,
+                heartbeat_seconds=0,
+            )
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn(r"busy\x1b[2J\nSTOPPED: forged\r\x9b31m\u202ereversed", rendered)
+        self.assertNotIn("\nSTOPPED: forged", rendered)
+        for control in ("\x1b", "\r", "\x9b", "\u202e"):
+            self.assertNotIn(control, rendered)
+
+    def test_safety_exception_output_escapes_terminal_controls(self):
+        def fake_sweep(_repo: Path, **_kwargs):
+            raise SafetyError("unsafe\x07\nCOMPLETE: forged\r\x9b31m\u2066isolated")
+
+        with redirect_stdout(StringIO()) as output:
+            code = main(
+                ["--repo", "."],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 2)
+        self.assertIn(r"unsafe\x07\nCOMPLETE: forged\r\x9b31m\u2066isolated", rendered)
+        self.assertNotIn("\nCOMPLETE: forged", rendered)
+        for control in ("\x07", "\r", "\x9b", "\u2066"):
+            self.assertNotIn(control, rendered)
+
     def test_preserved_state_retry_is_not_mislabeled_as_an_active_run(self):
         calls = []
 

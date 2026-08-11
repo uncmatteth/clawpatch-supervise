@@ -134,6 +134,10 @@ def _terminal_safe(value: Any) -> str:
     return "".join(escaped)
 
 
+def _terminal_safe_error(error: BaseException) -> str:
+    return _terminal_safe(redact_text(str(error)))
+
+
 def _counter(event: dict[str, Any]) -> str:
     current = _terminal_safe(event.get("current", "?"))
     total = _terminal_safe(event.get("total", "?"))
@@ -406,7 +410,7 @@ def main(
         try:
             cleanup_report = cleanup_owned_runs(apply=cleanup_args.apply, root=cleanup_root)
         except SafetyError as exc:
-            print(f"STOPPED: {exc}")
+            print(f"STOPPED: {_terminal_safe_error(exc)}")
             return 2
         print(f"ClawPatch Supervise cleanup root: {_terminal_safe(cleanup_report.root)}")
         for entry in cleanup_report.entries:
@@ -426,12 +430,15 @@ def main(
         try:
             repo = Path(doctor_args.repo).resolve()
         except (OSError, RuntimeError) as exc:
-            print(f"NOT READY: Could not resolve repository path {doctor_args.repo!r}: {exc}")
+            print(
+                "NOT READY: Could not resolve repository path "
+                f"{_terminal_safe(repr(doctor_args.repo))}: {_terminal_safe_error(exc)}"
+            )
             return 2
         try:
             report, _env_overrides = runtime_doctor(repo)
         except SafetyError as exc:
-            print(f"NOT READY: {exc}")
+            print(f"NOT READY: {_terminal_safe_error(exc)}")
             return 2
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
@@ -487,7 +494,10 @@ def main(
     try:
         repo = Path(args.repo).resolve()
     except (OSError, RuntimeError) as exc:
-        print(f"STOPPED: Could not resolve repository path {args.repo!r}: {exc}")
+        print(
+            "STOPPED: Could not resolve repository path "
+            f"{_terminal_safe(repr(args.repo))}: {_terminal_safe_error(exc)}"
+        )
         return 2
     if args.print_state_path:
         print(_terminal_safe(external_state_root(repo)))
@@ -557,7 +567,7 @@ def main(
             except RepositoryBusyError as exc:
                 print(
                     "\nBUSY: WAITING FOR THE ACTIVE RUN to release this repository; "
-                    f"checking again in {args.retry_seconds:g}s.\n{exc}",
+                    f"checking again in {args.retry_seconds:g}s.\n{_terminal_safe_error(exc)}",
                     flush=True,
                 )
                 time.sleep(args.retry_seconds)
@@ -620,7 +630,7 @@ def main(
                     print(
                         "\nTRANSIENT: RETRYING AUTOMATICALLY from the exact durable "
                         f"checkpoint in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
-                        f"{exc}",
+                        f"{_terminal_safe_error(exc)}",
                         flush=True,
                     )
                 except ClawpatchCommandFailure as exc:
@@ -630,7 +640,7 @@ def main(
                     print(
                         "\nTRANSIENT: RETRYING AUTOMATICALLY from the source-clean "
                         f"command in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
-                        f"{exc}",
+                        f"{_terminal_safe_error(exc)}",
                         flush=True,
                     )
                 except RepositoryBusyError as exc:
@@ -645,14 +655,14 @@ def main(
                     print(
                         f"\nBUSY: {heading}; checking again in "
                         f"{args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
-                        f"repo: {_terminal_safe(repo)}\n{exc}",
+                        f"repo: {_terminal_safe(repo)}\n{_terminal_safe_error(exc)}",
                         flush=True,
                     )
                 resolved_fresh = False
                 time.sleep(args.retry_seconds)
     except ClawpatchStop as exc:
         print("\n🛑💥🤬 FUCK. SUPERVISOR STOPPED SAFELY.", flush=True)
-        print(f"\nSTOPPED: {exc}", flush=True)
+        print(f"\nSTOPPED: {_terminal_safe_error(exc)}", flush=True)
         if exc.repair_action is RepairAction.STOP_TRANSIENT:
             print(
                 "TRANSIENT: service managers may resume this exact checkpoint with "
@@ -663,7 +673,7 @@ def main(
         return 2
     except ClawpatchCommandFailure as exc:
         print("\n💣😤🔧 COMMAND BLEW UP. SOURCE PROOF STILL WINS.", flush=True)
-        print(f"\nSTOPPED: {exc}", flush=True)
+        print(f"\nSTOPPED: {_terminal_safe_error(exc)}", flush=True)
         if exc.failure.transient:
             print(
                 "TRANSIENT: service managers may restart this source-clean command.",
@@ -673,7 +683,7 @@ def main(
         return 2
     except SafetyError as exc:
         print("\n🛑🧱🤬 SAFETY CHECK CAUGHT SOME SKETCHY SHIT.", flush=True)
-        print(f"\nSTOPPED: {exc}", flush=True)
+        print(f"\nSTOPPED: {_terminal_safe_error(exc)}", flush=True)
         return 2
     except KeyboardInterrupt:
         print(
