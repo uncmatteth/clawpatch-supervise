@@ -340,6 +340,7 @@ def _require_synchronized_remote_branch(
     branch: str,
     *,
     progress: Callable[[dict[str, Any]], None] | None = None,
+    preserve_local_on_conflict: bool = False,
 ) -> str:
     if branch == "HEAD":
         raise SafetyError("Clawpatch release sweep cannot synchronize a detached HEAD.")
@@ -427,6 +428,12 @@ def _require_synchronized_remote_branch(
                     raise SafetyError(
                         "Automatic divergent-history merge failed and exact pre-merge state "
                         "could not be restored."
+                    )
+                if preserve_local_on_conflict:
+                    raise SafetyError(
+                        "The current Clawpatch input baseline conflicts with "
+                        f"origin/{branch}. The baseline remains current at {local}; resolve the "
+                        "real Git conflict before supervision continues."
                     )
                 recovery_ref = (
                     "refs/clawpatch-supervise/recovery/diverged-history/" + local
@@ -2892,20 +2899,14 @@ def _checkpoint_proves_exact_source(
     )
 
 
-def _preserve_ambiguous_checkpoint_source(
+def _commit_ambiguous_checkpoint_source_baseline(
     repo: Path,
     checkpoint: dict[str, Any],
     paths: list[str],
     *,
     state_root: Path,
 ) -> dict[str, Any] | None:
-    """Preserve one exact stale-checkpoint source set and restore current HEAD.
-
-    Recovery is limited to a stopped checkpoint. Every current source change is
-    anchored under a local-only Git ref and described by an external receipt
-    before restoration, even when the stale checkpoint names different paths or
-    Git boundaries.
-    """
+    """Make ambiguous stopped source the new input baseline and retire its wrapper."""
     exact_paths = sorted(set(paths))
     owned_paths = sorted(str(path) for path in checkpoint.get("owned_paths", []))
     if (
@@ -2914,123 +2915,52 @@ def _preserve_ambiguous_checkpoint_source(
         or exact_paths != _source_paths(repo)
     ):
         return None
-    _validate_attempt_paths_syntax(exact_paths)
-    old_head = str(checkpoint.get("head_before", ""))
-    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
-
-    temporary_root = current_temporary_root()
-    with tempfile.TemporaryDirectory(
-        prefix="clawpatch-supervise-recovery-index-",
-        dir=str(temporary_root) if temporary_root is not None else None,
-    ) as temp:
-        index_path = Path(temp) / "index"
-        env = dict(os.environ)
-        env["GIT_INDEX_FILE"] = str(index_path)
-        env.update(
-            {
-                "GIT_AUTHOR_NAME": "ClawPatch Supervise Recovery",
-                "GIT_AUTHOR_EMAIL": "clawpatch-supervise-recovery@localhost",
-                "GIT_COMMITTER_NAME": "ClawPatch Supervise Recovery",
-                "GIT_COMMITTER_EMAIL": "clawpatch-supervise-recovery@localhost",
-            }
-        )
-        _must_run(["git", "read-tree", current_head], cwd=repo, timeout=120, env=env)
-        _must_run(["git", "add", "-A", "--", *exact_paths], cwd=repo, timeout=120, env=env)
-        preserved_tree = _must_run(
-            ["git", "write-tree"], cwd=repo, timeout=120, env=env
-        ).strip()
-        preserved_commit = _must_run(
-            [
-                "git",
-                "commit-tree",
-                preserved_tree,
-                "-p",
-                current_head,
-                "-m",
-                "clawpatch-supervise recovery: preserve ambiguous checkpoint source",
-            ],
-            cwd=repo,
-            timeout=120,
-            env=env,
-        ).strip()
-    if _paths_between(repo, current_head, preserved_commit) != exact_paths:
-        raise SafetyError(
-            "Automatic Clawpatch checkpoint recovery could not preserve exactly its ambiguous "
-            "source paths."
-        )
-
-    preserved_ref = f"refs/clawpatch-supervise/recovery/{preserved_commit}"
-    existing_ref = _run(
-        ["git", "rev-parse", "--verify", preserved_ref],
-        cwd=repo,
-        timeout=60,
+    baseline = _commit_preexisting_source_baseline(
+        repo,
+        exact_paths,
+        state_root=state_root,
     )
-    if existing_ref.returncode:
-        _must_run(
-            ["git", "update-ref", preserved_ref, preserved_commit],
-            cwd=repo,
-            timeout=60,
-        )
-    elif existing_ref.stdout.strip() != preserved_commit:
-        raise SafetyError("Clawpatch recovery ref unexpectedly points to different source.")
-
-    receipt_path = state_root / "recoveries" / f"{preserved_commit}.json"
-    receipt = {
-        "version": 1,
-        "repo": str(repo.resolve()),
-        "finding_id": str(checkpoint["finding_id"]),
-        "checkpoint_head": old_head,
-        "current_head": current_head,
-        "paths": exact_paths,
-        "checkpoint_owned_paths": owned_paths,
-        "recorded_source_fingerprint": str(
-            checkpoint.get("owned_source_fingerprint", "")
-        ),
-        "preserved_source_fingerprint": _source_paths_fingerprint(repo, exact_paths),
-        "preserved_commit": preserved_commit,
-        "preserved_ref": preserved_ref,
-        "created_at": utc_now(),
-        "checkpoint": checkpoint,
-    }
+    receipt_path = Path(str(baseline["receipt"]))
+    receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
+    receipt.update(
+        {
+            "reason": "ambiguous-checkpoint-source-baseline",
+            "finding_id": str(checkpoint["finding_id"]),
+            "checkpoint_head": str(checkpoint.get("head_before", "")),
+            "checkpoint_owned_paths": owned_paths,
+            "recorded_source_fingerprint": str(
+                checkpoint.get("owned_source_fingerprint", "")
+            ),
+            "checkpoint": checkpoint,
+        }
+    )
     atomic_write_json(receipt_path, receipt)
-
-    _discard_checkpoint_owned_source(repo, exact_paths)
-    remaining_source = _source_paths(repo)
-    if remaining_source:
-        raise SafetyError(
-            "Automatic Clawpatch checkpoint recovery preserved source at "
-            f"{preserved_ref} but could not restore a clean current HEAD: "
-            + ", ".join(remaining_source)
-        )
     _clear_release_progress(repo, state_root=state_root)
     return {
         "finding_id": str(checkpoint["finding_id"]),
-        "paths": exact_paths,
-        "preserved_commit": preserved_commit,
-        "preserved_ref": preserved_ref,
-        "receipt": str(receipt_path),
+        **baseline,
     }
 
 
-def _preserve_preexisting_source(
+def _commit_preexisting_source_baseline(
     repo: Path,
     paths: list[str],
     *,
     state_root: Path,
 ) -> dict[str, Any]:
-    """Preserve ownerless source under a local ref, then restore current HEAD."""
+    """Commit the complete current source tree as the external run baseline."""
     exact_paths = sorted(set(paths))
     if not exact_paths or exact_paths != _source_paths(repo):
         raise SafetyError(
-            "Automatic Clawpatch source recovery requires the complete current source set."
+            "Automatic Clawpatch baseline creation requires the complete current source set."
         )
     _validate_attempt_paths_syntax(exact_paths)
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
-    preserved_source_fingerprint = _source_paths_fingerprint(repo, exact_paths)
+    source_fingerprint = _source_paths_fingerprint(repo, exact_paths)
 
     temporary_root = current_temporary_root()
     with tempfile.TemporaryDirectory(
-        prefix="clawpatch-supervise-recovery-index-",
+        prefix="clawpatch-supervise-baseline-index-",
         dir=str(temporary_root) if temporary_root is not None else None,
     ) as temp:
         index_path = Path(temp) / "index"
@@ -3038,78 +2968,85 @@ def _preserve_preexisting_source(
         env["GIT_INDEX_FILE"] = str(index_path)
         env.update(
             {
-                "GIT_AUTHOR_NAME": "ClawPatch Supervise Recovery",
-                "GIT_AUTHOR_EMAIL": "clawpatch-supervise-recovery@localhost",
-                "GIT_COMMITTER_NAME": "ClawPatch Supervise Recovery",
-                "GIT_COMMITTER_EMAIL": "clawpatch-supervise-recovery@localhost",
+                "GIT_AUTHOR_NAME": "ClawPatch Supervise Baseline",
+                "GIT_AUTHOR_EMAIL": "clawpatch-supervise-baseline@localhost",
+                "GIT_COMMITTER_NAME": "ClawPatch Supervise Baseline",
+                "GIT_COMMITTER_EMAIL": "clawpatch-supervise-baseline@localhost",
             }
         )
         _must_run(["git", "read-tree", current_head], cwd=repo, timeout=120, env=env)
         _must_run(["git", "add", "-A", "--", *exact_paths], cwd=repo, timeout=120, env=env)
-        preserved_tree = _must_run(
+        baseline_tree = _must_run(
             ["git", "write-tree"], cwd=repo, timeout=120, env=env
         ).strip()
-        preserved_commit = _must_run(
+        baseline_commit = _must_run(
             [
                 "git",
                 "commit-tree",
-                preserved_tree,
+                baseline_tree,
                 "-p",
                 current_head,
                 "-m",
-                "clawpatch-supervise recovery: preserve pre-existing source",
+                "clawpatch baseline: pre-existing source",
             ],
             cwd=repo,
             timeout=120,
             env=env,
         ).strip()
-    if _paths_between(repo, current_head, preserved_commit) != exact_paths:
+    if _paths_between(repo, current_head, baseline_commit) != exact_paths:
         raise SafetyError(
-            "Automatic Clawpatch source recovery could not preserve exactly the current "
-            "source paths."
+            "Automatic Clawpatch baseline could not commit exactly the current source paths."
         )
 
-    preserved_ref = f"refs/clawpatch-supervise/recovery/{preserved_commit}"
+    baseline_ref = f"refs/clawpatch-supervise/baselines/{baseline_commit}"
     existing_ref = _run(
-        ["git", "rev-parse", "--verify", preserved_ref],
+        ["git", "rev-parse", "--verify", baseline_ref],
         cwd=repo,
         timeout=60,
     )
     if existing_ref.returncode:
         _must_run(
-            ["git", "update-ref", preserved_ref, preserved_commit],
+            ["git", "update-ref", baseline_ref, baseline_commit],
             cwd=repo,
             timeout=60,
         )
-    elif existing_ref.stdout.strip() != preserved_commit:
-        raise SafetyError("Clawpatch recovery ref unexpectedly points to different source.")
+    elif existing_ref.stdout.strip() != baseline_commit:
+        raise SafetyError("Clawpatch baseline ref unexpectedly points to different source.")
 
-    receipt_path = state_root / "recoveries" / f"{preserved_commit}.json"
+    receipt_path = state_root / "baselines" / f"{baseline_commit}.json"
     receipt = {
         "version": 1,
-        "reason": "preexisting-source",
+        "reason": "preexisting-source-baseline",
         "repo": str(repo.resolve()),
-        "current_head": current_head,
+        "parent_head": current_head,
         "paths": exact_paths,
-        "preserved_source_fingerprint": preserved_source_fingerprint,
-        "preserved_commit": preserved_commit,
-        "preserved_ref": preserved_ref,
+        "source_fingerprint": source_fingerprint,
+        "baseline_tree": baseline_tree,
+        "baseline_commit": baseline_commit,
+        "baseline_ref": baseline_ref,
         "created_at": utc_now(),
     }
     atomic_write_json(receipt_path, receipt)
 
-    _discard_checkpoint_owned_source(repo, exact_paths)
+    _must_run(
+        ["git", "update-ref", "HEAD", baseline_commit, current_head],
+        cwd=repo,
+        timeout=60,
+    )
+    _must_run(["git", "reset", "--mixed", "--quiet", "HEAD"], cwd=repo, timeout=120)
+    if _git_text(repo, ["git", "rev-parse", "HEAD"]) != baseline_commit:
+        raise SafetyError("Automatic Clawpatch baseline did not become the current Git HEAD.")
     remaining_source = _source_paths(repo)
-    if remaining_source:
+    if remaining_source or _git_text(repo, ["git", "rev-parse", "HEAD^{tree}"]) != baseline_tree:
         raise SafetyError(
-            "Automatic Clawpatch source recovery preserved source at "
-            f"{preserved_ref} but could not restore a clean current HEAD: "
-            + ", ".join(remaining_source)
+            "Automatic Clawpatch baseline did not leave the complete input source as a clean "
+            "current HEAD: " + ", ".join(remaining_source)
         )
     return {
         "paths": exact_paths,
-        "preserved_commit": preserved_commit,
-        "preserved_ref": preserved_ref,
+        "parent_head": current_head,
+        "baseline_commit": baseline_commit,
+        "baseline_ref": baseline_ref,
         "receipt": str(receipt_path),
     }
 
@@ -5335,6 +5272,7 @@ def _release_sweep_locked(
     _prior_false_positives: tuple[dict[str, Any], ...] = (),
     _prior_review_generations: tuple[dict[str, Any], ...] = (),
     _already_pushed: bool = False,
+    _preexisting_baseline_commit: str = "",
 ) -> dict[str, Any]:
     root = _git_root(repo)
     if integration_mode not in {"manageroo", "external"}:
@@ -5374,6 +5312,7 @@ def _release_sweep_locked(
         "false_positives": list(_prior_false_positives),
         "review_generations": list(_prior_review_generations),
     }
+    preexisting_baseline_commit = _preexisting_baseline_commit
     generation_result_start = len(report["results"])
     if not apply:
         report["planned_branch"] = branch
@@ -5388,6 +5327,37 @@ def _release_sweep_locked(
     )
     if integration_mode == "external":
         _migrate_legacy_external_progress(root, state_root=state_root)
+    if (
+        fresh
+        and integration_mode == "external"
+        and _source_paths(root)
+        and _load_release_progress(root, state_root=state_root) is None
+    ):
+        fresh_baseline = _commit_preexisting_source_baseline(
+            root,
+            _source_paths(root),
+            state_root=state_root,
+        )
+        report["preexisting_source_baseline"] = fresh_baseline
+        preexisting_baseline_commit = str(fresh_baseline["baseline_commit"])
+        if progress is not None:
+            progress(
+                {
+                    "phase": "baseline-commit",
+                    "current": "?",
+                    "total": "?",
+                    "command": (
+                        "commit current source as the ClawPatch input baseline; "
+                        "keep visible file content; rebuild ClawPatch queue"
+                    ),
+                    "attempt": 1,
+                    "max_attempts": 1,
+                    "owned_paths": list(fresh_baseline["paths"]),
+                    "commit": fresh_baseline["baseline_commit"],
+                    "baseline_ref": fresh_baseline["baseline_ref"],
+                    "receipt": fresh_baseline["receipt"],
+                }
+            )
     if (
         fresh
         and integration_mode == "external"
@@ -5617,30 +5587,32 @@ def _release_sweep_locked(
                 preexisting_source,
             )
         ):
-            ambiguous_recovery = _preserve_ambiguous_checkpoint_source(
+            ambiguous_baseline = _commit_ambiguous_checkpoint_source_baseline(
                 root,
                 durable_progress,
                 preexisting_source,
                 state_root=state_root,
             )
-            if ambiguous_recovery is not None:
-                report["ambiguous_checkpoint_recovery"] = ambiguous_recovery
+            if ambiguous_baseline is not None:
+                report["ambiguous_checkpoint_baseline"] = ambiguous_baseline
+                preexisting_baseline_commit = str(ambiguous_baseline["baseline_commit"])
                 if progress is not None:
                     progress(
                         {
-                            "phase": "reset-recovery",
+                            "phase": "baseline-commit",
                             "current": "?",
                             "total": "?",
-                            "finding_id": ambiguous_recovery["finding_id"],
+                            "finding_id": ambiguous_baseline["finding_id"],
                             "command": (
-                                "preserve ambiguous checkpoint source in a local recovery ref; "
-                                "restore current HEAD; continue ClawPatch queue"
+                                "commit ambiguous current source as the ClawPatch input baseline; "
+                                "retire stale checkpoint; continue ClawPatch queue"
                             ),
                             "attempt": 1,
                             "max_attempts": 1,
-                            "owned_paths": list(ambiguous_recovery["paths"]),
-                            "preserved_ref": ambiguous_recovery["preserved_ref"],
-                            "receipt": ambiguous_recovery["receipt"],
+                            "owned_paths": list(ambiguous_baseline["paths"]),
+                            "commit": ambiguous_baseline["baseline_commit"],
+                            "baseline_ref": ambiguous_baseline["baseline_ref"],
+                            "receipt": ambiguous_baseline["receipt"],
                         }
                     )
                 durable_progress = None
@@ -5795,27 +5767,29 @@ def _release_sweep_locked(
             + ", ".join(preexisting_source)
         )
         if integration_mode == "external":
-            preexisting_recovery = _preserve_preexisting_source(
+            preexisting_baseline = _commit_preexisting_source_baseline(
                 root,
                 preexisting_source,
                 state_root=state_root,
             )
-            report["preexisting_source_recovery"] = preexisting_recovery
+            report["preexisting_source_baseline"] = preexisting_baseline
+            preexisting_baseline_commit = str(preexisting_baseline["baseline_commit"])
             if progress is not None:
                 progress(
                     {
-                        "phase": "reset-recovery",
+                        "phase": "baseline-commit",
                         "current": "?",
                         "total": "?",
                         "command": (
-                            "preserve ownerless source in a local recovery ref; "
-                            "restore current HEAD; continue ClawPatch queue"
+                            "commit current source as the ClawPatch input baseline; "
+                            "keep visible file content; continue ClawPatch queue"
                         ),
                         "attempt": 1,
                         "max_attempts": 1,
-                        "owned_paths": list(preexisting_recovery["paths"]),
-                        "preserved_ref": preexisting_recovery["preserved_ref"],
-                        "receipt": preexisting_recovery["receipt"],
+                        "owned_paths": list(preexisting_baseline["paths"]),
+                        "commit": preexisting_baseline["baseline_commit"],
+                        "baseline_ref": preexisting_baseline["baseline_ref"],
+                        "receipt": preexisting_baseline["receipt"],
                     }
                 )
             preexisting_source = []
@@ -5826,7 +5800,12 @@ def _release_sweep_locked(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."
         )
     if push_mode != "none":
-        _require_synchronized_remote_branch(root, current_branch, progress=progress)
+        _require_synchronized_remote_branch(
+            root,
+            current_branch,
+            progress=progress,
+            preserve_local_on_conflict=bool(preexisting_baseline_commit),
+        )
     if durable_progress is not None:
         if durable_progress["phase"] != "stopped":
             raise SafetyError(
@@ -6463,6 +6442,27 @@ def _release_sweep_locked(
         resolve_uncertain=not advance_uncertain,
         refresh_retained_uncertain=advance_uncertain,
     )
+    if (
+        preexisting_baseline_commit
+        and push_mode == "each"
+        and not bool(closure.get("pushed", pushed))
+    ):
+        if progress is not None:
+            progress(
+                {
+                    "phase": "push",
+                    "current": current_finding,
+                    "total": total_findings,
+                    "command": f"git push origin {selected_branch}",
+                    "detail": "publish the verified input baseline after queue completion",
+                    "attempt": 1,
+                    "max_attempts": 1,
+                    "commit": preexisting_baseline_commit,
+                }
+            )
+        _push_and_verify(root, selected_branch, first=not pushed)
+        pushed = True
+        closure["pushed"] = True
     report["results"].extend(closure.get("recovered_findings", []))
     report["continuations"].extend(closure.get("recovered_continuations", []))
     generation_head = _git_text(root, ["git", "rev-parse", "HEAD"])
@@ -6522,6 +6522,7 @@ def _release_sweep_locked(
             _prior_false_positives=tuple(report["false_positives"]),
             _prior_review_generations=tuple(report["review_generations"]),
             _already_pushed=bool(closure.get("pushed", pushed)),
+            _preexisting_baseline_commit=preexisting_baseline_commit,
         )
     final_head = _git_text(root, ["git", "rev-parse", "HEAD"])
     final_uncertain_count = _required_int(

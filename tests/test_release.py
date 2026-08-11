@@ -912,7 +912,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    def test_external_fresh_refuses_current_source_changes_without_checkpoint(
+    def test_external_fresh_commits_current_source_as_baseline_before_rebuilding_queue(
         self,
         _version,
         _processes,
@@ -936,11 +936,19 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             stale.parent.mkdir(parents=True)
             stale.write_text("{}\n", encoding="utf-8")
             manageroo_state = root / "manageroo-owned-state"
-            json_clawpatch.side_effect = [
-                {"created": True},
-                {"activeLocks": 0, "lockFiles": 0, "openFindings": 0},
-                {"features": 0},
-            ]
+            def fake_json_clawpatch(repo_arg, argv, **_kwargs):
+                if argv[1] == "init":
+                    project = repo_arg / ".clawpatch" / "project.json"
+                    project.parent.mkdir(parents=True, exist_ok=True)
+                    project.write_text('{"name":"fresh"}\n', encoding="utf-8")
+                    return {"created": True, "next": "clawpatch map"}
+                if argv[1] == "status":
+                    return {"activeLocks": 0, "lockFiles": 0, "openFindings": 0}
+                if argv[1] == "map":
+                    return {"features": 0}
+                raise AssertionError(f"unexpected ClawPatch command: {argv}")
+
+            json_clawpatch.side_effect = fake_json_clawpatch
             review_all.return_value = {
                 "review": {"reviewed": 0, "findings": 0},
                 "completion": {"dryRun": True, "wouldReview": 0},
@@ -952,20 +960,21 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 "clawpatch_supervise.clawpatch_release._external_state_home",
                 return_value=manageroo_state,
             ):
-                with self.assertRaisesRegex(
-                    SafetyError,
-                    "fresh Clawpatch reset is allowed only when project source is clean",
-                ):
-                    release_sweep(
-                        repo,
-                        apply=True,
-                        branch="current",
-                        fresh=True,
-                        integration_mode="external",
-                    )
+                report = release_sweep(
+                    repo,
+                    apply=True,
+                    branch="current",
+                    fresh=True,
+                    integration_mode="external",
+                )
 
             self.assertEqual(source.read_bytes(), source_before)
-            self.assertTrue(stale.exists())
+            self.assertFalse(stale.exists())
+            self.assertEqual(_source_paths(repo), [])
+            self.assertEqual(
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
+                report["preexisting_source_baseline"]["baseline_commit"],
+            )
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
@@ -2218,7 +2227,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    def test_one_command_preserves_all_ambiguous_source_and_continues(
+    def test_one_command_commits_ambiguous_source_as_baseline_and_continues(
         self,
         _version,
         _processes,
@@ -2305,30 +2314,34 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                     integration_mode="external",
                 )
 
-            recovery = report["ambiguous_checkpoint_recovery"]
-            preserved_commit = recovery["preserved_commit"]
-            preserved_other_bytes = subprocess.check_output(
-                ["git", "show", f"{preserved_commit}:notes.txt"], cwd=repo
+            baseline = report["ambiguous_checkpoint_baseline"]
+            baseline_commit = baseline["baseline_commit"]
+            baseline_other_bytes = subprocess.check_output(
+                ["git", "show", f"{baseline_commit}:notes.txt"], cwd=repo
             )
-            receipt = Path(recovery["receipt"])
+            receipt = Path(baseline["receipt"])
             receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
 
             self.assertEqual(source.read_text(encoding="utf-8"), "before\n")
-            self.assertEqual(other.read_text(encoding="utf-8"), "original notes\n")
+            self.assertEqual(other.read_bytes(), other_ambiguous_bytes)
             self.assertEqual(
-                preserved_other_bytes.replace(b"\r\n", b"\n"),
+                baseline_other_bytes.replace(b"\r\n", b"\n"),
                 other_ambiguous_bytes.replace(b"\r\n", b"\n"),
             )
             self.assertEqual(
                 subprocess.check_output(
-                    ["git", "rev-parse", recovery["preserved_ref"]], cwd=repo, text=True
+                    ["git", "rev-parse", baseline["baseline_ref"]], cwd=repo, text=True
                 ).strip(),
-                preserved_commit,
+                baseline_commit,
             )
-            self.assertEqual(receipt_payload["preserved_commit"], preserved_commit)
+            self.assertEqual(receipt_payload["baseline_commit"], baseline_commit)
+            self.assertEqual(
+                receipt_payload["reason"], "ambiguous-checkpoint-source-baseline"
+            )
             self.assertEqual(receipt_payload["paths"], ["notes.txt"])
             self.assertEqual(receipt_payload["checkpoint_owned_paths"], ["app.py"])
             self.assertIsNone(_load_release_progress(repo, state_root=external_state))
+            self.assertEqual(_source_paths(repo), [])
             self.assertTrue(finding_path.is_file())
 
         resume_stopped_attempt.assert_not_called()
@@ -5441,7 +5454,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertIsNone(checkpoint)
         self.assertEqual(report["reset_recovery"]["generation"], "clean-descendant")
         self.assertEqual(
-            report["preexisting_source_recovery"]["paths"],
+            report["preexisting_source_baseline"]["paths"],
             ["generated-proof.json"],
         )
 
@@ -6018,7 +6031,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             with self.assertRaisesRegex(SafetyError, "pre-existing source changes"):
                 release_sweep(repo, apply=True, branch="current")
 
-    def test_external_apply_preserves_preexisting_source_and_continues(self):
+    def test_external_apply_commits_preexisting_source_as_baseline_and_continues(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = root / "repo"
@@ -6029,6 +6042,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             (repo / "removed.txt").write_text("tracked\n", encoding="utf-8")
             subprocess.run(["git", "add", "app.py", "removed.txt"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
             (repo / "app.py").write_text("dirty\n", encoding="utf-8")
             (repo / "removed.txt").unlink()
             (repo / "untracked.txt").write_text("new\n", encoding="utf-8")
@@ -6037,6 +6053,12 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             queue.write_text('{"queue":"preserve"}\n', encoding="utf-8")
 
             with (
+                patch(
+                    "clawpatch_supervise.clawpatch_release._require_synchronized_remote_branch"
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._push_and_verify"
+                ) as push_and_verify,
                 patch(
                     "clawpatch_supervise.clawpatch_release._release_state_root",
                     return_value=state_root,
@@ -6080,69 +6102,57 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                     repo,
                     apply=True,
                     branch="current",
+                    push_mode="each",
                     integration_mode="external",
                 )
 
-            recovery = report["preexisting_source_recovery"]
-            preserved_commit = recovery["preserved_commit"]
-            receipt = json.loads(Path(recovery["receipt"]).read_text(encoding="utf-8"))
-            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "before\n")
-            self.assertEqual((repo / "removed.txt").read_text(encoding="utf-8"), "tracked\n")
-            self.assertFalse((repo / "untracked.txt").exists())
+            baseline = report["preexisting_source_baseline"]
+            baseline_commit = baseline["baseline_commit"]
+            receipt = json.loads(Path(baseline["receipt"]).read_text(encoding="utf-8"))
+            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "dirty\n")
+            self.assertFalse((repo / "removed.txt").exists())
+            self.assertEqual((repo / "untracked.txt").read_text(encoding="utf-8"), "new\n")
             self.assertEqual(queue.read_text(encoding="utf-8"), '{"queue":"preserve"}\n')
             self.assertEqual(_source_paths(repo), [])
             self.assertEqual(
                 subprocess.check_output(
-                    ["git", "show", f"{preserved_commit}:app.py"], cwd=repo, text=True
+                    ["git", "show", f"{baseline_commit}:app.py"], cwd=repo, text=True
                 ),
                 "dirty\n",
             )
             self.assertEqual(
                 subprocess.check_output(
-                    ["git", "show", f"{preserved_commit}:untracked.txt"], cwd=repo, text=True
+                    ["git", "show", f"{baseline_commit}:untracked.txt"], cwd=repo, text=True
                 ),
                 "new\n",
             )
             removed = subprocess.run(
-                ["git", "cat-file", "-e", f"{preserved_commit}:removed.txt"],
+                ["git", "cat-file", "-e", f"{baseline_commit}:removed.txt"],
                 cwd=repo,
                 check=False,
                 capture_output=True,
             )
             self.assertNotEqual(removed.returncode, 0)
-            self.assertEqual(receipt["reason"], "preexisting-source")
+            self.assertEqual(receipt["reason"], "preexisting-source-baseline")
             self.assertEqual(receipt["paths"], ["app.py", "removed.txt", "untracked.txt"])
             self.assertEqual(
                 subprocess.check_output(
-                    ["git", "rev-parse", recovery["preserved_ref"]], cwd=repo, text=True
+                    ["git", "rev-parse", baseline["baseline_ref"]], cwd=repo, text=True
                 ).strip(),
-                preserved_commit,
+                baseline_commit,
             )
-
-    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
-    def test_external_automatic_fresh_waits_before_resetting_dirty_source(
-        self, _processes, _version
-    ):
-        with tempfile.TemporaryDirectory() as temp:
-            repo = Path(temp)
-            self.init_repo(repo)
-            (repo / "app.py").write_text("before\n", encoding="utf-8")
-            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
-            subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
-            (repo / "app.py").write_text("dirty\n", encoding="utf-8")
-
-            with self.assertRaisesRegex(RepositoryBusyError, "Automatic fresh review"):
-                release_sweep(
-                    repo,
-                    apply=True,
-                    branch="current",
-                    integration_mode="external",
-                    fresh=True,
-                    wait_on_preserved_source=True,
-                )
-
-            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "dirty\n")
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "rev-parse", f"{baseline_commit}^"], cwd=repo, text=True
+                ).strip(),
+                original_head,
+            )
+            self.assertEqual(
+                subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
+                baseline_commit,
+            )
+            push_and_verify.assert_called_once_with(repo, "main", first=True)
+            self.assertTrue(report["final_closure"]["pushed"])
 
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
     @patch(

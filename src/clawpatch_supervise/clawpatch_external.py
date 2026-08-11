@@ -101,8 +101,6 @@ def _resolve_fresh_mode(
     if requested is False:
         return False
     if requested is True:
-        if _clawpatch_state_exists(repo) and _source_paths(repo):
-            raise SafetyError("Explicit --fresh refuses to discard retained project source changes.")
         return True
     if not _clawpatch_state_exists(repo):
         return True
@@ -110,8 +108,6 @@ def _resolve_fresh_mode(
         repo,
         preflight_env_overrides=preflight_env_overrides,
     ):
-        return False
-    if _source_paths(repo):
         return False
     return True
 
@@ -614,7 +610,7 @@ def main(
                         integration_mode="external",
                         child_env_overrides=child_env_overrides,
                         advance_uncertain=True,
-                        wait_on_preserved_source=args.fresh is None,
+                        wait_on_preserved_source=False,
                     )
                     break
                 except ClawpatchStop as exc:

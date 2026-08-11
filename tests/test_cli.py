@@ -1248,21 +1248,26 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
-    def test_explicit_fresh_refuses_to_discard_retained_source(
+    def test_explicit_fresh_passes_retained_source_to_baseline_aware_sweep(
         self, _state_exists, _queue_is_clean, _source_paths
     ):
         calls = []
 
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
         with redirect_stdout(StringIO()):
             code = main(
                 ["--repo", ".", "--fresh"],
-                run_sweep=lambda repo, **kwargs: calls.append((repo, kwargs)),
+                run_sweep=fake_sweep,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
             )
 
-        self.assertEqual(code, 2)
-        self.assertEqual(calls, [])
+        self.assertEqual(code, 0)
+        self.assertTrue(calls[0][1]["fresh"])
+        self.assertFalse(calls[0][1]["wait_on_preserved_source"])
 
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
@@ -1361,7 +1366,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
-    def test_dirty_source_never_offers_or_performs_state_reset(
+    def test_clean_queue_with_dirty_source_starts_baseline_aware_fresh_review(
         self, _state_exists, _queue_is_clean, _source
     ):
         calls = []
@@ -1382,11 +1387,12 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             )
 
         self.assertEqual(code, 0)
-        self.assertFalse(calls[0][1]["fresh"])
+        self.assertTrue(calls[0][1]["fresh"])
+        self.assertFalse(calls[0][1]["wait_on_preserved_source"])
 
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=False)
-    def test_default_run_marks_automatic_fresh_as_waiting_on_preserved_source(
+    def test_default_run_without_queue_uses_baseline_aware_fresh_review(
         self, _state_exists, _source
     ):
         calls = []
@@ -1405,7 +1411,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertTrue(calls[0][1]["fresh"])
-        self.assertTrue(calls[0][1]["wait_on_preserved_source"])
+        self.assertFalse(calls[0][1]["wait_on_preserved_source"])
 
 
 if __name__ == "__main__":
