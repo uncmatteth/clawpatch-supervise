@@ -393,6 +393,7 @@ def main(
         require_external_clawpatch_preflight
     ),
     heartbeat_seconds: float = 30,
+    heartbeat_wait: Callable[[threading.Event, float], bool] | None = None,
     cleanup_root: Path | None = None,
 ) -> int:
     reconfigure = getattr(sys.stdout, "reconfigure", None)
@@ -528,7 +529,8 @@ def main(
             display(event)
 
     def heartbeat() -> None:
-        while not stopped.wait(heartbeat_seconds):
+        wait = heartbeat_wait or threading.Event.wait
+        while not wait(stopped, heartbeat_seconds):
             with output_lock:
                 snapshot = dict(state)
                 lines = _heartbeat_lines(snapshot, watchdog_seconds=watchdog_seconds)

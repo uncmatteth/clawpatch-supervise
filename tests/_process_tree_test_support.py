@@ -35,6 +35,14 @@ def _wait_for_descendant_exit(pid: int, group_id: int, *, timeout: float) -> boo
     return True
 
 
+def wait_for_path(path: Path, *, timeout: float = 5) -> None:
+    deadline = time.monotonic() + timeout
+    while not path.is_file():
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"process readiness signal was not observed: {path}")
+        time.sleep(0.01)
+
+
 def assert_blocked_descendant_exited(
     *,
     ready: Path,

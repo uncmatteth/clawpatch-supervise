@@ -230,6 +230,7 @@ def _run(
     timeout: int = 1800,
     env: dict[str, str] | None = None,
     kill_process_group: bool = True,
+    timeout_start_barrier: Callable[[subprocess.Popen[str]], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
     command = _platform_command(argv, platform_name=os.name)
     result = CommandRunner().run(
@@ -239,6 +240,7 @@ def _run(
         env=env,
         kill_process_group=kill_process_group,
         errors="surrogateescape",
+        timeout_start_barrier=timeout_start_barrier,
     )
     output = result.stdout
     if result.stderr:

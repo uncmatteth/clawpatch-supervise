@@ -480,20 +480,22 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 self._parts: list[str] = []
                 self._lock = threading.Lock()
                 self._delayed = False
-                self._review_heartbeat_written = threading.Event()
+                self.phase_write_started = threading.Event()
+                self.heartbeat_released = threading.Event()
 
             def write(self, value: str) -> int:
                 if "[1/1] still running: review" in value:
                     with self._lock:
                         self._parts.append(value)
-                    self._review_heartbeat_written.set()
                     return len(value)
                 with self._lock:
                     delay = "\n[1/1] REVIEW" in value and not self._delayed
                     if delay:
                         self._delayed = True
                 if delay:
-                    self._review_heartbeat_written.wait(0.1)
+                    self.phase_write_started.set()
+                    if not self.heartbeat_released.wait(5):
+                        raise AssertionError("heartbeat barrier was not released")
                 with self._lock:
                     self._parts.append(value)
                 return len(value)
@@ -518,7 +520,6 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                     "command": "clawpatch review --all --json",
                 }
             )
-            time.sleep(0.03)
             return {
                 "ok": True,
                 "finding_count": 0,
@@ -527,6 +528,19 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             }
 
         output = DelayedPhaseOutput()
+
+        heartbeat_count = 0
+
+        def heartbeat_wait(stopped: threading.Event, _seconds: float) -> bool:
+            nonlocal heartbeat_count
+            heartbeat_count += 1
+            if heartbeat_count == 1:
+                if not output.phase_write_started.wait(5):
+                    raise AssertionError("review phase output did not reach its barrier")
+                output.heartbeat_released.set()
+                return False
+            return stopped.wait(5)
+
         with (
             patch(
                 "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
@@ -540,6 +554,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 provision_validation_environment=fake_provision,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0.001,
+                heartbeat_wait=heartbeat_wait,
             )
 
         rendered = output.getvalue()

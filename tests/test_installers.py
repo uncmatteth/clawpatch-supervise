@@ -9,9 +9,10 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from typing import Callable
 from unittest.mock import patch
 
-from _process_tree_test_support import assert_blocked_descendant_exited
+from _process_tree_test_support import assert_blocked_descendant_exited, wait_for_path
 from clawpatch_supervise import __version__
 from clawpatch_supervise.runner import CommandRunner
 
@@ -37,6 +38,7 @@ class InstallerContractTests(unittest.TestCase):
         environment: dict[str, str],
         cwd: Path | None = None,
         timeout_seconds: float = INSTALLER_TIMEOUT_SECONDS,
+        timeout_start_barrier: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> subprocess.CompletedProcess[str]:
         result = CommandRunner().run(
             argv,
@@ -44,6 +46,7 @@ class InstallerContractTests(unittest.TestCase):
             env=environment,
             timeout_seconds=timeout_seconds,
             kill_process_group=True,
+            timeout_start_barrier=timeout_start_barrier,
         )
         if result.timed_out:
             self.fail(
@@ -457,6 +460,7 @@ class InstallerContractTests(unittest.TestCase):
         child_source = (
             "import os, signal, sys, time\n"
             "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "time.sleep(0.3)\n"
             "open(sys.argv[1], 'w', encoding='utf-8').write(f'{os.getpid()} {os.getpgrp()}\\n')\n"
             "os.close(0); os.close(1); os.close(2)\n"
             "while not os.path.exists(sys.argv[2]): time.sleep(0.01)\n"
@@ -486,6 +490,7 @@ class InstallerContractTests(unittest.TestCase):
                 environment=os.environ.copy(),
                 cwd=root,
                 timeout_seconds=0.2,
+                timeout_start_barrier=lambda _process: wait_for_path(ready),
             )
 
         self.assertIn("Linux/macOS", str(raised.exception))

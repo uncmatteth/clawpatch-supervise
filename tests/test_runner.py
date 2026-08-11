@@ -9,7 +9,7 @@ import time
 import unittest
 from unittest.mock import call, patch
 
-from _process_tree_test_support import assert_blocked_descendant_exited
+from _process_tree_test_support import assert_blocked_descendant_exited, wait_for_path
 from clawpatch_supervise.clawpatch_protocol import (
     ClawpatchFailureKind,
     RepairAction,
@@ -316,6 +316,7 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
         child_source = (
             "import os, signal, sys, time\n"
             "signal.signal(signal.SIGTERM, signal.SIG_IGN)\n"
+            "time.sleep(0.3)\n"
             "open(sys.argv[1], 'w', encoding='utf-8').write(f'{os.getpid()} {os.getpgrp()}\\n')\n"
             "os.close(0); os.close(1); os.close(2)\n"
             "while not os.path.exists(sys.argv[2]): time.sleep(0.01)\n"
@@ -346,6 +347,7 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
                 ],
                 cwd=root,
                 timeout=1,
+                timeout_start_barrier=lambda _process: wait_for_path(ready),
             )
 
             self.assertEqual(result.returncode, 124, result.stdout)

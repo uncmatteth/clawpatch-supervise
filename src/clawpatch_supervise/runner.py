@@ -7,7 +7,7 @@ import subprocess
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from .errors import SafetyError
 from .util import atomic_write_json, ensure_within, redact_argv, redact_text, utc_now
@@ -221,6 +221,7 @@ class CommandRunner:
         check: bool = False,
         kill_process_group: bool = True,
         errors: str = "replace",
+        timeout_start_barrier: Callable[[subprocess.Popen[str]], None] | None = None,
     ) -> CommandResult:
         """Run a command in an isolated process group by default.
 
@@ -253,6 +254,7 @@ class CommandRunner:
                     input_text=input_text,
                     timeout_seconds=timeout_seconds,
                     errors=errors,
+                    timeout_start_barrier=timeout_start_barrier,
                 )
             else:
                 completed = subprocess.run(
@@ -319,6 +321,7 @@ class CommandRunner:
         input_text: str | None,
         timeout_seconds: int,
         errors: str,
+        timeout_start_barrier: Callable[[subprocess.Popen[str]], None] | None,
     ) -> tuple[subprocess.CompletedProcess[str], bool]:
         kwargs: dict = {
             "cwd": str(cwd),
@@ -337,6 +340,8 @@ class CommandRunner:
             kwargs["start_new_session"] = True
         process = subprocess.Popen(argv, **kwargs)
         try:
+            if timeout_start_barrier is not None:
+                timeout_start_barrier(process)
             stdout, stderr = process.communicate(input=input_text, timeout=timeout_seconds)
             return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr), False
         except subprocess.TimeoutExpired as initial_timeout:
