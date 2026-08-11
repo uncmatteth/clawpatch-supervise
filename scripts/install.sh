@@ -259,7 +259,13 @@ staging_venv="$(mktemp -d "$install_root/venv.${version}.XXXXXX")"
 "$python_command" -m venv "$staging_venv"
 "$staging_venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$package_to_install"
 
-"$staging_venv/bin/clawpatch-supervise" --version
+supervisor_installed_version="$("$staging_venv/bin/clawpatch-supervise" --version)"
+expected_supervisor_version="clawpatch-supervise $version"
+if [[ "$supervisor_installed_version" != "$expected_supervisor_version" ]]; then
+  echo "Installed supervisor version mismatch: expected $expected_supervisor_version, found $supervisor_installed_version." >&2
+  exit 2
+fi
+printf '%s\n' "$supervisor_installed_version"
 if [[ -n "$verify_repo" ]]; then
   PATH="${clawpatch_command%/*}:$PATH" \
     "$staging_venv/bin/clawpatch-supervise" doctor --repo "$verify_repo"
