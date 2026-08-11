@@ -937,6 +937,30 @@ class InstallerContractTests(unittest.TestCase):
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_removes_new_commands_when_supervisor_activation_fails(
+        self,
+    ) -> None:
+        root = Path(self._temporary_directory.name)
+
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+            supervisor_move_fails=True,
+        )
+
+        self.assertEqual(result.returncode, 29, result.stderr)
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
+        self.assertFalse(staged_root.exists())
+        installed_bin = root / "installed-bin"
+        self.assertFalse(os.path.lexists(installed_bin / "clawpatch"))
+        self.assertFalse(os.path.lexists(installed_bin / "clawpatch-supervise"))
+        self.assertEqual(
+            sorted(path.name for path in installed_bin.iterdir()),
+            [".clawpatch-supervise.install.lock"],
+        )
+        self.assertEqual(list(install_root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_retains_backup_when_rollback_restore_fails(self) -> None:
         root = Path(self._temporary_directory.name)
         install_root = root / "install"
