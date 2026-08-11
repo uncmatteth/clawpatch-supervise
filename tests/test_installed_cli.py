@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 import venv
 from pathlib import Path
@@ -14,9 +15,20 @@ from clawpatch_supervise import __version__
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+NETWORK_TEST_ENV = "CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS"
 
 
 class InstalledConsoleScriptTests(unittest.TestCase):
+    def test_build_requirements_are_exactly_pinned_for_the_network_lane(self) -> None:
+        manifest = tomllib.loads(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        requirements = (REPOSITORY_ROOT / "requirements-test.txt").read_text(
+            encoding="utf-8"
+        ).splitlines()
+
+        self.assertEqual(manifest["build-system"]["requires"], requirements)
+
     def test_wheel_build_uses_isolated_pep517_requirements(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp)
@@ -35,6 +47,10 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             self.assertNotIn("PIP_NO_INDEX", run.call_args.kwargs["env"])
             self.assertNotIn("PIP_NO_BUILD_ISOLATION", run.call_args.kwargs["env"])
 
+    @unittest.skipUnless(
+        os.environ.get(NETWORK_TEST_ENV) == "1",
+        f"network integration test; set {NETWORK_TEST_ENV}=1 to run",
+    )
     def test_wheel_installs_console_script_and_propagates_exit_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

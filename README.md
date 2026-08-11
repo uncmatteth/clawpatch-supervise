@@ -411,16 +411,23 @@ py -3 -m venv .venv
 
 ## Test and release proof
 
-Run the complete local suite, including the installed-wheel console-entry-point smoke test:
+Run the complete offline local suite:
 
 ```bash
-python3 -m pip install --requirement requirements-test.txt
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-Provision the pinned test requirements while the package index is available. The installed-wheel
-test then builds and installs the artifact with package-index access disabled, and fails instead of
-skipping when the wheel cannot be produced.
+The installed-wheel console-entry-point smoke test intentionally uses isolated PEP 517 build
+requirements from the package index. Run that explicit network integration lane separately:
+
+```bash
+CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS=1 PYTHONPATH=src python3 -m unittest \
+  tests.test_installed_cli.InstalledConsoleScriptTests.test_wheel_installs_console_script_and_propagates_exit_status -v
+```
+
+Its setuptools and wheel versions are pinned identically in `pyproject.toml` and
+`requirements-test.txt`, so an index outage can affect only this opt-in lane and a future backend
+release cannot silently change the build.
 
 This project intentionally has no hosted CI workflows. Before describing a release as cross-platform, run the full suite and native installer manually on Linux, macOS, and Windows with every supported Python version, and retain the command output as release evidence.
 
