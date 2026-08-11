@@ -2162,7 +2162,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._run_project_gates", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    def test_one_command_preserves_changed_checkpoint_source_and_continues(
+    def test_one_command_preserves_all_ambiguous_source_and_continues(
         self,
         _version,
         _processes,
@@ -2175,11 +2175,16 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         final_closure,
     ):
         with tempfile.TemporaryDirectory() as temp:
-            repo = Path(temp)
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            external_state = root / "external-state"
             self.init_repo(repo)
             source = repo / "app.py"
             source.write_text("before\n", encoding="utf-8")
-            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            other = repo / "notes.txt"
+            other.write_text("original notes\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py", "notes.txt"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
             branch = subprocess.check_output(
                 ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
@@ -2189,6 +2194,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             ).strip()
             finding_path = repo / ".clawpatch" / "findings" / "fnd_one.json"
             finding_path.parent.mkdir(parents=True)
+            (finding_path.parent.parent / "project.json").write_text(
+                '{"name":"fixture"}\n', encoding="utf-8"
+            )
             finding_path.write_text(
                 json.dumps(
                     {
@@ -2206,18 +2214,13 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 head_before=old_head,
                 phase="stopped",
                 owned_paths=["app.py"],
+                state_root=external_state,
             )
             self.assertTrue(checkpoint["owned_source_fingerprint"])
 
-            source.write_text("later ambiguous bytes\n", encoding="utf-8")
-            ambiguous_bytes = source.read_bytes()
-            (repo / "README.md").write_text("controller upgrade\n", encoding="utf-8")
-            subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
-            subprocess.run(
-                ["git", "commit", "-q", "-m", "controller upgrade"],
-                cwd=repo,
-                check=True,
-            )
+            source.write_text("before\n", encoding="utf-8")
+            other.write_text("other interrupted work\n", encoding="utf-8")
+            other_ambiguous_bytes = other.read_bytes()
 
             show_finding.return_value = {
                 "finding": {"id": "fnd_one", "status": "open"},
@@ -2235,20 +2238,30 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             next_finding.return_value = (None, {"finding": None})
             final_closure.return_value = {"pushed": False, "needs_fresh_review": False}
 
-            report = release_sweep(repo, apply=True, branch="current")
+            with patch(
+                "clawpatch_supervise.clawpatch_release._release_state_root",
+                return_value=external_state,
+            ):
+                report = release_sweep(
+                    repo,
+                    apply=True,
+                    branch="current",
+                    integration_mode="external",
+                )
 
             recovery = report["ambiguous_checkpoint_recovery"]
             preserved_commit = recovery["preserved_commit"]
-            preserved_bytes = subprocess.check_output(
-                ["git", "show", f"{preserved_commit}:app.py"], cwd=repo
+            preserved_other_bytes = subprocess.check_output(
+                ["git", "show", f"{preserved_commit}:notes.txt"], cwd=repo
             )
             receipt = Path(recovery["receipt"])
             receipt_payload = json.loads(receipt.read_text(encoding="utf-8"))
 
             self.assertEqual(source.read_text(encoding="utf-8"), "before\n")
+            self.assertEqual(other.read_text(encoding="utf-8"), "original notes\n")
             self.assertEqual(
-                preserved_bytes.replace(b"\r\n", b"\n"),
-                ambiguous_bytes.replace(b"\r\n", b"\n"),
+                preserved_other_bytes.replace(b"\r\n", b"\n"),
+                other_ambiguous_bytes.replace(b"\r\n", b"\n"),
             )
             self.assertEqual(
                 subprocess.check_output(
@@ -2257,12 +2270,12 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 preserved_commit,
             )
             self.assertEqual(receipt_payload["preserved_commit"], preserved_commit)
-            self.assertEqual(receipt_payload["paths"], ["app.py"])
-            self.assertIsNone(_load_release_progress(repo))
+            self.assertEqual(receipt_payload["paths"], ["notes.txt"])
+            self.assertEqual(receipt_payload["checkpoint_owned_paths"], ["app.py"])
+            self.assertIsNone(_load_release_progress(repo, state_root=external_state))
             self.assertTrue(finding_path.is_file())
 
         resume_stopped_attempt.assert_not_called()
-        show_finding.assert_called_once()
 
     @patch("clawpatch_supervise.clawpatch_release._resume_stopped_attempt")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])

@@ -2824,34 +2824,22 @@ def _preserve_ambiguous_checkpoint_source(
 ) -> dict[str, Any] | None:
     """Preserve one exact stale-checkpoint source set and restore current HEAD.
 
-    Recovery is limited to a modern fingerprinted stopped checkpoint whose old
-    HEAD is an ancestor of the current HEAD and whose recorded paths exactly
-    match every current source change. The ambiguous tree is anchored under a
-    local-only Git ref and described by an external receipt before restoration.
+    Recovery is limited to a stopped checkpoint. Every current source change is
+    anchored under a local-only Git ref and described by an external receipt
+    before restoration, even when the stale checkpoint names different paths or
+    Git boundaries.
     """
     exact_paths = sorted(set(paths))
     owned_paths = sorted(str(path) for path in checkpoint.get("owned_paths", []))
-    recorded_fingerprint = str(checkpoint.get("owned_source_fingerprint", ""))
     if (
         checkpoint.get("phase") != "stopped"
-        or not recorded_fingerprint
         or not exact_paths
-        or exact_paths != owned_paths
         or exact_paths != _source_paths(repo)
     ):
         return None
     _validate_attempt_paths_syntax(exact_paths)
     old_head = str(checkpoint.get("head_before", ""))
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
-    if not old_head or old_head == current_head:
-        return None
-    ancestor = _run(
-        ["git", "merge-base", "--is-ancestor", old_head, current_head],
-        cwd=repo,
-        timeout=60,
-    )
-    if ancestor.returncode:
-        return None
 
     temporary_root = current_temporary_root()
     with tempfile.TemporaryDirectory(
@@ -2917,7 +2905,10 @@ def _preserve_ambiguous_checkpoint_source(
         "checkpoint_head": old_head,
         "current_head": current_head,
         "paths": exact_paths,
-        "recorded_source_fingerprint": recorded_fingerprint,
+        "checkpoint_owned_paths": owned_paths,
+        "recorded_source_fingerprint": str(
+            checkpoint.get("owned_source_fingerprint", "")
+        ),
         "preserved_source_fingerprint": _source_paths_fingerprint(repo, exact_paths),
         "preserved_commit": preserved_commit,
         "preserved_ref": preserved_ref,
@@ -5434,8 +5425,13 @@ def _release_sweep_locked(
         if (
             durable_progress is not None
             and preexisting_source
-            and durable_progress["head_before"] != head_before
-            and durable_progress.get("owned_source_fingerprint")
+            and (
+                integration_mode == "external"
+                or (
+                    durable_progress["head_before"] != head_before
+                    and durable_progress.get("owned_source_fingerprint")
+                )
+            )
             and not _checkpoint_proves_exact_source(
                 root,
                 durable_progress,
