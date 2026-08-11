@@ -84,8 +84,7 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             shutil.copy2(REPOSITORY_ROOT / filename, source / filename)
         shutil.copytree(REPOSITORY_ROOT / "src", source / "src")
         environment = os.environ.copy()
-        environment["PIP_RETRIES"] = "0"
-        environment["PIP_TIMEOUT"] = "5"
+        environment["PIP_NO_INDEX"] = "1"
         built = subprocess.run(
             [
                 sys.executable,
@@ -93,7 +92,9 @@ class InstalledConsoleScriptTests(unittest.TestCase):
                 "pip",
                 "wheel",
                 "--disable-pip-version-check",
+                "--no-build-isolation",
                 "--no-deps",
+                "--no-index",
                 "--wheel-dir",
                 str(destination),
                 str(source),
@@ -106,17 +107,6 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             timeout=120,
         )
         if built.returncode != 0:
-            dependency_bootstrap_failed = (
-                "pip subprocess to install build dependencies did not run successfully"
-                in built.stderr
-            )
-            network_unavailable = (
-                "No matching distribution found for setuptools>=77" in built.stderr
-            )
-            if dependency_bootstrap_failed and network_unavailable:
-                raise unittest.SkipTest(
-                    "build-system requirements are unavailable in this offline environment"
-                )
             raise AssertionError(built.stderr)
         wheels = list(destination.glob("clawpatch_supervise-*.whl"))
         if len(wheels) != 1:

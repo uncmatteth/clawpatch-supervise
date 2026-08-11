@@ -412,8 +412,13 @@ py -3 -m venv .venv
 Run the complete local suite, including the installed-wheel console-entry-point smoke test:
 
 ```bash
+python3 -m pip install --requirement requirements-test.txt
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
+
+Provision the pinned test requirements while the package index is available. The installed-wheel
+test then builds and installs the artifact with package-index access disabled, and fails instead of
+skipping when the wheel cannot be produced.
 
 This project intentionally has no hosted CI workflows. Before describing a release as cross-platform, run the full suite and native installer manually on Linux, macOS, and Windows with every supported Python version, and retain the command output as release evidence.
 
