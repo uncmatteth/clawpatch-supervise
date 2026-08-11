@@ -42,14 +42,6 @@ class CleanupCommandTests(unittest.TestCase):
             encoding="utf-8",
         )
 
-    def _assert_retained_directory_quarantine(self, cleanup_root: Path) -> None:
-        quarantines = list(cleanup_root.iterdir())
-        self.assertEqual(len(quarantines), 1)
-        self.assertTrue(quarantines[0].name.startswith(".cleanup-"))
-        retained = list(quarantines[0].rglob("*"))
-        self.assertTrue(retained)
-        self.assertTrue(all(path.is_dir() for path in retained))
-
     def test_cleanup_dry_run_reports_owned_stale_directory_without_deleting_it(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
@@ -275,7 +267,7 @@ class CleanupCommandTests(unittest.TestCase):
             )
             self.assertTrue(original.is_dir())
 
-    def test_cleanup_preserves_nested_replacement_created_after_final_identity_check(
+    def test_cleanup_refuses_nested_replacement_created_after_final_identity_check(
         self,
     ) -> None:
         with tempfile.TemporaryDirectory() as temp:
@@ -311,7 +303,7 @@ class CleanupCommandTests(unittest.TestCase):
                     cleanup_module.os,
                     "supports_dir_fd",
                     supported_dir_fd,
-                ):
+                ), self.assertRaisesRegex(SafetyError, "changed during cleanup"):
                     cleanup_module._remove_exact_directory(
                         candidate,
                         (candidate_metadata.st_dev, candidate_metadata.st_ino),
@@ -373,7 +365,21 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertEqual(child_env["PYTHONUTF8"], "1")
             self.assertEqual(child_env["PYTHONIOENCODING"], "utf-8")
             self.assertTrue(cleanup_root.is_dir())
-            self._assert_retained_directory_quarantine(cleanup_root)
+            self.assertEqual(list(cleanup_root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX directory-relative cleanup")
+    def test_repeated_owned_runs_remove_nested_directories_and_quarantines(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+
+            for index in range(2):
+                with owned_run_directory(root, root=cleanup_root) as owned_run:
+                    nested = owned_run.temporary_root / "venv" / "lib" / f"run-{index}"
+                    nested.mkdir(parents=True)
+                    (nested / "artifact.pyc").write_bytes(b"compiled")
+
+                self.assertEqual(list(cleanup_root.iterdir()), [])
 
     def test_completed_run_warns_instead_of_stopping_when_windows_blocks_temp_cleanup(
         self,

@@ -363,6 +363,8 @@ def _remove_exact_owned_run_locked(candidate: Path, cleanup_root: Path) -> None:
 
     quarantine = cleanup_root / f".cleanup-{secrets.token_hex(12)}"
     quarantine.mkdir(mode=0o700)
+    quarantine_metadata = quarantine.lstat()
+    quarantine_identity = (quarantine_metadata.st_dev, quarantine_metadata.st_ino)
     claimed = quarantine / candidate.name
 
     def claimed_is_exact_owned_run() -> bool:
@@ -390,6 +392,7 @@ def _remove_exact_owned_run_locked(candidate: Path, cleanup_root: Path) -> None:
         if not claimed_is_exact_owned_run():
             raise SafetyError("The supervisor-owned run directory changed during cleanup.")
         _remove_exact_directory(claimed, identity)
+        _remove_exact_directory(quarantine, quarantine_identity)
     except BaseException as error:
         if claimed.exists() or claimed.is_symlink():
             if candidate.exists() or candidate.is_symlink():
@@ -429,7 +432,7 @@ def _serialized_cleanup_root(cleanup_root: Path) -> Iterator[None]:
 
 
 def _remove_exact_directory(path: Path, identity: tuple[int, int]) -> None:
-    required_dir_fd_functions = (os.open, os.stat, os.unlink)
+    required_dir_fd_functions = (os.open, os.stat, os.unlink, os.rmdir)
     if os.scandir not in os.supports_fd or any(
         function not in os.supports_dir_fd for function in required_dir_fd_functions
     ):
@@ -453,16 +456,35 @@ def _remove_exact_directory(path: Path, identity: tuple[int, int]) -> None:
             if (metadata.st_dev, metadata.st_ino) != identity:
                 raise SafetyError("The supervisor-owned run directory changed during cleanup.")
             _empty_directory_descriptor(directory_descriptor, flags)
-            current = os.stat(path.name, dir_fd=parent_descriptor, follow_symlinks=False)
-            if (current.st_dev, current.st_ino) != identity:
-                raise SafetyError("The supervisor-owned run directory changed during cleanup.")
-            # POSIX has no unprivileged identity-conditional rmdir operation.
-            # Retain this exact inode under its random quarantine name rather
-            # than risk deleting a replacement installed after this check.
+            _remove_exact_directory_entry(
+                parent_descriptor,
+                path.name,
+                identity,
+                flags,
+            )
         finally:
             os.close(directory_descriptor)
     finally:
         os.close(parent_descriptor)
+
+
+def _remove_exact_directory_entry(
+    parent_descriptor: int,
+    name: str,
+    identity: tuple[int, int],
+    flags: int,
+) -> None:
+    current = os.stat(name, dir_fd=parent_descriptor, follow_symlinks=False)
+    if (current.st_dev, current.st_ino) != identity:
+        raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+    verification_descriptor = os.open(name, flags, dir_fd=parent_descriptor)
+    try:
+        verified = os.fstat(verification_descriptor)
+        if (verified.st_dev, verified.st_ino) != identity:
+            raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+        os.rmdir(name, dir_fd=parent_descriptor)
+    finally:
+        os.close(verification_descriptor)
 
 
 def _empty_directory_descriptor(directory_descriptor: int, flags: int) -> None:
@@ -480,17 +502,12 @@ def _empty_directory_descriptor(directory_descriptor: int, flags: int) -> None:
                     _empty_directory_descriptor(child_descriptor, flags)
                 finally:
                     os.close(child_descriptor)
-                current = os.stat(
+                _remove_exact_directory_entry(
+                    directory_descriptor,
                     entry.name,
-                    dir_fd=directory_descriptor,
-                    follow_symlinks=False,
+                    (metadata.st_dev, metadata.st_ino),
+                    flags,
                 )
-                if (current.st_dev, current.st_ino) != (metadata.st_dev, metadata.st_ino):
-                    raise SafetyError(
-                        "The supervisor-owned run directory changed during cleanup."
-                    )
-                # The same identity-conditional rmdir limitation applies to
-                # nested directories, so retain the now-empty exact inode.
             else:
                 os.unlink(entry.name, dir_fd=directory_descriptor)
 
