@@ -273,7 +273,7 @@ fi
 printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$install_root" "$bin_dir"
-exec 9>"$install_root/.install.lock"
+exec 9>"$bin_dir/.clawpatch-supervise.install.lock"
 "$python_command" - 9 <<'PY'
 import fcntl
 import sys

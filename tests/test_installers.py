@@ -916,7 +916,10 @@ class InstallerContractTests(unittest.TestCase):
         )
         self.assertEqual(
             sorted(path.name for path in install_root.iterdir()),
-            [".install.lock", "clawpatch"],
+            ["clawpatch"],
+        )
+        self.assertTrue(
+            (installed_bin / ".clawpatch-supervise.install.lock").is_file()
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
@@ -974,7 +977,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("Rollback failed", result.stderr)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
-    def test_linux_installer_serializes_activation_and_interrupted_rollback(
+    def test_linux_installer_serializes_shared_command_directory_across_install_roots(
         self,
     ) -> None:
         interrupted_returncode = None
@@ -984,6 +987,10 @@ class InstallerContractTests(unittest.TestCase):
         ) -> subprocess.CompletedProcess[str]:
             nonlocal interrupted_returncode
             first_environment = environment.copy()
+            first_install_root = Path(environment["CLAWPATCH_SUPERVISE_HOME"]).with_name(
+                "first-install"
+            )
+            first_environment["CLAWPATCH_SUPERVISE_HOME"] = str(first_install_root)
             first_environment["CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE"] = "true"
             first = subprocess.Popen(
                 [str(installer_path)],
