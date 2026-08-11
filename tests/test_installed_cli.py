@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import venv
 from pathlib import Path
+from unittest.mock import patch
 
 from clawpatch_supervise import __version__
 
@@ -16,6 +17,24 @@ REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 class InstalledConsoleScriptTests(unittest.TestCase):
+    def test_wheel_build_uses_isolated_pep517_requirements(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            destination = Path(temp)
+
+            def build(argv, **_kwargs):
+                (destination / "clawpatch_supervise-test.whl").touch()
+                return subprocess.CompletedProcess(argv, 0, "", "")
+
+            with patch.object(subprocess, "run", side_effect=build) as run:
+                self._build_wheel(destination)
+
+            argv = run.call_args.args[0]
+            self.assertIn("--use-pep517", argv)
+            self.assertNotIn("--no-build-isolation", argv)
+            self.assertNotIn("--no-index", argv)
+            self.assertNotIn("PIP_NO_INDEX", run.call_args.kwargs["env"])
+            self.assertNotIn("PIP_NO_BUILD_ISOLATION", run.call_args.kwargs["env"])
+
     def test_wheel_installs_console_script_and_propagates_exit_status(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
@@ -84,7 +103,8 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             shutil.copy2(REPOSITORY_ROOT / filename, source / filename)
         shutil.copytree(REPOSITORY_ROOT / "src", source / "src")
         environment = os.environ.copy()
-        environment["PIP_NO_INDEX"] = "1"
+        environment.pop("PIP_NO_INDEX", None)
+        environment.pop("PIP_NO_BUILD_ISOLATION", None)
         built = subprocess.run(
             [
                 sys.executable,
@@ -92,9 +112,8 @@ class InstalledConsoleScriptTests(unittest.TestCase):
                 "pip",
                 "wheel",
                 "--disable-pip-version-check",
-                "--no-build-isolation",
+                "--use-pep517",
                 "--no-deps",
-                "--no-index",
                 "--wheel-dir",
                 str(destination),
                 str(source),
