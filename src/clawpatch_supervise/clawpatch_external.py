@@ -501,16 +501,16 @@ def main(
         "finding_id": "",
         "changed": time.monotonic(),
     }
-    state_lock = threading.Lock()
+    output_lock = threading.Lock()
     stopped = threading.Event()
 
     def display(event: dict[str, Any]) -> None:
-        with state_lock:
+        with output_lock:
             for key in ("command", "finding_id", "attempt", "max_attempts"):
                 state.pop(key, None)
             state.update(event)
             state["changed"] = time.monotonic()
-        print(_render_event(event), flush=True)
+            print(_render_event(event), flush=True)
 
     def display_after_external_preflight(event: dict[str, Any]) -> None:
         if event.get("phase") != "preflight":
@@ -518,10 +518,10 @@ def main(
 
     def heartbeat() -> None:
         while not stopped.wait(heartbeat_seconds):
-            with state_lock:
+            with output_lock:
                 snapshot = dict(state)
-            lines = _heartbeat_lines(snapshot, watchdog_seconds=watchdog_seconds)
-            print("\n".join(lines), flush=True)
+                lines = _heartbeat_lines(snapshot, watchdog_seconds=watchdog_seconds)
+                print("\n".join(lines), flush=True)
 
     thread = None
     if heartbeat_seconds > 0:

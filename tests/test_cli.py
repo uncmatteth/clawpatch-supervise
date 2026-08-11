@@ -4,6 +4,8 @@ import json
 import os
 import sys
 import tempfile
+import threading
+import time
 import tomllib
 import unittest
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
@@ -471,6 +473,82 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 self.assertIn(escaped_attack, rendered)
                 for control in ("\nforged", "\x07", "\r", "\t", "\x1b", "\x9b"):
                     self.assertNotIn(control, rendered)
+
+    def test_phase_event_precedes_heartbeat_for_that_phase(self):
+        class DelayedPhaseOutput:
+            def __init__(self):
+                self._parts: list[str] = []
+                self._lock = threading.Lock()
+                self._delayed = False
+                self._review_heartbeat_written = threading.Event()
+
+            def write(self, value: str) -> int:
+                if "[1/1] still running: review" in value:
+                    with self._lock:
+                        self._parts.append(value)
+                    self._review_heartbeat_written.set()
+                    return len(value)
+                with self._lock:
+                    delay = "\n[1/1] REVIEW" in value and not self._delayed
+                    if delay:
+                        self._delayed = True
+                if delay:
+                    self._review_heartbeat_written.wait(0.1)
+                with self._lock:
+                    self._parts.append(value)
+                return len(value)
+
+            def flush(self) -> None:
+                pass
+
+            def getvalue(self) -> str:
+                with self._lock:
+                    return "".join(self._parts)
+
+        @contextmanager
+        def fake_provision(_repo: Path, *, progress, temporary_root: Path):
+            yield {}
+
+        def fake_sweep(_repo: Path, **kwargs):
+            kwargs["progress"](
+                {
+                    "phase": "review",
+                    "current": 1,
+                    "total": 1,
+                    "command": "clawpatch review --all --json",
+                }
+            )
+            time.sleep(0.03)
+            return {
+                "ok": True,
+                "finding_count": 0,
+                "open_findings": 0,
+                "git_head": "abc123",
+            }
+
+        output = DelayedPhaseOutput()
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            patch("sys.stdout", output),
+        ):
+            code = main(
+                ["--repo", "."],
+                run_sweep=fake_sweep,
+                provision_validation_environment=fake_provision,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0.001,
+            )
+
+        rendered = output.getvalue()
+        self.assertEqual(code, 0)
+        self.assertIn("still running: review", rendered)
+        self.assertLess(
+            rendered.index("[1/1] REVIEW"),
+            rendered.index("[1/1] still running: review"),
+        )
 
     def test_cleanup_path_output_escapes_controls(self):
         output = StringIO()
