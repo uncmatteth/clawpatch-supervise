@@ -24,6 +24,7 @@ from clawpatch_supervise.clawpatch_release import (
     _clawpatch_doctor,
     _clawpatch_version,
     _commit_attempt,
+    _current_input_baseline_commit,
     _execute_fix,
     _external_state_home,
     _fix_command,
@@ -6151,6 +6152,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
                 baseline_commit,
             )
+            self.assertEqual(_current_input_baseline_commit(repo), baseline_commit)
             push_and_verify.assert_called_once_with(repo, "main", first=True)
             self.assertTrue(report["final_closure"]["pushed"])
 

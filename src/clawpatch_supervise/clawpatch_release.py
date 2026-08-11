@@ -3051,6 +3051,18 @@ def _commit_preexisting_source_baseline(
     }
 
 
+def _current_input_baseline_commit(repo: Path) -> str:
+    """Return current HEAD only when a durable local baseline ref identifies it."""
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    baseline_ref = f"refs/clawpatch-supervise/baselines/{current_head}"
+    resolved = _run(
+        ["git", "rev-parse", "--verify", baseline_ref],
+        cwd=repo,
+        timeout=60,
+    )
+    return current_head if resolved.returncode == 0 and resolved.stdout.strip() == current_head else ""
+
+
 def _temporary_commit_matches_owned_source(
     repo: Path,
     *,
@@ -5312,7 +5324,9 @@ def _release_sweep_locked(
         "false_positives": list(_prior_false_positives),
         "review_generations": list(_prior_review_generations),
     }
-    preexisting_baseline_commit = _preexisting_baseline_commit
+    preexisting_baseline_commit = (
+        _preexisting_baseline_commit or _current_input_baseline_commit(root)
+    )
     generation_result_start = len(report["results"])
     if not apply:
         report["planned_branch"] = branch
