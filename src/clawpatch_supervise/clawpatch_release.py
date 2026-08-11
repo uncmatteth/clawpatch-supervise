@@ -5957,6 +5957,13 @@ def _release_sweep_locked(
             env=env,
             progress=progress,
         )
+    resume_existing_open_queue = bool(
+        integration_mode == "external"
+        and not fresh
+        and not resumed_checkpoint
+        and durable_progress is None
+        and _required_int(status, "openFindings") > 0
+    )
 
     if not resumed_checkpoint:
         if progress is not None:
@@ -5987,13 +5994,23 @@ def _release_sweep_locked(
                 + ", ".join(baseline_changes)
             )
 
-    if resumed_checkpoint:
-        mapped = {"resumed": True, "features": 0}
+    if resumed_checkpoint or resume_existing_open_queue:
+        mapped = {
+            "resumed": True,
+            "features": 0,
+            "existing_open_queue": resume_existing_open_queue,
+        }
         mapped_features = 0
         review = {
             "resumed": True,
             "review": {"reviewed": 0, "findings": 0},
-            "completion": {"skipped": f"resumed {resumed_checkpoint_kind}"},
+            "completion": {
+                "skipped": (
+                    "existing open queue"
+                    if resume_existing_open_queue
+                    else f"resumed {resumed_checkpoint_kind}"
+                )
+            },
         }
     else:
         mapped = _map_repository(root, env=env, progress=progress)
@@ -6163,9 +6180,9 @@ def _release_sweep_locked(
         current=current_finding,
         total=total_findings,
         require_project_gates=require_project_gates,
-        require_fresh_review=known_generation_findings,
-        resolve_uncertain=not advance_uncertain,
-        refresh_retained_uncertain=advance_uncertain,
+        require_fresh_review=known_generation_findings and not resume_existing_open_queue,
+        resolve_uncertain=not advance_uncertain and not resume_existing_open_queue,
+        refresh_retained_uncertain=advance_uncertain and not resume_existing_open_queue,
     )
     report["results"].extend(closure.get("recovered_findings", []))
     report["continuations"].extend(closure.get("recovered_continuations", []))
