@@ -784,6 +784,34 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         )
         self.assertTrue(all(item.kwargs["env"] == expected_env for item in run.call_args_list))
 
+    def test_target_pythonpath_never_reaches_the_clawpatch_sweep(self):
+        sweep_called = False
+
+        @contextmanager
+        def fake_provision(repo: Path, *, progress, temporary_root: Path):
+            yield {"PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo)))}
+
+        def fake_sweep(_repo: Path, **_kwargs):
+            nonlocal sweep_called
+            sweep_called = True
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with tempfile.TemporaryDirectory() as temp:
+            output = StringIO()
+            with redirect_stdout(output):
+                code = main(
+                    ["--repo", temp, "--fresh"],
+                    run_sweep=fake_sweep,
+                    provision_validation_environment=fake_provision,
+                    ensure_repository_idle=lambda _repo: None,
+                    heartbeat_seconds=0,
+                    cleanup_root=Path(temp) / "cleanup",
+                )
+
+        self.assertEqual(code, 2)
+        self.assertFalse(sweep_called)
+        self.assertIn("Python import environment", output.getvalue())
+
     def test_repository_path_stays_canonical_after_preflight_retargets_symlink(self):
         received_paths = []
 

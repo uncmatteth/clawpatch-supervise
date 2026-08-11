@@ -1577,6 +1577,15 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         child_env_overrides={name: "bypass"},
                     )
 
+    def test_release_environment_rejects_python_import_path_overrides(self):
+        for name in ("PYTHONPATH", "PYTHONHOME", "pythonpath"):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(SafetyError, "Python import environment"):
+                    _release_clawpatch_env(
+                        trusted_host_codex_sandbox_bypass=False,
+                        child_env_overrides={name: "/target-controlled"},
+                    )
+
     def test_process_matcher_ignores_clawpatch_mentions_inside_gbrain_context(self):
         gbrain = [
             "bun",

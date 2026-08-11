@@ -17,6 +17,7 @@ from .clawpatch_release import (
     CLAWPATCH_CHILD_WATCHDOG_SECONDS,
     ClawpatchCommandFailure,
     ClawpatchStop,
+    _clawpatch_control_env_overrides,
     _parse_json_output,
     _release_clawpatch_env,
     _source_paths,
@@ -599,11 +600,11 @@ def main(
                 temporary_root=owned_run.temporary_root,
             ) as validation_env_overrides,
         ):
-            child_env_overrides = {
-                **validation_env_overrides,
-                **owned_run.child_environment(),
-                **preflight_env_overrides,
-            }
+            child_env_overrides = _clawpatch_control_env_overrides(
+                validation_env_overrides,
+                owned_run.child_environment(),
+                preflight_env_overrides,
+            )
             retry_attempt = 0
             while True:
                 try:

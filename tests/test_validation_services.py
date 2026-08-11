@@ -10,12 +10,14 @@ from typing import Mapping
 from unittest.mock import patch
 
 from clawpatch_supervise.errors import SafetyError
+from clawpatch_supervise.clawpatch_release import _release_clawpatch_env
 from clawpatch_supervise.validation_services import (
     PostgresTestContract,
     PythonTestContract,
     _checked,
     _checked_python_environment_command,
     _compose_contract,
+    _expose_repository_to_validation_python,
     _provision_python_test_environment,
     _provision_postgres_test_environment,
     _remove_container,
@@ -91,6 +93,75 @@ class FailedSubprocessRedactionTests(unittest.TestCase):
 
 
 class DisposablePythonValidationTests(unittest.TestCase):
+    def test_repository_imports_are_scoped_to_the_validation_interpreter(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repository"
+            source = repo / "src"
+            source.mkdir(parents=True)
+            sentinel = root / "target-code-ran"
+            (source / "target_shadow.py").write_text(
+                "from pathlib import Path\n"
+                f"Path({str(sentinel)!r}).write_text('ran', encoding='utf-8')\n"
+                "VALUE = 'repository source'\n",
+                encoding="utf-8",
+            )
+            environment = root / "validation-venv"
+            created = subprocess.run(
+                [sys.executable, "-I", "-m", "venv", "--without-pip", str(environment)],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(created.returncode, 0, created.stderr)
+            executable_dir = environment / ("Scripts" if os.name == "nt" else "bin")
+            validation_python = executable_dir / (
+                "python.exe" if os.name == "nt" else "python"
+            )
+            _expose_repository_to_validation_python(environment, repo)
+            validation_overrides = {
+                "PATH": str(executable_dir) + os.pathsep + os.environ.get("PATH", ""),
+                "VIRTUAL_ENV": str(environment),
+            }
+            control_env = _release_clawpatch_env(
+                trusted_host_codex_sandbox_bypass=False,
+                child_env_overrides=validation_overrides,
+            )
+            control_script = root / "control-entrypoint.py"
+            control_script.write_text(
+                "try:\n"
+                "    import target_shadow\n"
+                "except ModuleNotFoundError:\n"
+                "    print('isolated')\n",
+                encoding="utf-8",
+            )
+
+            control = subprocess.run(
+                [sys.executable, str(control_script)],
+                cwd=repo,
+                env=control_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(control.returncode, 0, control.stderr)
+            self.assertEqual(control.stdout.strip(), "isolated")
+            self.assertFalse(sentinel.exists())
+
+            validation = subprocess.run(
+                [str(validation_python), "-c", "import target_shadow; print(target_shadow.VALUE)"],
+                cwd=repo,
+                env=control_env,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+
+            self.assertEqual(validation.returncode, 0, validation.stderr)
+            self.assertEqual(validation.stdout.strip(), "repository source")
+            self.assertEqual(sentinel.read_text(encoding="utf-8"), "ran")
+
     @patch.dict(os.environ, {"GITHUB_TOKEN": "github-secret"})
     def test_default_runner_does_not_restore_omitted_host_environment(self) -> None:
         safe_env = {
@@ -191,11 +262,23 @@ class DisposablePythonValidationTests(unittest.TestCase):
                         )
                     self.assertEqual(environment["PIP_CONFIG_FILE"], os.devnull)
                     self.assertEqual(environment["PIP_NO_INPUT"], "1")
+                self.assertNotIn("PYTHONPATH", child_env)
+                environment = next(
+                    temporary_root.glob("manageroo-validation-python-*/venv")
+                )
+                site_packages = (
+                    environment / "Lib" / "site-packages"
+                    if os.name == "nt"
+                    else environment
+                    / "lib"
+                    / f"python{sys.version_info.major}.{sys.version_info.minor}"
+                    / "site-packages"
+                )
                 self.assertEqual(
-                    child_env["PYTHONPATH"],
-                    os.pathsep.join(
-                        (str(temporary_root / "src"), str(temporary_root))
+                    (site_packages / "clawpatch-supervise-target.pth").read_text(
+                        encoding="utf-8"
                     ),
+                    f"{temporary_root / 'src'}\n{temporary_root}\n",
                 )
                 self.assertFalse(outside_sentinel.exists())
 

@@ -318,6 +318,25 @@ def _python_environment_bin(environment: Path) -> tuple[Path, Path]:
     return executable_dir, python
 
 
+def _expose_repository_to_validation_python(environment: Path, repo: Path) -> None:
+    site_packages = (
+        environment / "Lib" / "site-packages"
+        if os.name == "nt"
+        else environment
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+    site_packages.mkdir(parents=True, exist_ok=True)
+    import_paths = (repo / "src", repo)
+    if any("\n" in str(path) or "\r" in str(path) for path in import_paths):
+        raise SafetyError("Repository paths cannot contain line breaks for Python validation.")
+    (site_packages / "clawpatch-supervise-target.pth").write_text(
+        "".join(f"{path}\n" for path in import_paths),
+        encoding="utf-8",
+    )
+
+
 def _checked_python_environment_command(
     run: RunCommand,
     argv: list[str],
@@ -422,13 +441,13 @@ def _provision_python_test_environment(
                 action="dependency installation",
                 env=install_env,
             )
+            _expose_repository_to_validation_python(environment, repo)
             child_path = str(executable_dir)
             inherited_path = os.environ.get("PATH")
             if inherited_path:
                 child_path += os.pathsep + inherited_path
             child_env = {
                 "PATH": child_path,
-                "PYTHONPATH": os.pathsep.join((str(repo / "src"), str(repo))),
                 "VIRTUAL_ENV": str(environment),
                 "PYTHONNOUSERSITE": "1",
                 "PIP_DISABLE_PIP_VERSION_CHECK": "1",

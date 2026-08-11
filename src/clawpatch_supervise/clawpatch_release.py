@@ -88,6 +88,7 @@ _CLAWPATCH_POLICY_ENV_NAMES = frozenset(
         "MANAGEROO_CLAWPATCH_CHILD_TIMEOUT_SECONDS",
     }
 )
+_PYTHON_IMPORT_ENV_NAMES = frozenset({"PYTHONHOME", "PYTHONPATH"})
 _SUPERVISOR_UPGRADE_PATHS = frozenset(
     {
         "AGENTS.md",
@@ -161,6 +162,26 @@ class _MissingFinding(SafetyError):
         self.finding_id = finding_id
 
 
+def _clawpatch_control_env_overrides(
+    *sources: dict[str, str],
+) -> dict[str, str]:
+    overrides = {name: value for source in sources for name, value in source.items()}
+    for name, value in overrides.items():
+        if not _ENV_NAME.fullmatch(name) or "\x00" in value:
+            raise SafetyError(
+                "The supervisor received an invalid validation-service environment value."
+            )
+        if name.upper() in _PYTHON_IMPORT_ENV_NAMES:
+            raise SafetyError(
+                f"Validation services cannot override Python import environment variable {name}."
+            )
+        if name.upper() in _CLAWPATCH_POLICY_ENV_NAMES:
+            raise SafetyError(
+                f"Validation services cannot override policy-owned supervisor variable {name}."
+            )
+    return overrides
+
+
 def _release_clawpatch_env(
     *,
     trusted_host_codex_sandbox_bypass: bool,
@@ -175,7 +196,7 @@ def _release_clawpatch_env(
         for name in _RELEASE_CHILD_INHERITED_ENV_NAMES
         if (value := os.environ.get(name)) is not None
     }
-    overrides = child_env_overrides or {}
+    overrides = _clawpatch_control_env_overrides(child_env_overrides or {})
     child_env["CLAWPATCH_CODEX_TIMEOUT_MS"] = str(child_timeout_seconds * 1_000)
     child_env["MANAGEROO_CLAWPATCH_CHILD_TIMEOUT_SECONDS"] = str(child_timeout_seconds)
     child_env.pop("MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK", None)
@@ -185,14 +206,6 @@ def _release_clawpatch_env(
     elif allow_sandbox_bypass_fallback:
         child_env["MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK"] = "1"
     for name, value in overrides.items():
-        if not _ENV_NAME.fullmatch(name) or "\x00" in value:
-            raise SafetyError(
-                "The supervisor received an invalid validation-service environment value."
-            )
-        if name.upper() in _CLAWPATCH_POLICY_ENV_NAMES:
-            raise SafetyError(
-                f"Validation services cannot override policy-owned supervisor variable {name}."
-            )
         child_env[name] = value
     return child_env
 
