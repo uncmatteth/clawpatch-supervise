@@ -5281,6 +5281,90 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         resume_stopped.assert_not_called()
         self.assertTrue(finding_preserved)
 
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    def test_external_retires_verified_checkpoint_when_only_unowned_source_is_dirty(
+        self, _processes, _version
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            state_root = root / "state"
+            self.init_repo(repo)
+            source = repo / "app.py"
+            unrelated = repo / "generated-proof.json"
+            source.write_text("before\n", encoding="utf-8")
+            unrelated.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py", "generated-proof.json"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            source.write_text("verified repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "clawpatch-supervise iteration: fnd_one"],
+                cwd=repo,
+                check=True,
+            )
+            temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "reset", "--mixed", original_head], cwd=repo, check=True)
+            _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=original_head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                temporary_commit=temporary_commit,
+                last_action=RepairAction.STOP_TERMINAL,
+                state_root=state_root,
+            )
+            finding_path = repo / ".clawpatch" / "findings" / "fnd_one.json"
+            finding_path.parent.mkdir(parents=True)
+            finding_path.write_text(
+                json.dumps({"findingId": "fnd_one", "status": "open"}) + "\n",
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "release"], cwd=repo, check=True)
+            unrelated.write_text("new generated proof\n", encoding="utf-8")
+
+            with (
+                patch(
+                    "clawpatch_supervise.clawpatch_release._external_state_home",
+                    return_value=state_root.parent,
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._release_state_root",
+                    return_value=state_root,
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._show_finding",
+                    return_value={
+                        "finding": {"id": "fnd_one", "status": "open"},
+                        "patchAttempts": [],
+                    },
+                ),
+                self.assertRaisesRegex(RepositoryBusyError, "pre-existing source changes"),
+            ):
+                release_sweep(
+                    repo,
+                    apply=True,
+                    branch="current",
+                    integration_mode="external",
+                )
+            checkpoint = _load_release_progress(repo, state_root=state_root)
+
+        self.assertIsNone(checkpoint)
+
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._next_finding")
     @patch("clawpatch_supervise.clawpatch_release._review_all_features")

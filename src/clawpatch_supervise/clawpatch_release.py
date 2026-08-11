@@ -1954,7 +1954,7 @@ def _clean_descendant_retires_verified_checkpoint(
     The ClawPatch finding remains in ``.clawpatch`` and is selected normally on
     the continuing run. This does not classify, skip, or otherwise advance it.
     """
-    if progress.get("phase") != "stopped" or _source_paths(repo):
+    if progress.get("phase") != "stopped":
         return False
     finding_id = progress.get("finding_id")
     original_head = progress.get("head_before")
@@ -1967,6 +1967,8 @@ def _clean_descendant_retires_verified_checkpoint(
         or not isinstance(owned_paths, list)
         or bool(temporary_commit) != bool(owned_paths)
     ):
+        return False
+    if set(_source_paths(repo)).intersection(str(path) for path in owned_paths):
         return False
     current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
     if current_head == original_head:
@@ -5323,6 +5325,35 @@ def _release_sweep_locked(
                             "owned_paths": [],
                         }
                     )
+        if (
+            durable_progress is not None
+            and integration_mode == "external"
+            and _clean_descendant_retires_verified_checkpoint(root, durable_progress)
+        ):
+            reset_finding = str(durable_progress["finding_id"])
+            if progress is not None:
+                progress(
+                    {
+                        "phase": "reset-recovery",
+                        "current": "?",
+                        "total": "?",
+                        "finding_id": reset_finding,
+                        "command": (
+                            "retire verified stale recovery wrapper; "
+                            "preserve unrelated source and ClawPatch queue"
+                        ),
+                        "attempt": 1,
+                        "max_attempts": 1,
+                        "owned_paths": [],
+                    }
+                )
+            _clear_release_progress(root, state_root=state_root)
+            report["reset_recovery"] = {
+                "finding_id": reset_finding,
+                "owned_paths": [],
+                "generation": "clean-descendant",
+            }
+            durable_progress = None
         if (
             durable_progress is not None
             and preexisting_source

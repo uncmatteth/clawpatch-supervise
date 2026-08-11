@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.33}"
+version="${CLAWPATCH_SUPERVISE_VERSION:-0.1.34}"
 source_package="${CLAWPATCH_SUPERVISE_SOURCE:-https://github.com/uncmatteth/clawpatch-supervise/releases/download/v${version}/clawpatch_supervise-${version}-py3-none-any.whl}"
 install_root="${CLAWPATCH_SUPERVISE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/clawpatch-supervise}"
 bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
@@ -10,7 +10,7 @@ verify_repo="${CLAWPATCH_SUPERVISE_VERIFY_REPO:-}"
 readonly minimum_clawpatch_version="0.7.2"
 readonly release_clawpatch_version="0.7.2"
 readonly release_clawpatch_integrity_0_7_2="sha512-rhpWj6e31XJUtWKlp/MJOjdjtj+ZXc9WiLcXRk+ZaA699K++dVaYfx00dVS/QNiJBaI71IUFU6sdSPsX/nyW0g=="
-readonly release_sha256_0_1_33="ee883fc6c47bdb22831256c0e6d7d340b83eb0051ef8efda39e57601f3c98cc8"
+readonly release_sha256_0_1_34="3d4550f29a88111233a3652460197ae9b52555a0add5a2792a1a36a5b649a2fa"
 download_root=""
 staging_venv=""
 staging_clawpatch_root=""
@@ -217,11 +217,11 @@ if [[ ! -d "$source_package" ]]; then
       echo "CLAWPATCH_SUPERVISE_SHA256 is required for a custom wheel source." >&2
       exit 2
     fi
-    if [[ "$version" != "0.1.33" ]]; then
+    if [[ "$version" != "0.1.34" ]]; then
       echo "No trusted SHA-256 is available for clawpatch-supervise $version." >&2
       exit 2
     fi
-    expected_sha256="$release_sha256_0_1_33"
+    expected_sha256="$release_sha256_0_1_34"
   fi
 
   download_root="$(mktemp -d)"
