@@ -424,4 +424,10 @@ activation_complete=true
 activated_clawpatch_root="$staging_clawpatch_root"
 staging_venv=""
 staging_clawpatch_root=""
+if [[ -n "$superseded_venv" ]] && ! rm -rf -- "$superseded_venv"; then
+  echo "Unable to remove superseded supervisor environment: $superseded_venv" >&2
+fi
+if [[ -n "$superseded_clawpatch_root" ]] && ! rm -rf -- "$superseded_clawpatch_root"; then
+  echo "Unable to remove superseded ClawPatch root: $superseded_clawpatch_root" >&2
+fi
 echo "Installed command: $supervisor_destination"
