@@ -2389,28 +2389,6 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             self.assertEqual(preserved["owned_source_fingerprint"], "")
             resume_stopped_attempt.assert_not_called()
 
-            extra = repo / "other.py"
-            extra.write_text("another active edit\n", encoding="utf-8")
-            with (
-                patch(
-                    "clawpatch_supervise.clawpatch_release._release_state_root",
-                    return_value=repo / ".manageroo" / "cache",
-                ),
-                self.assertRaisesRegex(
-                    RepositoryBusyError,
-                    "waiting without discarding",
-                ),
-            ):
-                release_sweep(
-                    repo,
-                    apply=True,
-                    branch="current",
-                    integration_mode="external",
-                )
-
-            self.assertEqual(source.read_bytes(), source_before)
-            self.assertEqual(extra.read_text(encoding="utf-8"), "another active edit\n")
-
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     def test_complete_review_uses_bounded_worker_waves_until_zero_pending(self, json_clawpatch):
         json_clawpatch.side_effect = [
@@ -5398,6 +5376,9 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
             finding_path = repo / ".clawpatch" / "findings" / "fnd_one.json"
             finding_path.parent.mkdir(parents=True)
+            (finding_path.parent.parent / "project.json").write_text(
+                '{"name":"fixture"}\n', encoding="utf-8"
+            )
             finding_path.write_text(
                 json.dumps({"findingId": "fnd_one", "status": "open"}) + "\n",
                 encoding="utf-8",
@@ -5422,9 +5403,34 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         "patchAttempts": [],
                     },
                 ),
-                self.assertRaisesRegex(RepositoryBusyError, "pre-existing source changes"),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._run_project_gates",
+                    return_value=[],
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._json_clawpatch",
+                    side_effect=[
+                        {"activeLocks": 0, "lockFiles": 0, "openFindings": 0},
+                        {"features": 0},
+                    ],
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._review_all_features",
+                    return_value={
+                        "review": {"reviewed": 0, "findings": 0},
+                        "completion": {"dryRun": True, "wouldReview": 0},
+                    },
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._next_finding",
+                    return_value=(None, {"finding": None}),
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._final_closure",
+                    return_value={"pushed": False, "needs_fresh_review": False},
+                ),
             ):
-                release_sweep(
+                report = release_sweep(
                     repo,
                     apply=True,
                     branch="current",
@@ -5433,6 +5439,11 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             checkpoint = _load_release_progress(repo, state_root=state_root)
 
         self.assertIsNone(checkpoint)
+        self.assertEqual(report["reset_recovery"]["generation"], "clean-descendant")
+        self.assertEqual(
+            report["preexisting_source_recovery"]["paths"],
+            ["generated-proof.json"],
+        )
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._next_finding")
@@ -6007,26 +6018,106 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             with self.assertRaisesRegex(SafetyError, "pre-existing source changes"):
                 release_sweep(repo, apply=True, branch="current")
 
-    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
-    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
-    def test_external_apply_waits_on_preexisting_source_changes(self, _processes, _version):
+    def test_external_apply_preserves_preexisting_source_and_continues(self):
         with tempfile.TemporaryDirectory() as temp:
-            repo = Path(temp)
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            state_root = root / "state"
             self.init_repo(repo)
             (repo / "app.py").write_text("before\n", encoding="utf-8")
-            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            (repo / "removed.txt").write_text("tracked\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py", "removed.txt"], cwd=repo, check=True)
             subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
             (repo / "app.py").write_text("dirty\n", encoding="utf-8")
+            (repo / "removed.txt").unlink()
+            (repo / "untracked.txt").write_text("new\n", encoding="utf-8")
+            queue = repo / ".clawpatch" / "project.json"
+            queue.parent.mkdir()
+            queue.write_text('{"queue":"preserve"}\n', encoding="utf-8")
 
-            with self.assertRaisesRegex(RepositoryBusyError, "waiting without discarding"):
-                release_sweep(
+            with (
+                patch(
+                    "clawpatch_supervise.clawpatch_release._release_state_root",
+                    return_value=state_root,
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._clawpatch_version",
+                    return_value="0.7.2",
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._active_clawpatch_processes",
+                    return_value=[],
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._run_project_gates",
+                    return_value=[],
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._json_clawpatch",
+                    side_effect=[
+                        {"activeLocks": 0, "lockFiles": 0, "openFindings": 0},
+                        {"features": 0},
+                    ],
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._review_all_features",
+                    return_value={
+                        "review": {"reviewed": 0, "findings": 0},
+                        "completion": {"dryRun": True, "wouldReview": 0},
+                    },
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._next_finding",
+                    return_value=(None, {"finding": None}),
+                ),
+                patch(
+                    "clawpatch_supervise.clawpatch_release._final_closure",
+                    return_value={"pushed": False, "needs_fresh_review": False},
+                ),
+            ):
+                report = release_sweep(
                     repo,
                     apply=True,
                     branch="current",
                     integration_mode="external",
                 )
 
-            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "dirty\n")
+            recovery = report["preexisting_source_recovery"]
+            preserved_commit = recovery["preserved_commit"]
+            receipt = json.loads(Path(recovery["receipt"]).read_text(encoding="utf-8"))
+            self.assertEqual((repo / "app.py").read_text(encoding="utf-8"), "before\n")
+            self.assertEqual((repo / "removed.txt").read_text(encoding="utf-8"), "tracked\n")
+            self.assertFalse((repo / "untracked.txt").exists())
+            self.assertEqual(queue.read_text(encoding="utf-8"), '{"queue":"preserve"}\n')
+            self.assertEqual(_source_paths(repo), [])
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "show", f"{preserved_commit}:app.py"], cwd=repo, text=True
+                ),
+                "dirty\n",
+            )
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "show", f"{preserved_commit}:untracked.txt"], cwd=repo, text=True
+                ),
+                "new\n",
+            )
+            removed = subprocess.run(
+                ["git", "cat-file", "-e", f"{preserved_commit}:removed.txt"],
+                cwd=repo,
+                check=False,
+                capture_output=True,
+            )
+            self.assertNotEqual(removed.returncode, 0)
+            self.assertEqual(receipt["reason"], "preexisting-source")
+            self.assertEqual(receipt["paths"], ["app.py", "removed.txt", "untracked.txt"])
+            self.assertEqual(
+                subprocess.check_output(
+                    ["git", "rev-parse", recovery["preserved_ref"]], cwd=repo, text=True
+                ).strip(),
+                preserved_commit,
+            )
 
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])

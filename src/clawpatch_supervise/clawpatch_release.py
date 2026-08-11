@@ -3012,6 +3012,108 @@ def _preserve_ambiguous_checkpoint_source(
     }
 
 
+def _preserve_preexisting_source(
+    repo: Path,
+    paths: list[str],
+    *,
+    state_root: Path,
+) -> dict[str, Any]:
+    """Preserve ownerless source under a local ref, then restore current HEAD."""
+    exact_paths = sorted(set(paths))
+    if not exact_paths or exact_paths != _source_paths(repo):
+        raise SafetyError(
+            "Automatic Clawpatch source recovery requires the complete current source set."
+        )
+    _validate_attempt_paths_syntax(exact_paths)
+    current_head = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    preserved_source_fingerprint = _source_paths_fingerprint(repo, exact_paths)
+
+    temporary_root = current_temporary_root()
+    with tempfile.TemporaryDirectory(
+        prefix="clawpatch-supervise-recovery-index-",
+        dir=str(temporary_root) if temporary_root is not None else None,
+    ) as temp:
+        index_path = Path(temp) / "index"
+        env = dict(os.environ)
+        env["GIT_INDEX_FILE"] = str(index_path)
+        env.update(
+            {
+                "GIT_AUTHOR_NAME": "ClawPatch Supervise Recovery",
+                "GIT_AUTHOR_EMAIL": "clawpatch-supervise-recovery@localhost",
+                "GIT_COMMITTER_NAME": "ClawPatch Supervise Recovery",
+                "GIT_COMMITTER_EMAIL": "clawpatch-supervise-recovery@localhost",
+            }
+        )
+        _must_run(["git", "read-tree", current_head], cwd=repo, timeout=120, env=env)
+        _must_run(["git", "add", "-A", "--", *exact_paths], cwd=repo, timeout=120, env=env)
+        preserved_tree = _must_run(
+            ["git", "write-tree"], cwd=repo, timeout=120, env=env
+        ).strip()
+        preserved_commit = _must_run(
+            [
+                "git",
+                "commit-tree",
+                preserved_tree,
+                "-p",
+                current_head,
+                "-m",
+                "clawpatch-supervise recovery: preserve pre-existing source",
+            ],
+            cwd=repo,
+            timeout=120,
+            env=env,
+        ).strip()
+    if _paths_between(repo, current_head, preserved_commit) != exact_paths:
+        raise SafetyError(
+            "Automatic Clawpatch source recovery could not preserve exactly the current "
+            "source paths."
+        )
+
+    preserved_ref = f"refs/clawpatch-supervise/recovery/{preserved_commit}"
+    existing_ref = _run(
+        ["git", "rev-parse", "--verify", preserved_ref],
+        cwd=repo,
+        timeout=60,
+    )
+    if existing_ref.returncode:
+        _must_run(
+            ["git", "update-ref", preserved_ref, preserved_commit],
+            cwd=repo,
+            timeout=60,
+        )
+    elif existing_ref.stdout.strip() != preserved_commit:
+        raise SafetyError("Clawpatch recovery ref unexpectedly points to different source.")
+
+    receipt_path = state_root / "recoveries" / f"{preserved_commit}.json"
+    receipt = {
+        "version": 1,
+        "reason": "preexisting-source",
+        "repo": str(repo.resolve()),
+        "current_head": current_head,
+        "paths": exact_paths,
+        "preserved_source_fingerprint": preserved_source_fingerprint,
+        "preserved_commit": preserved_commit,
+        "preserved_ref": preserved_ref,
+        "created_at": utc_now(),
+    }
+    atomic_write_json(receipt_path, receipt)
+
+    _discard_checkpoint_owned_source(repo, exact_paths)
+    remaining_source = _source_paths(repo)
+    if remaining_source:
+        raise SafetyError(
+            "Automatic Clawpatch source recovery preserved source at "
+            f"{preserved_ref} but could not restore a clean current HEAD: "
+            + ", ".join(remaining_source)
+        )
+    return {
+        "paths": exact_paths,
+        "preserved_commit": preserved_commit,
+        "preserved_ref": preserved_ref,
+        "receipt": str(receipt_path),
+    }
+
+
 def _temporary_commit_matches_owned_source(
     repo: Path,
     *,
@@ -5693,8 +5795,32 @@ def _release_sweep_locked(
             + ", ".join(preexisting_source)
         )
         if integration_mode == "external":
-            raise RepositoryBusyError(message + "; waiting without discarding them.")
-        raise SafetyError(message)
+            preexisting_recovery = _preserve_preexisting_source(
+                root,
+                preexisting_source,
+                state_root=state_root,
+            )
+            report["preexisting_source_recovery"] = preexisting_recovery
+            if progress is not None:
+                progress(
+                    {
+                        "phase": "reset-recovery",
+                        "current": "?",
+                        "total": "?",
+                        "command": (
+                            "preserve ownerless source in a local recovery ref; "
+                            "restore current HEAD; continue ClawPatch queue"
+                        ),
+                        "attempt": 1,
+                        "max_attempts": 1,
+                        "owned_paths": list(preexisting_recovery["paths"]),
+                        "preserved_ref": preexisting_recovery["preserved_ref"],
+                        "receipt": preexisting_recovery["receipt"],
+                    }
+                )
+            preexisting_source = []
+        else:
+            raise SafetyError(message)
     if durable_progress is not None and branch not in {"auto", "current", current_branch}:
         raise SafetyError(
             "Cannot create a different branch while resuming interrupted Clawpatch release progress."
