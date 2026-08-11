@@ -10,7 +10,17 @@ import unittest
 from unittest.mock import call, patch
 
 from _process_tree_test_support import assert_blocked_descendant_exited
-from clawpatch_supervise.clawpatch_release import _release_clawpatch_env, _run
+from clawpatch_supervise.clawpatch_protocol import (
+    ClawpatchFailureKind,
+    RepairAction,
+    decide_repair_transition,
+)
+from clawpatch_supervise.clawpatch_release import (
+    ClawpatchCommandFailure,
+    _must_clawpatch,
+    _release_clawpatch_env,
+    _run,
+)
 from clawpatch_supervise.errors import SafetyError
 from clawpatch_supervise.runner import CommandRunner, _terminate_process_group
 
@@ -189,6 +199,42 @@ class WindowsProcessTreeTerminationTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "posix", "POSIX process-group behavior")
 class PosixProcessTreeTerminationTests(unittest.TestCase):
+    def test_signal_terminated_clawpatch_command_becomes_controlled_terminal_failure(
+        self,
+    ) -> None:
+        result = _run(
+            [
+                sys.executable,
+                "-c",
+                "import os, signal; os.kill(os.getpid(), signal.SIGTERM)",
+            ],
+            cwd=Path.cwd(),
+            timeout=30,
+        )
+
+        self.assertEqual(result.returncode, -signal.SIGTERM)
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_release._run_clawpatch",
+                return_value=result,
+            ),
+            self.assertRaises(ClawpatchCommandFailure) as raised,
+        ):
+            _must_clawpatch(
+                Path.cwd(),
+                ["clawpatch", "review"],
+                env={},
+                timeout=30,
+            )
+
+        failure = raised.exception.failure
+        self.assertEqual(failure.exit_code, -signal.SIGTERM)
+        self.assertEqual(failure.kind, ClawpatchFailureKind.COMMAND_FAILED)
+        self.assertEqual(
+            decide_repair_transition(failure=failure).action,
+            RepairAction.STOP_TERMINAL,
+        )
+
     @patch("clawpatch_supervise.runner.os.name", "posix")
     def test_surviving_group_is_killed_when_parent_communicate_completes(self) -> None:
         class Process:

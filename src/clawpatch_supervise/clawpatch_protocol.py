@@ -69,8 +69,8 @@ _PROGRESS_CAPABLE_FAILURES = frozenset(
 
 
 def classify_clawpatch_failure(phase: str, exit_code: int) -> ClawpatchFailure:
-    if not phase or isinstance(exit_code, bool) or not isinstance(exit_code, int) or exit_code <= 0:
-        raise ValueError("A failed ClawPatch command requires a phase and a positive exit code.")
+    if not phase or isinstance(exit_code, bool) or not isinstance(exit_code, int) or exit_code == 0:
+        raise ValueError("A failed ClawPatch command requires a phase and a nonzero exit code.")
     kind = _EXIT_FAILURES.get(exit_code, ClawpatchFailureKind.COMMAND_FAILED)
     return ClawpatchFailure(
         phase=phase,
