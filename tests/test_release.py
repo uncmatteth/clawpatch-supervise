@@ -6563,6 +6563,72 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             any(event.get("phase") == "reset-recovery" for event in progress_events)
         )
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._process_finding_until_fixed")
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._map_repository")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_external_existing_open_queue_resumes_without_remap_or_uncertain_refresh(
+        self,
+        _version,
+        _processes,
+        json_clawpatch,
+        map_repository,
+        review_all_features,
+        process_finding,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            (repo / ".clawpatch").mkdir()
+            (repo / ".clawpatch" / "project.json").write_text("{}\n", encoding="utf-8")
+            json_clawpatch.side_effect = [
+                {"activeLocks": 0, "lockFiles": 0, "openFindings": 1},
+                {
+                    "finding": {"id": "fnd_one", "status": "open"},
+                    "next": "clawpatch show --finding fnd_one",
+                },
+                {
+                    "finding": {"id": "fnd_one", "status": "open"},
+                    "validation": [],
+                    "patchAttempts": [],
+                },
+                {"finding": None, "status": "open"},
+            ]
+            process_finding.return_value = (
+                {
+                    "finding_id": "fnd_one",
+                    "files_changed": [],
+                    "revalidation": {"finding": "fnd_one", "outcome": "fixed"},
+                    "commit": "abc123",
+                },
+                False,
+                0,
+            )
+            final_closure.return_value = {
+                "pushed": False,
+                "needs_fresh_review": False,
+                "uncertain_report": {"total": 4, "items": [{}, {}, {}, {}]},
+            }
+
+            report = release_sweep(
+                repo,
+                apply=True,
+                branch="current",
+                integration_mode="external",
+                advance_uncertain=True,
+            )
+
+        map_repository.assert_not_called()
+        review_all_features.assert_not_called()
+        self.assertFalse(final_closure.call_args.kwargs["require_fresh_review"])
+        self.assertFalse(final_closure.call_args.kwargs["resolve_uncertain"])
+        self.assertFalse(final_closure.call_args.kwargs["refresh_retained_uncertain"])
+        self.assertEqual(report["finding_count"], 1)
+
     @patch("clawpatch_supervise.clawpatch_release._prepare_fresh_release")
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
