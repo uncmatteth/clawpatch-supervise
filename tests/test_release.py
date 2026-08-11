@@ -6408,7 +6408,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 baseline_commit,
             )
             self.assertEqual(_current_input_baseline_commit(repo), baseline_commit)
-            push_and_verify.assert_called_once_with(repo, "main", first=True)
+            push_and_verify.assert_called_once_with(repo.resolve(), "main", first=True)
             self.assertTrue(report["final_closure"]["pushed"])
 
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")

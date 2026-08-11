@@ -432,7 +432,7 @@ def main(
         doctor_parser.add_argument("--repo", default=".")
         doctor_args = doctor_parser.parse_args(raw_argv[1:])
         try:
-            repo = Path(doctor_args.repo).resolve()
+            repo = Path(doctor_args.repo).resolve(strict=True)
         except (OSError, RuntimeError) as exc:
             print(
                 "NOT READY: Could not resolve repository path "
@@ -496,7 +496,7 @@ def main(
     if not math.isfinite(args.retry_seconds) or args.retry_seconds <= 0:
         parser.error("--retry-seconds must be a finite positive number")
     try:
-        repo = Path(args.repo).resolve()
+        repo = Path(args.repo).resolve(strict=True)
     except (OSError, RuntimeError) as exc:
         print(
             "STOPPED: Could not resolve repository path "

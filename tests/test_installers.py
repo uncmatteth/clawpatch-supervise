@@ -858,7 +858,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(actual_install_root, install_root)
         staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
         self.assertFalse(staged_root.exists())
-        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch)
+        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch.resolve())
         self.assertEqual(installed_supervisor.read_text(encoding="utf-8"), previous_wrapper)
         dependency = subprocess.run(
             [str(installed_supervisor), "--dependency-version"],
@@ -905,7 +905,7 @@ class InstallerContractTests(unittest.TestCase):
         staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
         self.assertFalse(staged_root.exists())
         self.assertTrue(installed_clawpatch.is_symlink())
-        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch)
+        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch.resolve())
         self.assertEqual(
             previous_clawpatch.read_text(encoding="utf-8"),
             previous_clawpatch_content,
@@ -972,7 +972,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(len(retained_backups), 1)
         retained_backup = retained_backups[0]
         self.assertTrue(retained_backup.is_symlink())
-        self.assertEqual(retained_backup.resolve(), previous_clawpatch)
+        self.assertEqual(retained_backup.resolve(), previous_clawpatch.resolve())
         self.assertIn(str(retained_backup), result.stderr)
         self.assertIn("Rollback failed", result.stderr)
 
@@ -1081,7 +1081,7 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 26)
         self.assertEqual(actual_install_root, install_root)
-        self.assertEqual(installed_command.resolve(), previous_supervisor)
+        self.assertEqual(installed_command.resolve(), previous_supervisor.resolve())
         previous_result = subprocess.run(
             [str(installed_command), "--version"],
             capture_output=True,

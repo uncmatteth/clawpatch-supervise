@@ -129,7 +129,12 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             "owned-validation-override",
         )
         self.assertEqual(result.get("PATH"), os.environ.get("PATH"))
-        self.assertEqual(result, expected)
+        platform_added = {"__CF_USER_TEXT_ENCODING"} if sys.platform == "darwin" else set()
+        self.assertEqual(set(result) - set(expected), platform_added)
+        self.assertEqual(
+            {name: value for name, value in result.items() if name not in platform_added},
+            expected,
+        )
 
     def test_state_query_failure_reports_bounded_stdout_and_stderr(self):
         repo = Path("/tmp/example-repository")
@@ -829,7 +834,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 )
 
         self.assertEqual(code, 0)
-        self.assertEqual(received_paths, [repo_a, repo_a, repo_a])
+        canonical_repo_a = repo_a.resolve()
+        self.assertEqual(received_paths, [canonical_repo_a] * 3)
 
     def test_resume_phase_explains_source_clean_planned_attempt(self):
         self.assertEqual(
