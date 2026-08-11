@@ -275,6 +275,7 @@ class CleanupCommandTests(unittest.TestCase):
             )
             self.assertTrue(original.is_dir())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX anchored cleanup only")
     def test_cleanup_preserves_nested_replacement_created_after_final_identity_check(
         self,
     ) -> None:

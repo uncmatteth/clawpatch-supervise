@@ -405,6 +405,11 @@ def _remove_exact_owned_run_locked(candidate: Path, cleanup_root: Path) -> None:
                         f"{restore_error}"
                     )
         raise
+    finally:
+        try:
+            quarantine.rmdir()
+        except OSError:
+            pass
 
 
 @contextmanager
@@ -429,6 +434,10 @@ def _serialized_cleanup_root(cleanup_root: Path) -> Iterator[None]:
 
 
 def _remove_exact_directory(path: Path, identity: tuple[int, int]) -> None:
+    if os.name == "nt":
+        _empty_windows_directory(path, identity)
+        return
+
     required_dir_fd_functions = (os.open, os.stat, os.unlink)
     if os.scandir not in os.supports_fd or any(
         function not in os.supports_dir_fd for function in required_dir_fd_functions
@@ -463,6 +472,37 @@ def _remove_exact_directory(path: Path, identity: tuple[int, int]) -> None:
             os.close(directory_descriptor)
     finally:
         os.close(parent_descriptor)
+
+
+def _empty_windows_directory(path: Path, identity: tuple[int, int]) -> None:
+    metadata = path.lstat()
+    if not stat.S_ISDIR(metadata.st_mode) or (metadata.st_dev, metadata.st_ino) != identity:
+        raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+
+    for entry in path.iterdir():
+        entry_metadata = entry.lstat()
+        entry_identity = (entry_metadata.st_dev, entry_metadata.st_ino)
+        is_junction = bool(getattr(entry, "is_junction", lambda: False)())
+        if stat.S_ISDIR(entry_metadata.st_mode) and not entry.is_symlink() and not is_junction:
+            _empty_windows_directory(entry, entry_identity)
+            current = entry.lstat()
+            if (current.st_dev, current.st_ino) != entry_identity:
+                raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+            # Windows cannot conditionally remove a directory by its file ID,
+            # so retain the empty exact directory beneath the random claim.
+            continue
+
+        current = entry.lstat()
+        if (current.st_dev, current.st_ino) != entry_identity:
+            raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+        if is_junction:
+            entry.rmdir()
+        else:
+            entry.unlink()
+
+    current = path.lstat()
+    if (current.st_dev, current.st_ino) != identity:
+        raise SafetyError("The supervisor-owned run directory changed during cleanup.")
 
 
 def _empty_directory_descriptor(directory_descriptor: int, flags: int) -> None:
