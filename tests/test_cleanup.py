@@ -426,6 +426,27 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertIn("COMPLETE", output.getvalue())
             self.assertNotIn("STOPPED", output.getvalue())
 
+    def test_owned_run_directory_without_callback_surfaces_blocked_cleanup(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+            retained_path: Path | None = None
+
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup._remove_exact_owned_run",
+                    side_effect=PermissionError(5, "Access is denied"),
+                ),
+                self.assertRaises(SafetyError) as raised,
+            ):
+                with owned_run_directory(root, root=cleanup_root) as owned_run:
+                    retained_path = owned_run.path
+
+            self.assertIsNotNone(retained_path)
+            self.assertTrue(retained_path.is_dir())
+            self.assertIn(str(retained_path), str(raised.exception))
+            self.assertIsInstance(raised.exception.__cause__, PermissionError)
+
     @unittest.skipUnless(Path("/proc").is_dir(), "Linux live-reference proof")
     def test_cleanup_preserves_stale_owned_directory_referenced_by_live_child(self) -> None:
         with tempfile.TemporaryDirectory() as temp:

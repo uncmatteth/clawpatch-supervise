@@ -566,7 +566,10 @@ def owned_run_directory(
             if body_error is None:
                 if on_blocked_cleanup is not None:
                     on_blocked_cleanup(candidate, cleanup_error)
-                return
+                    return
+                raise SafetyError(
+                    f"ClawPatch Supervise could not remove its owned run directory: {candidate}"
+                ) from cleanup_error
             body_error.add_note(
                 f"ClawPatch Supervise cleanup also failed for its owned run directory: {candidate}"
             )
