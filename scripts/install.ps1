@@ -198,6 +198,7 @@ $toolDirectories = @((Split-Path -Parent $clawpatch)) | Select-Object -Unique
 $toolPath = $toolDirectories -join ";"
 $wrapperText = (
     "@echo off`r`n" +
+    "chcp 65001 >nul`r`n" +
     "set `"PYTHONUTF8=1`"`r`n" +
     "set `"PYTHONIOENCODING=utf-8`"`r`n" +
     "set `"NODE_DISABLE_COMPILE_CACHE=1`"`r`n" +

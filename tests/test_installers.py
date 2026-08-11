@@ -1328,6 +1328,11 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(invocations, [])
         wrapper = _install_root.parent / "installed-bin" / "clawpatch-supervise.cmd"
         wrapper_text = wrapper.read_text(encoding="ascii")
+        self.assertIn("chcp 65001 >nul", wrapper_text)
+        self.assertLess(
+            wrapper_text.index("chcp 65001 >nul"),
+            wrapper_text.index("PYTHONIOENCODING=utf-8"),
+        )
         self.assertIn("PYTHONUTF8=1", wrapper_text)
         self.assertIn("PYTHONIOENCODING=utf-8", wrapper_text)
         self.assertIn("NODE_DISABLE_COMPILE_CACHE=1", wrapper_text)
