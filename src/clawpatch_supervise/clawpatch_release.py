@@ -2723,6 +2723,93 @@ def _clear_release_progress(repo: Path, *, state_root: Path | None = None) -> No
     _release_progress_path(repo, state_root=state_root).unlink(missing_ok=True)
 
 
+def recover_external_interrupted_state(
+    repo: Path,
+    *,
+    reason: str,
+) -> dict[str, Any] | None:
+    """Turn supervisor-owned interrupted state into a fresh-review boundary.
+
+    The external command owns this checkpoint, not the project source.  Visible
+    source becomes an ordinary input-baseline commit; a source-clean checkpoint
+    is retired directly.  In both cases the next sweep rebuilds and reviews the
+    queue instead of requiring operator recovery.
+    """
+    root = repo.resolve()
+    state_root = external_state_root(root)
+    progress_path = _release_progress_path(root, state_root=state_root)
+    quarantined_checkpoint = ""
+    try:
+        checkpoint = _load_release_progress(root, state_root=state_root)
+    except SafetyError:
+        if progress_path.is_symlink() or not progress_path.is_file():
+            raise
+        raw_progress = progress_path.read_bytes()
+        digest = hashlib.sha256(raw_progress).hexdigest()
+        quarantine_path = state_root / "recoveries" / f"invalid-progress-{digest}.json"
+        quarantine_path.parent.mkdir(parents=True, exist_ok=True)
+        if quarantine_path.exists():
+            if quarantine_path.is_symlink() or quarantine_path.read_bytes() != raw_progress:
+                raise SafetyError(
+                    "Malformed Clawpatch checkpoint quarantine does not match its digest."
+                )
+            progress_path.unlink()
+        else:
+            progress_path.replace(quarantine_path)
+        quarantined_checkpoint = str(quarantine_path)
+        checkpoint = None
+    queue_path = root / ".clawpatch" / "project.json"
+    queue_exists = queue_path.is_file() and not queue_path.is_symlink()
+    if checkpoint is None and not quarantined_checkpoint and not queue_exists:
+        return None
+    source_paths = _source_paths(root)
+    current_head = _git_text(root, ["git", "rev-parse", "HEAD"])
+    failure = reason[-4000:]
+    boundary = {
+        "repo": str(root),
+        "head": current_head,
+        "paths": source_paths,
+        "source_fingerprint": (
+            _source_paths_fingerprint(root, source_paths) if source_paths else ""
+        ),
+        "failure": failure,
+    }
+    boundary_key = hashlib.sha256(
+        json.dumps(boundary, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+    receipt_path = state_root / "recoveries" / f"unattended-{boundary_key}.json"
+    if receipt_path.exists():
+        if receipt_path.is_symlink() or not receipt_path.is_file():
+            raise SafetyError("Unattended Clawpatch recovery receipt is unsafe.")
+        return None
+    baseline = (
+        _commit_preexisting_source_baseline(root, source_paths, state_root=state_root)
+        if source_paths
+        else {}
+    )
+    receipt = {
+        "version": 1,
+        "reason": "unattended-checkpoint-recovery",
+        "repo": str(root),
+        "finding_id": str(checkpoint["finding_id"]) if checkpoint else "unknown",
+        "checkpoint": checkpoint or {},
+        "quarantined_checkpoint": quarantined_checkpoint,
+        "paths": source_paths,
+        "baseline_commit": str(baseline.get("baseline_commit", "")),
+        "failure": failure,
+        "created_at": utc_now(),
+    }
+    atomic_write_json(receipt_path, receipt)
+    _clear_release_progress(root, state_root=state_root)
+    return {
+        "finding_id": str(checkpoint["finding_id"]) if checkpoint else "unknown",
+        "paths": source_paths,
+        "baseline_commit": str(baseline.get("baseline_commit", "")),
+        "receipt": str(receipt_path),
+        "quarantined_checkpoint": quarantined_checkpoint,
+    }
+
+
 def _parse_checkpoint_time(value: Any) -> datetime | None:
     if not isinstance(value, str) or not value:
         return None
