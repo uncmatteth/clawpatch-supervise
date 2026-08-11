@@ -178,8 +178,9 @@ def _lsof_path_has_live_reference(candidate: Path) -> bool | None:
     if lsof is None:
         return None
     try:
+        resolved_candidate = candidate.resolve()
         result = subprocess.run(
-            [lsof, "-nP", "-Fp", "+D", str(candidate.resolve())],
+            [lsof, "-nP", "-Fp", "+D", str(resolved_candidate)],
             text=True,
             encoding="utf-8",
             errors="replace",
@@ -198,6 +199,20 @@ def _lsof_path_has_live_reference(candidate: Path) -> bool | None:
     # namespaces); those warnings do not turn an empty candidate result into
     # an inconclusive probe.
     if result.returncode == 1 and not result.stdout.strip():
+        warning_prefix = "lsof: WARNING: can't stat() "
+        saw_mount_warning = False
+        for line in (line.strip() for line in result.stderr.splitlines() if line.strip()):
+            if line.startswith(warning_prefix):
+                detail = line[len(warning_prefix) :]
+                if str(resolved_candidate) in detail or not (
+                    " file system " in detail or "mount" in detail.casefold()
+                ):
+                    return None
+                saw_mount_warning = True
+                continue
+            if saw_mount_warning and line == "Output information may be incomplete.":
+                continue
+            return None
         return False
     return None
 

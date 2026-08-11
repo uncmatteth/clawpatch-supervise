@@ -463,6 +463,22 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertFalse(cleanup_module._lsof_path_has_live_reference(Path("/candidate")))
 
     @unittest.skipUnless(os.name == "posix", "POSIX lsof fallback")
+    def test_lsof_candidate_specific_error_is_inconclusive(self) -> None:
+        candidate = Path("/candidate")
+        result = subprocess.CompletedProcess(
+            args=["lsof"],
+            returncode=1,
+            stdout="",
+            stderr=f"lsof: WARNING: can't stat() {candidate}: Permission denied\n",
+        )
+
+        with (
+            patch("clawpatch_supervise.cleanup.shutil.which", return_value="/usr/bin/lsof"),
+            patch("clawpatch_supervise.cleanup.subprocess.run", return_value=result),
+        ):
+            self.assertIsNone(cleanup_module._lsof_path_has_live_reference(candidate))
+
+    @unittest.skipUnless(os.name == "posix", "POSIX lsof fallback")
     def test_cleanup_without_proc_preserves_directory_referenced_by_live_process(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
