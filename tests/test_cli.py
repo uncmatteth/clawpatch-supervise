@@ -1093,6 +1093,42 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(len(preflight_calls), 2)
         self.assertIn("WAITING FOR THE ACTIVE RUN", output.getvalue())
 
+    def test_preserved_state_retry_is_not_mislabeled_as_an_active_run(self):
+        calls = []
+
+        def fake_sweep(_repo: Path, **_kwargs):
+            calls.append(True)
+            if len(calls) == 1:
+                raise RepositoryBusyError(
+                    "Interrupted Clawpatch release progress no longer owns the exact "
+                    "current source paths; waiting without discarding them."
+                )
+            return {
+                "ok": True,
+                "finding_count": 0,
+                "open_findings": 0,
+                "git_head": "abc",
+            }
+
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(StringIO()) as output,
+        ):
+            code = main(
+                ["--repo", ".", "--retry-seconds", "0.001"],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("THIS REPOSITORY'S PRESERVED STATE", output.getvalue())
+        self.assertNotIn("WAITING FOR THE ACTIVE RUN", output.getvalue())
+
     def test_plain_command_retries_a_transient_source_clean_command(self):
         calls = []
 
@@ -1178,51 +1214,36 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["fresh"])
         self.assertEqual(calls[0][1]["child_timeout_seconds"], 900)
 
+    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
+    @patch(
+        "clawpatch_supervise.clawpatch_external._existing_queue_is_clean",
+        side_effect=AssertionError("explicit --fresh must reset instead of inspecting queue contents"),
+    )
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
-    def test_explicit_fresh_refuses_to_discard_an_unsafe_queue(self, _state_exists):
-        cases = (
-            ("open findings", {"openFindings": 1, "activeLocks": 0, "lockFiles": 0}, None),
-            ("active locks", {"openFindings": 0, "activeLocks": 1, "lockFiles": 0}, None),
-            ("lock files", {"openFindings": 0, "activeLocks": 0, "lockFiles": 1}, None),
-            (
-                "uncertain findings",
-                {"openFindings": 0, "activeLocks": 0, "lockFiles": 0},
-                {"total": 1},
-            ),
-        )
+    def test_explicit_fresh_resets_an_existing_open_queue(
+        self, _state_exists, _queue_is_clean, _source_paths
+    ):
+        calls = []
 
-        for label, status, uncertain in cases:
-            with self.subTest(label=label):
-                calls = []
-                state_results = [status]
-                if uncertain is not None:
-                    state_results.append(uncertain)
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {
+                "ok": True,
+                "finding_count": 0,
+                "open_findings": 0,
+                "git_head": "abc123",
+            }
 
-                def fake_sweep(repo: Path, **kwargs):
-                    calls.append((repo, kwargs))
-                    return {
-                        "ok": True,
-                        "finding_count": 0,
-                        "open_findings": 0,
-                        "git_head": "abc123",
-                    }
+        with redirect_stdout(StringIO()):
+            code = main(
+                ["--repo", ".", "--fresh"],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
 
-                with (
-                    patch(
-                        "clawpatch_supervise.clawpatch_external._run_state_query",
-                        side_effect=state_results,
-                    ),
-                    redirect_stdout(StringIO()),
-                ):
-                    code = main(
-                        ["--repo", ".", "--fresh"],
-                        run_sweep=fake_sweep,
-                        ensure_repository_idle=lambda _repo: None,
-                        heartbeat_seconds=0,
-                    )
-
-                self.assertEqual(code, 2)
-                self.assertEqual(calls, [])
+        self.assertEqual(code, 0)
+        self.assertTrue(calls[0][1]["fresh"])
 
     @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)

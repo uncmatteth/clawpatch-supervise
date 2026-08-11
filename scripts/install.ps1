@@ -1,6 +1,6 @@
 [CmdletBinding()]
 param(
-    [string]$Version = "0.1.31",
+    [string]$Version = "0.1.33",
     [string]$Source = "",
     [string]$InstallRoot = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise"),
     [string]$BinDir = (Join-Path $env:LOCALAPPDATA "ClawPatchSupervise\bin"),
@@ -12,7 +12,7 @@ param(
 $ErrorActionPreference = "Stop"
 $MinimumClawPatchVersion = [version]"0.7.2"
 $ReleaseClawPatchVersion = "0.7.2"
-$ReleaseSha256_0_1_31 = "6c717c460c143b28031493b514d664b85f35037829c0d6925cc5765d3d15cc17"
+$ReleaseSha256_0_1_33 = "ee883fc6c47bdb22831256c0e6d7d340b83eb0051ef8efda39e57601f3c98cc8"
 function Find-PathApplication {
     param([string[]]$Names)
     foreach ($directory in ($env:Path -split ";")) {
@@ -51,10 +51,10 @@ function Get-CompatibleClawPatchVersion {
 $usingDefaultSource = [string]::IsNullOrWhiteSpace($Source)
 if ($usingDefaultSource) {
     $Source = "https://github.com/uncmatteth/clawpatch-supervise/releases/download/v$Version/clawpatch_supervise-$Version-py3-none-any.whl"
-    if ($Version -ne "0.1.31") {
+    if ($Version -ne "0.1.33") {
         throw "No trusted SHA-256 is available for clawpatch-supervise $Version."
     }
-    $Sha256 = $ReleaseSha256_0_1_31
+    $Sha256 = $ReleaseSha256_0_1_33
 }
 
 $pyLauncher = Get-Command py -ErrorAction SilentlyContinue

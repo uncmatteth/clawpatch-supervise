@@ -1287,10 +1287,10 @@ def _run_project_gates(
     finding_id: str,
     required: bool = True,
 ) -> list[dict[str, Any]]:
+    if not required:
+        return []
     config_path = repo / PROJECT_DIR / "config.toml"
     if not config_path.is_file():
-        if not required:
-            return []
         raise SafetyError("The repository has no configured validation gates.")
     try:
         config = tomllib.loads(config_path.read_text(encoding="utf-8"))
@@ -3098,7 +3098,7 @@ def _prepare_fresh_release(
     progress: Callable[[dict[str, Any]], None] | None = None,
     state_root: Path | None = None,
 ) -> None:
-    """Delete only Clawpatch run state, preserve project configuration, and initialize again."""
+    """Replace Clawpatch state transactionally while preserving project configuration."""
     _require_no_process(repo)
     try:
         _recover_checkpoint_temporary_commit(repo, state_root=state_root)
@@ -3123,13 +3123,29 @@ def _prepare_fresh_release(
             + ", ".join(source_changes)
         )
     config_text = _committed_clawpatch_config(repo)
+    backup_text = _git_text(
+        repo,
+        ["git", "rev-parse", "--git-path", "clawpatch-supervise-fresh-queue-backup"],
+    )
+    backup_path = Path(backup_text)
+    if not backup_path.is_absolute():
+        backup_path = repo / backup_path
+    backup_path = backup_path.absolute()
+    if backup_path.is_symlink():
+        raise SafetyError("The fresh Clawpatch queue backup path cannot be a symlink.")
+    if backup_path.exists():
+        if clawpatch_state_root.exists():
+            raise SafetyError(
+                "Both the active Clawpatch queue and a retained fresh-reset backup exist. "
+                f"The supervisor preserved both for inspection: {backup_path}"
+            )
+        if not backup_path.is_dir():
+            raise SafetyError("The retained fresh Clawpatch queue backup is not a directory.")
+        backup_path.replace(clawpatch_state_root)
     if clawpatch_state_root.exists():
         if not clawpatch_state_root.is_dir():
             raise SafetyError("The .clawpatch state path is not a directory.")
-        shutil.rmtree(clawpatch_state_root)
-    _clear_release_progress(repo, state_root=state_root)
-    proof_root = state_root if state_root is not None else repo / PROJECT_DIR / "cache"
-    (proof_root / "clawpatch-release-proof.json").unlink(missing_ok=True)
+        clawpatch_state_root.replace(backup_path)
     if progress is not None:
         progress(
             {
@@ -3141,16 +3157,39 @@ def _prepare_fresh_release(
                 "max_attempts": 1,
             }
         )
-    _json_clawpatch(
-        repo,
-        ["clawpatch", "init", "--json"],
-        env=env,
-        progress=None,
-    )
-    if config_text is not None:
-        config_path = clawpatch_state_root / "config.json"
-        config_path.write_text(config_text, encoding="utf-8")
-    excluded_gitlinks = _exclude_gitlinks_from_clawpatch_config(repo)
+    try:
+        _json_clawpatch(
+            repo,
+            ["clawpatch", "init", "--json"],
+            env=env,
+            progress=None,
+        )
+        if config_text is not None:
+            config_path = clawpatch_state_root / "config.json"
+            config_path.write_text(config_text, encoding="utf-8")
+        excluded_gitlinks = _exclude_gitlinks_from_clawpatch_config(repo)
+    except BaseException as exc:
+        try:
+            if clawpatch_state_root.exists():
+                if clawpatch_state_root.is_symlink() or not clawpatch_state_root.is_dir():
+                    raise SafetyError(
+                        "Fresh initialization left an unsafe .clawpatch path; the old queue remains at "
+                        f"{backup_path}."
+                    )
+                shutil.rmtree(clawpatch_state_root)
+            if backup_path.exists():
+                backup_path.replace(clawpatch_state_root)
+        except (OSError, SafetyError) as restore_exc:
+            raise SafetyError(
+                "Fresh Clawpatch initialization failed and the supervisor could not restore the old "
+                f"queue automatically. The backup remains at {backup_path}: {restore_exc}"
+            ) from exc
+        raise
+    if backup_path.exists():
+        shutil.rmtree(backup_path)
+    _clear_release_progress(repo, state_root=state_root)
+    proof_root = state_root if state_root is not None else repo / PROJECT_DIR / "cache"
+    (proof_root / "clawpatch-release-proof.json").unlink(missing_ok=True)
     if excluded_gitlinks and progress is not None:
         progress(
             {
@@ -5988,9 +6027,9 @@ def _release_sweep_locked(
     if not resumed_checkpoint:
         if progress is not None:
             gate_command = (
-                "configured repository gates"
-                if require_project_gates or (root / PROJECT_DIR / "config.toml").is_file()
-                else "ClawPatch-owned validation (no Manageroo gates configured)"
+                "configured Manageroo repository gates"
+                if require_project_gates
+                else "ClawPatch-owned finding validation (full repository gates are not run)"
             )
             progress(
                 {

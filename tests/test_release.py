@@ -574,6 +574,84 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ],
             )
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch(
+        "clawpatch_supervise.clawpatch_release._next_finding",
+        return_value=(None, {"finding": None}),
+    )
+    @patch("clawpatch_supervise.clawpatch_release._review_all_features")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_external_sweep_does_not_run_manageroo_project_gates(
+        self,
+        _version,
+        _processes,
+        json_clawpatch,
+        review_all,
+        _next_finding,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            external_state = root / "external-state"
+            self.init_plain_repo(repo)
+            manageroo = repo / ".manageroo"
+            manageroo.mkdir()
+            (manageroo / "config.toml").write_text(
+                "[safety]\n"
+                'allowed_programs = ["git"]\n\n'
+                "[[verification.gates]]\n"
+                'id = "must-not-run"\n'
+                'kind = "build"\n'
+                "required = true\n"
+                "timeout_seconds = 60\n"
+                'argv = ["git", "rev-parse", "--verify", "refs/heads/must-not-run"]\n',
+                encoding="utf-8",
+            )
+            subprocess.run(["git", "add", ".manageroo/config.toml"], cwd=repo, check=True)
+            subprocess.run(
+                ["git", "commit", "-q", "-m", "add Manageroo configuration"],
+                cwd=repo,
+                check=True,
+            )
+            json_clawpatch.side_effect = [
+                {"created": True, "next": "clawpatch map"},
+                {"activeLocks": 0, "lockFiles": 0, "openFindings": 0},
+                {"features": 1},
+            ]
+            review_all.return_value = {
+                "review": {"reviewed": 1, "findings": 0},
+                "completion": {"dryRun": True, "wouldReview": 0},
+            }
+            final_closure.return_value = {"pushed": False}
+            progress_events = []
+
+            with patch(
+                "clawpatch_supervise.clawpatch_release._external_state_home",
+                return_value=external_state,
+                create=True,
+            ):
+                report = release_sweep(
+                    repo,
+                    apply=True,
+                    branch="current",
+                    integration_mode="external",
+                    progress=progress_events.append,
+                )
+
+        self.assertTrue(report["ok"])
+        self.assertIn(
+            "ClawPatch-owned finding validation",
+            next(
+                event["command"]
+                for event in progress_events
+                if event.get("phase") == "baseline-validation"
+            ),
+        )
+
     @patch("clawpatch_supervise.clawpatch_release.sys.base_prefix", "/usr")
     @patch(
         "clawpatch_supervise.clawpatch_release.sys.prefix",
@@ -1027,6 +1105,32 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 json_clawpatch.call_args.args[1],
                 ["clawpatch", "init", "--json"],
             )
+
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_fresh_init_failure_restores_the_existing_queue(
+        self, json_clawpatch, _processes
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            state = repo / ".clawpatch"
+            (state / "findings").mkdir(parents=True)
+            stale = state / "findings" / "open.json"
+            stale.write_text('{"status":"open"}\n', encoding="utf-8")
+
+            def fail_after_partial_init(*_args, **_kwargs):
+                state.mkdir()
+                (state / "partial.json").write_text("{}\n", encoding="utf-8")
+                raise SafetyError("fresh init failed")
+
+            json_clawpatch.side_effect = fail_after_partial_init
+
+            with self.assertRaisesRegex(SafetyError, "fresh init failed"):
+                _prepare_fresh_release(repo, env={"PATH": "test"})
+
+            self.assertEqual(stale.read_text(encoding="utf-8"), '{"status":"open"}\n')
+            self.assertFalse((state / "partial.json").exists())
 
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")

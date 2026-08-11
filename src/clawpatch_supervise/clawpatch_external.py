@@ -100,18 +100,18 @@ def _resolve_fresh_mode(
 ) -> bool:
     if requested is False:
         return False
+    if requested is True:
+        if _clawpatch_state_exists(repo) and _source_paths(repo):
+            raise SafetyError("Explicit --fresh refuses to discard retained project source changes.")
+        return True
     if not _clawpatch_state_exists(repo):
         return True
     if not _existing_queue_is_clean(
         repo,
         preflight_env_overrides=preflight_env_overrides,
     ):
-        if requested is True:
-            raise SafetyError("Explicit --fresh requires an existing ClawPatch queue to be clean.")
         return False
     if _source_paths(repo):
-        if requested is True:
-            raise SafetyError("Explicit --fresh refuses to discard retained project source changes.")
         return False
     return True
 
@@ -464,7 +464,7 @@ def main(
         dest="fresh",
         action="store_true",
         default=None,
-        help="explicitly remove clean existing ClawPatch state and start a fresh review",
+        help="discard the existing ClawPatch queue and start a fresh full review",
     )
     start_mode.add_argument(
         "--resume-stopped",
@@ -639,10 +639,17 @@ def main(
                     )
                 except RepositoryBusyError as exc:
                     retry_attempt += 1
+                    busy_reason = str(exc)
+                    active_run = "already active" in busy_reason.casefold()
+                    heading = (
+                        "WAITING FOR THIS REPOSITORY'S ACTIVE RUN"
+                        if active_run
+                        else "THIS REPOSITORY'S PRESERVED STATE NEEDS RECOVERY"
+                    )
                     print(
-                        "\nBUSY: WAITING FOR THE ACTIVE RUN to release this repository; "
-                        f"checking again in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
-                        f"{exc}",
+                        f"\nBUSY: {heading}; checking again in "
+                        f"{args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
+                        f"repo: {_terminal_safe(repo)}\n{exc}",
                         flush=True,
                     )
                 resolved_fresh = False
