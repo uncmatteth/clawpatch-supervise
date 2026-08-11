@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -51,7 +52,7 @@ class InstalledConsoleScriptTests(unittest.TestCase):
         os.environ.get(NETWORK_TEST_ENV) == "1",
         f"network integration test; set {NETWORK_TEST_ENV}=1 to run",
     )
-    def test_wheel_installs_console_script_and_propagates_exit_status(self) -> None:
+    def test_wheel_installs_console_script_and_covers_non_mutating_modes(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             wheel = self._build_wheel(root)
@@ -59,6 +60,56 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             environment.pop("PYTHONHOME", None)
             environment.pop("PYTHONPATH", None)
             environment["PYTHONNOUSERSITE"] = "1"
+
+            home = root / "home"
+            runtime = root / "runtime"
+            state = root / "state"
+            temporary = root / "tmp"
+            local_app_data = root / "local-app-data"
+            tools = root / "tools"
+            for directory in (home, runtime, state, temporary, local_app_data, tools):
+                directory.mkdir(mode=0o700)
+            environment.update(
+                {
+                    "HOME": str(home),
+                    "LOCALAPPDATA": str(local_app_data),
+                    "TEMP": str(temporary),
+                    "TMP": str(temporary),
+                    "TMPDIR": str(temporary),
+                    "USERPROFILE": str(home),
+                    "XDG_RUNTIME_DIR": str(runtime),
+                    "XDG_STATE_HOME": str(state),
+                }
+            )
+
+            if os.name == "nt":
+                clawpatch = tools / "clawpatch.cmd"
+                clawpatch.write_text(
+                    "@echo off\r\n"
+                    'if "%~1"=="--version" (echo clawpatch 0.7.2& exit /b 0)\r\n'
+                    'if "%~1"=="doctor" if "%~2"=="--json" '
+                    '(echo {"state":"missing","provider":"test","providerVersion":"stub"}'
+                    "& exit /b 0)\r\n"
+                    "exit /b 9\r\n",
+                    encoding="ascii",
+                )
+            else:
+                clawpatch = tools / "clawpatch"
+                clawpatch.write_text(
+                    "#!/bin/sh\n"
+                    'if [ "$1" = "--version" ]; then\n'
+                    "  printf '%s\\n' 'clawpatch 0.7.2'\n"
+                    'elif [ "$1" = "doctor" ] && [ "$2" = "--json" ]; then\n'
+                    "  printf '%s\\n' "
+                    "'{\"state\":\"missing\",\"provider\":\"test\","
+                    "\"providerVersion\":\"stub\"}'\n"
+                    "else\n"
+                    "  exit 9\n"
+                    "fi\n",
+                    encoding="ascii",
+                )
+                clawpatch.chmod(0o700)
+            environment["PATH"] = str(tools) + os.pathsep + environment.get("PATH", "")
 
             virtual_environment = root / "venv"
             venv.EnvBuilder(with_pip=True).create(virtual_environment)
@@ -87,27 +138,66 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
 
-            version = subprocess.run(
-                [str(command), "--version"],
-                capture_output=True,
-                check=False,
-                cwd=root,
-                env=environment,
-                text=True,
-                timeout=30,
-            )
+            def invoke(*arguments: str, cwd: Path = root) -> subprocess.CompletedProcess[str]:
+                return subprocess.run(
+                    [str(command), *arguments],
+                    capture_output=True,
+                    check=False,
+                    cwd=cwd,
+                    env=environment,
+                    text=True,
+                    timeout=30,
+                )
+
+            version = invoke("--version")
             self.assertEqual(version.returncode, 0, version.stderr)
             self.assertEqual(version.stdout.strip(), f"clawpatch-supervise {__version__}")
 
-            invalid = subprocess.run(
-                [str(command), "--not-a-real-option"],
+            help_result = invoke("--help")
+            self.assertEqual(help_result.returncode, 0, help_result.stderr)
+            self.assertIn("usage: clawpatch-supervise", help_result.stdout)
+            self.assertIn("--print-state-path", help_result.stdout)
+
+            cleanup = invoke("cleanup", "--dry-run")
+            self.assertEqual(cleanup.returncode, 0, cleanup.stderr)
+            self.assertIn("ClawPatch Supervise cleanup root:", cleanup.stdout)
+            self.assertIn("COMPLETE: inspected=0 removed=0 removed_bytes=0", cleanup.stdout)
+
+            repository = root / "repository"
+            repository.mkdir()
+            initialized = subprocess.run(
+                ["git", "init", "--quiet"],
                 capture_output=True,
                 check=False,
-                cwd=root,
+                cwd=repository,
                 env=environment,
                 text=True,
                 timeout=30,
             )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+
+            state_path = invoke("--repo", str(repository), "--print-state-path")
+            self.assertEqual(state_path.returncode, 0, state_path.stderr)
+            self.assertTrue(Path(state_path.stdout.strip()).is_relative_to(root))
+
+            doctor = invoke("doctor", "--repo", str(repository))
+            self.assertEqual(doctor.returncode, 0, doctor.stderr)
+            doctor_report = json.loads(doctor.stdout)
+            self.assertTrue(doctor_report["ready"])
+            self.assertEqual(doctor_report["provider"], "test")
+            self.assertEqual(doctor_report["providerVersion"], "stub")
+            self.assertEqual(doctor_report["clawpatch"], "clawpatch 0.7.2")
+
+            for arguments, message in (
+                (("--timeout-minutes", "0"), "--timeout-minutes must be at least 1"),
+                (("--retry-seconds", "nan"), "--retry-seconds must be a finite positive number"),
+            ):
+                with self.subTest(arguments=arguments):
+                    invalid_numeric = invoke(*arguments)
+                    self.assertEqual(invalid_numeric.returncode, 2)
+                    self.assertIn(message, invalid_numeric.stderr)
+
+            invalid = invoke("--not-a-real-option")
             self.assertEqual(invalid.returncode, 2, invalid.stderr)
             self.assertIn("unrecognized arguments: --not-a-real-option", invalid.stderr)
 

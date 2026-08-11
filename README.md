@@ -417,12 +417,14 @@ Run the complete offline local suite:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The installed-wheel console-entry-point smoke test intentionally uses isolated PEP 517 build
-requirements from the package index. Run that explicit network integration lane separately:
+The installed-wheel console-entry-point integration test intentionally uses isolated PEP 517 build
+requirements from the package index. It exercises the generated executable's version, help,
+doctor, cleanup dry-run, state-path, and argument-error modes. Run that explicit network lane
+separately:
 
 ```bash
 CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS=1 PYTHONPATH=src python3 -m unittest \
-  tests.test_installed_cli.InstalledConsoleScriptTests.test_wheel_installs_console_script_and_propagates_exit_status -v
+  tests.test_installed_cli.InstalledConsoleScriptTests.test_wheel_installs_console_script_and_covers_non_mutating_modes -v
 ```
 
 Its setuptools and wheel versions are pinned identically in `pyproject.toml` and
