@@ -255,6 +255,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
 
     @unittest.skipUnless(os.name == "posix", "POSIX byte filenames")
+    @unittest.skipIf(sys.platform == "darwin", "macOS rejects surrogate-escaped filenames")
     def test_status_and_source_paths_preserve_distinct_non_utf8_filenames(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
