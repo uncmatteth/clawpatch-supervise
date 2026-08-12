@@ -1702,6 +1702,63 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["fresh"])
         self.assertFalse(calls[0][1]["wait_on_preserved_source"])
 
+    def test_default_run_rejects_incomplete_clawpatch_state_and_preserves_it(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repository"
+            state = repo / ".clawpatch"
+            state.mkdir(parents=True)
+            retained = state / "retained.json"
+            retained.write_text('{"finding": "keep"}\n', encoding="utf-8")
+            before = retained.read_bytes()
+
+            output = StringIO()
+            with redirect_stdout(output):
+                code = main(
+                    ["--repo", str(repo)],
+                    run_sweep=lambda *_args, **_kwargs: self.fail(
+                        "automatic mode must not replace incomplete ClawPatch state"
+                    ),
+                    ensure_repository_idle=lambda _repo: None,
+                    heartbeat_seconds=0,
+                )
+
+            after = retained.read_bytes()
+
+        self.assertEqual(code, 2)
+        self.assertEqual(after, before)
+        self.assertIn("preserving", output.getvalue().casefold())
+
+    def test_explicit_fresh_permits_discarding_incomplete_clawpatch_state(self):
+        calls = []
+
+        def fake_sweep(repo: Path, **kwargs):
+            calls.append((repo, kwargs))
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        @contextmanager
+        def fake_validation_environment(*_args, **_kwargs):
+            yield {}
+
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp) / "repository"
+            state = repo / ".clawpatch"
+            state.mkdir(parents=True)
+            (state / "retained.json").write_text('{"finding": "discard"}\n', encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                code = main(
+                    ["--repo", str(repo), "--fresh"],
+                    run_sweep=fake_sweep,
+                    provision_validation_environment=fake_validation_environment,
+                    ensure_repository_idle=lambda _repo: None,
+                    heartbeat_seconds=0,
+                    cleanup_root=Path(temp) / "cleanup",
+                )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(calls[0][1]["fresh"])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,7 +36,13 @@ from .validation_services import provision_disposable_validation_environment
 
 def _clawpatch_state_exists(repo: Path) -> bool:
     state = repo.resolve() / ".clawpatch"
-    return state.is_dir() and (state / "project.json").is_file()
+    try:
+        state.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError as exc:
+        raise SafetyError("Could not inspect existing ClawPatch state; preserving it.") from exc
+    return True
 
 
 def _run_state_query(
@@ -106,6 +112,12 @@ def _resolve_fresh_mode(
         return True
     if not _clawpatch_state_exists(repo):
         return True
+    state = repo.resolve() / ".clawpatch"
+    if not state.is_dir() or not (state / "project.json").is_file():
+        raise SafetyError(
+            "Existing ClawPatch state is incomplete because project.json is missing; "
+            "preserving it. Restore the state or pass explicit --fresh to discard it."
+        )
     if not _existing_queue_is_clean(
         repo,
         preflight_env_overrides=preflight_env_overrides,
