@@ -299,63 +299,6 @@ if [[ "$managed_clawpatch" == true && -d "$clawpatch_destination" ]]; then
   echo "Command destination is a directory: $clawpatch_destination" >&2
   exit 2
 fi
-superseded_venv="$("$python_command" - "$supervisor_destination" "$install_root" <<'PY'
-import shlex
-import sys
-from pathlib import Path
-
-wrapper = Path(sys.argv[1])
-install_root = Path(sys.argv[2]).resolve()
-supervisor = None
-if wrapper.is_symlink():
-    supervisor = wrapper.resolve()
-elif wrapper.is_file():
-    try:
-        lines = wrapper.read_text(encoding="utf-8").splitlines()
-        for line in lines:
-            words = shlex.split(line)
-            if len(words) == 3 and words[0] == "exec" and words[2] == "$@":
-                supervisor = Path(words[1]).resolve()
-                break
-    except (OSError, UnicodeError, ValueError):
-        pass
-
-if supervisor is not None and supervisor.name == "clawpatch-supervise":
-    candidate = supervisor.parent.parent
-    if (
-        candidate.name.startswith("venv.")
-        and candidate.parent == install_root
-        and supervisor == candidate / "bin" / "clawpatch-supervise"
-    ):
-        print(candidate)
-PY
-)"
-superseded_clawpatch_root=""
-if [[ "$managed_clawpatch" == true ]]; then
-  superseded_clawpatch_root="$("$python_command" - "$clawpatch_destination" "$install_root" <<'PY'
-import os
-import sys
-from pathlib import Path
-
-command = Path(sys.argv[1])
-install_root = Path(sys.argv[2]).resolve()
-if command.is_symlink():
-    clawpatch = Path(os.readlink(command))
-    if not clawpatch.is_absolute():
-        clawpatch = command.parent / clawpatch
-    clawpatch = Path(os.path.abspath(clawpatch))
-    candidate = clawpatch.parent.parent.parent
-    if (
-        candidate.name.startswith("clawpatch.")
-        and not candidate.is_symlink()
-        and candidate.is_dir()
-        and candidate.parent.resolve() == install_root
-        and clawpatch == candidate / "node_modules" / ".bin" / "clawpatch"
-    ):
-        print(candidate)
-PY
-)"
-fi
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
 "$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$node_dir" "$bin_dir" "$clawpatch_dir" <<'PY'
 import os
@@ -431,10 +374,6 @@ activation_complete=true
 activated_clawpatch_root="$staging_clawpatch_root"
 staging_venv=""
 staging_clawpatch_root=""
-if [[ -n "$superseded_venv" ]] && ! rm -rf -- "$superseded_venv"; then
-  echo "Unable to remove superseded supervisor environment: $superseded_venv" >&2
-fi
-if [[ -n "$superseded_clawpatch_root" ]] && ! rm -rf -- "$superseded_clawpatch_root"; then
-  echo "Unable to remove superseded ClawPatch root: $superseded_clawpatch_root" >&2
-fi
+# Retain prior runtime generations so commands that started before activation can finish.
+# Cleanup must be a separate maintenance action after proving no process uses them.
 echo "Installed command: $supervisor_destination"

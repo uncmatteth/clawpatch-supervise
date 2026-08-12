@@ -1307,7 +1307,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(list(install_root.iterdir()), [])
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
-    def test_linux_installer_removes_superseded_managed_environment_after_activation(
+    def test_linux_installer_retains_superseded_managed_environment_after_activation(
         self,
     ) -> None:
         root = Path(self._temporary_directory.name)
@@ -1322,6 +1322,8 @@ class InstallerContractTests(unittest.TestCase):
             installed_command,
             f'#!/bin/sh\nexec {previous_supervisor} "$@"\n',
         )
+        preserved_wrapper = root / "preserved-clawpatch-supervise"
+        shutil.copy2(installed_command, preserved_wrapper)
 
         result, _invocations, actual_install_root = self._run_linux_installer(
             clawpatch_present=True,
@@ -1331,16 +1333,27 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(actual_install_root, install_root)
-        self.assertFalse(previous_venv.exists())
+        self.assertTrue(previous_venv.exists())
+        preserved_result = subprocess.run(
+            [str(preserved_wrapper), "--version"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(preserved_result.returncode, 0, preserved_result.stderr)
+        self.assertEqual(preserved_result.stdout.strip(), "0.1.27")
         environments = list(install_root.glob("venv.*"))
-        self.assertEqual(len(environments), 1)
+        self.assertEqual(len(environments), 2)
+        activated_environment = next(
+            environment for environment in environments if environment != previous_venv
+        )
         self.assertIn(
-            str(environments[0] / "bin" / "clawpatch-supervise"),
+            str(activated_environment / "bin" / "clawpatch-supervise"),
             installed_command.read_text(encoding="utf-8"),
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
-    def test_linux_installer_removes_superseded_managed_clawpatch_root(self) -> None:
+    def test_linux_installer_retains_superseded_managed_clawpatch_root(self) -> None:
         root = Path(self._temporary_directory.name)
         install_root = root / "install"
         previous_root = install_root / "clawpatch.previous"
@@ -1359,6 +1372,8 @@ class InstallerContractTests(unittest.TestCase):
         installed_clawpatch = root / "installed-bin" / "clawpatch"
         installed_clawpatch.parent.mkdir()
         installed_clawpatch.symlink_to(previous_clawpatch)
+        preserved_clawpatch = root / "preserved-clawpatch"
+        preserved_clawpatch.symlink_to(previous_clawpatch)
 
         result, invocations, actual_install_root = self._run_linux_installer(
             clawpatch_present=True,
@@ -1369,7 +1384,15 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(actual_install_root, install_root)
         staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
-        self.assertFalse(previous_root.exists())
+        self.assertTrue(previous_root.exists())
+        preserved_result = subprocess.run(
+            [str(preserved_clawpatch), "--version"],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+        self.assertEqual(preserved_result.returncode, 0, preserved_result.stderr)
+        self.assertEqual(preserved_result.stdout.strip(), "0.7.1")
         self.assertTrue(staged_root.exists())
         self.assertTrue(unrelated_directory.exists())
         self.assertEqual(
