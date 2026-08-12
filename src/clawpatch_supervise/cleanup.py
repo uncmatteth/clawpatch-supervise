@@ -3,6 +3,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import json
+import math
 import os
 import secrets
 import shutil
@@ -121,6 +122,11 @@ def default_cleanup_root() -> Path:
     return Path(tempfile.gettempdir()) / f"clawpatch-supervise-{identity}-private" / "runs"
 
 
+def _pid_is_platform_safe(pid: object) -> bool:
+    maximum = 0xFFFFFFFF if os.name == "nt" else 0x7FFFFFFF
+    return not isinstance(pid, bool) and isinstance(pid, int) and 0 < pid <= maximum
+
+
 def _windows_pid_is_running(pid: int) -> bool:
     import ctypes
     from ctypes import wintypes
@@ -134,7 +140,10 @@ def _windows_pid_is_running(pid: int) -> bool:
     close_handle = kernel32.CloseHandle
     close_handle.argtypes = (wintypes.HANDLE,)
     close_handle.restype = wintypes.BOOL
-    handle = open_process(process_query_limited_information, False, pid)
+    try:
+        handle = open_process(process_query_limited_information, False, pid)
+    except (ctypes.ArgumentError, OverflowError, TypeError, ValueError):
+        return True
     if handle:
         close_handle(handle)
         return True
@@ -146,10 +155,14 @@ def _windows_pid_is_running(pid: int) -> bool:
 def _pid_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
+    if not _pid_is_platform_safe(pid):
+        return True
     if os.name == "nt":
         return _windows_pid_is_running(pid)
     try:
         os.kill(pid, 0)
+    except (OverflowError, ValueError):
+        return True
     except ProcessLookupError:
         return False
     except PermissionError:
@@ -312,10 +325,18 @@ def cleanup_owned_runs(
             continue
         pid = marker.get("pid")
         created = marker.get("created_unix")
-        if isinstance(pid, bool) or not isinstance(pid, int):
+        if not _pid_is_platform_safe(pid):
             entries.append(CleanupEntry(candidate, "UNSAFE", size))
             continue
         if isinstance(created, bool) or not isinstance(created, (int, float)):
+            entries.append(CleanupEntry(candidate, "UNSAFE", size))
+            continue
+        try:
+            created_value = float(created)
+        except (OverflowError, ValueError):
+            entries.append(CleanupEntry(candidate, "UNSAFE", size))
+            continue
+        if not math.isfinite(created_value) or created_value < 0:
             entries.append(CleanupEntry(candidate, "UNSAFE", size))
             continue
         if _pid_is_running(pid):
@@ -328,7 +349,7 @@ def cleanup_owned_runs(
         if live_reference:
             entries.append(CleanupEntry(candidate, "ACTIVE", size))
             continue
-        if now() - float(created) < stale_after_seconds:
+        if now() - created_value < stale_after_seconds:
             entries.append(CleanupEntry(candidate, "RECENT", size))
             continue
         entries.append(CleanupEntry(candidate, "STALE", size))

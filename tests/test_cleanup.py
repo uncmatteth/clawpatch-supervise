@@ -25,7 +25,7 @@ from clawpatch_supervise.errors import SafetyError
 
 class CleanupCommandTests(unittest.TestCase):
     @staticmethod
-    def _mark(candidate: Path, *, pid: int, created_unix: float) -> None:
+    def _mark(candidate: Path, *, pid: int, created_unix: int | float) -> None:
         candidate.mkdir(mode=0o700, parents=True)
         candidate.parent.chmod(0o700)
         (candidate / ".clawpatch-supervise-owned.json").write_text(
@@ -142,6 +142,49 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertTrue(candidate.is_dir())
             self.assertEqual([entry.status for entry in report.entries], ["ACTIVE"])
             self.assertEqual(report.removed, 0)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX PID probe behavior")
+    def test_pid_probe_fails_closed_on_numeric_overflow(self) -> None:
+        with patch("clawpatch_supervise.cleanup.os.kill", side_effect=OverflowError):
+            self.assertTrue(_pid_is_running(42))
+
+    def test_cleanup_classifies_invalid_created_time_as_unsafe(self) -> None:
+        invalid_times = (float("nan"), float("inf"), float("-inf"), -1)
+        for created_unix in invalid_times:
+            with (
+                self.subTest(created_unix=created_unix),
+                tempfile.TemporaryDirectory() as temp,
+            ):
+                cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+                candidate = cleanup_root / "run-invalid-created-time"
+                self._mark(candidate, pid=999_999_999, created_unix=created_unix)
+
+                report = cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+                self.assertTrue(candidate.is_dir())
+                self.assertEqual([entry.status for entry in report.entries], ["UNSAFE"])
+                self.assertEqual(report.removed, 0)
+
+    def test_cleanup_classifies_out_of_range_pid_as_unsafe(self) -> None:
+        for pid in (0, -1, 10**100):
+            with self.subTest(pid=pid), tempfile.TemporaryDirectory() as temp:
+                cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+                candidate = cleanup_root / "run-invalid-pid"
+                self._mark(candidate, pid=pid, created_unix=0)
+
+                report = cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+                self.assertTrue(candidate.is_dir())
+                self.assertEqual([entry.status for entry in report.entries], ["UNSAFE"])
+                self.assertEqual(report.removed, 0)
 
     def test_cleanup_apply_keeps_an_undeletable_owned_run_and_continues(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
