@@ -424,7 +424,7 @@ state-path, and argument-error modes. Run that explicit network lane separately:
 
 ```bash
 CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS=1 PYTHONPATH=src python3 -m unittest \
-  tests.test_installed_cli.InstalledConsoleScriptTests.test_wheel_installs_console_script_and_covers_non_mutating_modes -v
+  tests.test_installed_cli.InstalledConsoleScriptTests.test_clawpatch_supervise_entrypoint_from_installed_wheel -v
 ```
 
 Its setuptools and wheel versions are pinned identically in `pyproject.toml` and

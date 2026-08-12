@@ -60,7 +60,7 @@ class InstalledConsoleScriptTests(unittest.TestCase):
         os.environ.get(NETWORK_TEST_ENV) == "1",
         f"network integration test; set {NETWORK_TEST_ENV}=1 to run",
     )
-    def test_wheel_installs_console_script_and_covers_non_mutating_modes(self) -> None:
+    def test_clawpatch_supervise_entrypoint_from_installed_wheel(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             wheel = self._build_wheel(root)
@@ -176,7 +176,8 @@ class InstalledConsoleScriptTests(unittest.TestCase):
 
             version = invoke("--version")
             self.assertEqual(version.returncode, 0, version.stderr)
-            self.assertEqual(version.stdout.strip(), f"clawpatch-supervise {__version__}")
+            self.assertEqual(version.stdout, f"clawpatch-supervise {__version__}\n")
+            self.assertEqual(version.stderr, "")
 
             help_result = invoke("--help")
             self.assertEqual(help_result.returncode, 0, help_result.stderr)
