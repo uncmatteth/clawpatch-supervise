@@ -73,6 +73,7 @@ class InstallerContractTests(unittest.TestCase):
         source_sha256: str | None = None,
         supervisor_version: str = __version__,
         supervisor_version_fails: bool = False,
+        clawpatch_move_fails: bool = False,
         supervisor_move_fails: bool = False,
         node_version: str = "v22.0.0",
         verify_repo: bool = False,
@@ -138,6 +139,10 @@ class InstallerContractTests(unittest.TestCase):
         self._write_executable(
             python,
             "#!/bin/sh\n"
+            'if [ "$1" = "-" ] && [ "$#" -eq 3 ] && '
+            '[ "$3" = "$CLAWPATCH_SUPERVISE_BIN_DIR/clawpatch" ]; then\n'
+            '  [ "$CLAWPATCH_TEST_CLAWPATCH_MOVE_FAILS" != "true" ] || exit 31\n'
+            "fi\n"
             'if [ "$1" = "-" ] && [ "$#" -eq 3 ] && '
             '[ "$3" = "$CLAWPATCH_SUPERVISE_BIN_DIR/clawpatch-supervise" ]; then\n'
             '  if [ "$CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE" = "true" ]; then\n'
@@ -207,6 +212,9 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_INSTALLED_COMMAND_STUB": str(installed_command_stub),
                 "CLAWPATCH_TEST_CLAWPATCH_VERSION": clawpatch_version,
                 "CLAWPATCH_TEST_CLAWHUB_VERSION": clawhub_version,
+                "CLAWPATCH_TEST_CLAWPATCH_MOVE_FAILS": str(
+                    clawpatch_move_fails
+                ).lower(),
                 "CLAWPATCH_TEST_LOG": str(invocation_log),
                 "CLAWPATCH_TEST_NPM_ARTIFACT": trusted_clawpatch_artifact,
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
@@ -883,6 +891,61 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(
             sorted(path.name for path in install_root.iterdir()),
             ["clawpatch"],
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rolls_back_commands_when_clawpatch_activation_fails(
+        self,
+    ) -> None:
+        root = Path(self._temporary_directory.name)
+        install_root = root / "install"
+        previous_clawpatch = (
+            install_root
+            / "clawpatch.previous"
+            / "node_modules"
+            / ".bin"
+            / "clawpatch"
+        )
+        previous_clawpatch.parent.mkdir(parents=True)
+        self._write_executable(previous_clawpatch, "#!/bin/sh\nprintf '0.7.1\\n'\n")
+        installed_bin = root / "installed-bin"
+        installed_bin.mkdir()
+        installed_clawpatch = installed_bin / "clawpatch"
+        previous_clawpatch_target = os.path.relpath(previous_clawpatch, installed_bin)
+        installed_clawpatch.symlink_to(previous_clawpatch_target)
+        previous_venv = install_root / "venv.0.1.20.previous"
+        previous_supervisor = previous_venv / "bin" / "clawpatch-supervise"
+        previous_supervisor.parent.mkdir(parents=True)
+        self._write_executable(previous_supervisor, "#!/bin/sh\nprintf '0.1.20\\n'\n")
+        installed_supervisor = installed_bin / "clawpatch-supervise"
+        previous_supervisor_content = (
+            f'#!/bin/sh\nexec {previous_supervisor} "$@"\n'.encode()
+        )
+        installed_supervisor.write_bytes(previous_supervisor_content)
+        installed_supervisor.chmod(0o751)
+
+        result, invocations, actual_install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            clawpatch_command=previous_clawpatch,
+            clawpatch_move_fails=True,
+        )
+
+        self.assertEqual(result.returncode, 31, result.stderr)
+        self.assertEqual(actual_install_root, install_root)
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
+        self.assertFalse(staged_root.exists())
+        self.assertTrue(installed_clawpatch.is_symlink())
+        self.assertEqual(os.readlink(installed_clawpatch), previous_clawpatch_target)
+        self.assertEqual(installed_supervisor.read_bytes(), previous_supervisor_content)
+        self.assertEqual(installed_supervisor.stat().st_mode & 0o777, 0o751)
+        self.assertEqual(
+            sorted(path.name for path in installed_bin.iterdir()),
+            [".clawpatch-supervise.install.lock", "clawpatch", "clawpatch-supervise"],
+        )
+        self.assertEqual(
+            sorted(path.name for path in install_root.iterdir()),
+            ["clawpatch.previous", "venv.0.1.20.previous"],
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
