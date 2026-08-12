@@ -166,6 +166,35 @@ class CommandRunnerLoggingTests(unittest.TestCase):
                 self.assertNotIn(query_secret, serialized)
                 self.assertIn("example.invalid/repository", serialized)
 
+    def test_multiword_secrets_are_redacted_from_results_and_logs(self) -> None:
+        stdout_secret = "nebula quartz glacier velvet"
+        stderr_secret = "cobalt lantern meadow zephyr"
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            log_root = root / "logs"
+
+            result = CommandRunner(log_root=log_root).run(
+                [
+                    sys.executable,
+                    "-c",
+                    "import sys; print(sys.argv[1]); print(sys.argv[2], file=sys.stderr)",
+                    f"password={stdout_secret}",
+                    f"passphrase={stderr_secret}",
+                ],
+                cwd=root,
+                log_name="multiword-secrets",
+            )
+
+            payload = json.loads(
+                (log_root / "multiword-secrets.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(result.exit_code, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "password=<REDACTED>")
+            self.assertEqual(result.stderr.strip(), "passphrase=<REDACTED>")
+            for serialized in (json.dumps(result.to_dict()), json.dumps(payload)):
+                for secret_word in (*stdout_secret.split(), *stderr_secret.split()):
+                    self.assertNotIn(secret_word, serialized)
+
 
 class WindowsProcessTreeTerminationTests(unittest.TestCase):
     @patch("clawpatch_supervise.runner.os.name", "nt")
