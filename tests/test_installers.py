@@ -1118,6 +1118,38 @@ class InstallerContractTests(unittest.TestCase):
         self.assertTrue(lock_path.is_symlink())
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_times_out_on_stale_install_lock(self) -> None:
+        root = Path(self._temporary_directory.name)
+        installed_bin = root / "installed-bin"
+        lock_path = installed_bin / ".clawpatch-supervise.install.lock"
+        lock_path.mkdir(parents=True)
+
+        def install_with_short_lock_timeout(
+            installer_path: Path, environment: dict[str, str]
+        ) -> subprocess.CompletedProcess[str]:
+            environment["CLAWPATCH_SUPERVISE_INSTALL_LOCK_TIMEOUT_SECONDS"] = "1"
+            return self._run_installer_process(
+                platform_name="Linux/macOS",
+                installer_path=installer_path,
+                argv=[str(installer_path)],
+                environment=environment,
+                timeout_seconds=5,
+            )
+
+        result, _invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            process_runner=install_with_short_lock_timeout,
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Timed out after 1s waiting for install lock", result.stderr)
+        self.assertIn("If no installer is running, remove it and retry", result.stderr)
+        self.assertTrue(lock_path.is_dir())
+        self.assertNotIn("Installed command:", result.stdout)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_retains_backup_when_rollback_restore_fails(self) -> None:
         root = Path(self._temporary_directory.name)
         install_root = root / "install"

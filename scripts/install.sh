@@ -7,6 +7,7 @@ install_root="${CLAWPATCH_SUPERVISE_HOME:-${XDG_DATA_HOME:-$HOME/.local/share}/c
 bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 verify_repo="${CLAWPATCH_SUPERVISE_VERIFY_REPO:-}"
+readonly install_lock_timeout_seconds="${CLAWPATCH_SUPERVISE_INSTALL_LOCK_TIMEOUT_SECONDS:-30}"
 readonly minimum_clawpatch_version="0.7.2"
 readonly release_clawpatch_version="0.7.2"
 readonly release_clawpatch_integrity_0_7_2="sha512-rhpWj6e31XJUtWKlp/MJOjdjtj+ZXc9WiLcXRk+ZaA699K++dVaYfx00dVS/QNiJBaI71IUFU6sdSPsX/nyW0g=="
@@ -279,11 +280,19 @@ printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$install_root" "$bin_dir"
 install_lock_dir="$bin_dir/.clawpatch-supervise.install.lock"
+if [[ ! "$install_lock_timeout_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "CLAWPATCH_SUPERVISE_INSTALL_LOCK_TIMEOUT_SECONDS must be a positive integer." >&2
+  exit 2
+fi
+install_lock_deadline=$((SECONDS + install_lock_timeout_seconds))
 while [[ "$install_lock_held" != true ]]; do
   if mkdir -m 700 "$install_lock_dir" 2>/dev/null; then
     install_lock_held=true
   elif [[ -L "$install_lock_dir" || ! -d "$install_lock_dir" ]]; then
     echo "Install lock path is not a directory: $install_lock_dir" >&2
+    exit 2
+  elif (( SECONDS >= install_lock_deadline )); then
+    echo "Timed out after ${install_lock_timeout_seconds}s waiting for install lock: $install_lock_dir. If no installer is running, remove it and retry." >&2
     exit 2
   else
     "$python_command" -c 'import time; time.sleep(0.05)'
