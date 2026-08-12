@@ -1503,6 +1503,34 @@ def _revalidation_payload(
     return argv, payload, str(outcome)
 
 
+def _revalidation_reports_environment_limit(payload: dict[str, Any]) -> bool:
+    explanation = " ".join(
+        value
+        for key in ("reason", "reasoning", "note")
+        if isinstance((value := payload.get(key)), str)
+    ).lower()
+    if not explanation:
+        return True
+    return any(
+        marker in explanation
+        for marker in (
+            "access denied",
+            "blocked by the sandbox",
+            "could not bind",
+            "could not create a temporary directory",
+            "network access is blocked",
+            "operation not permitted",
+            "outside the sandbox",
+            "permission denied",
+            "read-only file system",
+            "sandbox restriction",
+            "sandbox prevented",
+            "sandbox-blocked",
+            "unable to bind",
+        )
+    )
+
+
 def _revalidate(
     repo: Path,
     finding_id: str,
@@ -1551,10 +1579,11 @@ def _revalidate(
                 failure=classify_clawpatch_failure("revalidation", 23),
             ) from exc
         raise
-    if outcome in {"open", "uncertain"} and env.get("CLAWPATCH_CODEX_SANDBOX") in {
-        None,
-        "read-only",
-    }:
+    if (
+        outcome in {"open", "uncertain"}
+        and _revalidation_reports_environment_limit(payload)
+        and env.get("CLAWPATCH_CODEX_SANDBOX") in {None, "read-only"}
+    ):
         initial_outcome = outcome
         escalated_env = dict(env)
         escalated_env["CLAWPATCH_CODEX_SANDBOX"] = "workspace-write"
@@ -1573,6 +1602,7 @@ def _revalidate(
         outcome = escalated_outcome
         if (
             outcome in {"open", "uncertain"}
+            and _revalidation_reports_environment_limit(payload)
             and env.get("MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK") == "1"
         ):
             workspace_write_outcome = outcome

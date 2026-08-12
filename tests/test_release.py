@@ -2362,6 +2362,37 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         )
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_recorded_validation_failure_does_not_escalate_sandbox(self, json_clawpatch):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            source.write_text("clawpatch repair\n", encoding="utf-8")
+            json_clawpatch.return_value = {
+                "finding": "fnd_one",
+                "outcome": "uncertain",
+                "reasoning": (
+                    "The newest linked patch attempt recorded expected validation exit codes "
+                    "0, 0, and 1. That targeted validation failure prohibits a fixed outcome. "
+                    "No validation commands were rerun in the read-only sandbox."
+                ),
+            }
+
+            result = _revalidate(
+                repo,
+                "fnd_one",
+                env={"MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK": "1"},
+                expected_paths=["app.py"],
+            )
+
+        self.assertEqual(result["outcome"], "uncertain")
+        self.assertNotIn("managerooSandboxEscalated", result)
+        self.assertEqual(json_clawpatch.call_count, 1)
+
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     def test_external_uncertain_revalidation_uses_trusted_host_after_workspace_block(
         self, json_clawpatch
     ):
@@ -2484,7 +2515,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         )
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
-    def test_open_revalidation_returns_the_documented_same_finding_continuation(
+    def test_definitive_open_revalidation_returns_without_sandbox_escalation(
         self, json_clawpatch
     ):
         with tempfile.TemporaryDirectory() as temp:
@@ -2509,13 +2540,8 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             )
 
         self.assertEqual(result["outcome"], "open")
-        self.assertTrue(result["managerooSandboxEscalated"])
-        self.assertEqual(result["managerooInitialOutcome"], "open")
-        self.assertEqual(json_clawpatch.call_count, 2)
-        self.assertEqual(
-            json_clawpatch.call_args_list[1].kwargs["env"]["CLAWPATCH_CODEX_SANDBOX"],
-            "workspace-write",
-        )
+        self.assertNotIn("managerooSandboxEscalated", result)
+        self.assertEqual(json_clawpatch.call_count, 1)
 
     @patch("clawpatch_supervise.clawpatch_release._push_and_verify")
     @patch("clawpatch_supervise.clawpatch_release._commit_attempt", return_value="partial123")
