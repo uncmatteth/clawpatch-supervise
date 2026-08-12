@@ -1478,7 +1478,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("& $wrapper doctor --repo", windows)
         self.assertNotIn("& $supervisor doctor --repo", windows)
 
-    def test_repository_has_only_packaging_smoke_workflow(self) -> None:
+    def test_repository_has_no_hosted_workflow_files(self) -> None:
         workflow_root = REPOSITORY_ROOT / ".github" / "workflows"
 
         workflow_files = sorted(
@@ -1486,7 +1486,7 @@ class InstallerContractTests(unittest.TestCase):
             for path in workflow_root.rglob("*")
             if path.is_file()
         )
-        self.assertEqual(workflow_files, [Path("packaging-smoke.yml")])
+        self.assertEqual(workflow_files, [])
 
     def test_windows_installer_checks_compatibility_before_install_root_mutation(self) -> None:
         windows = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")

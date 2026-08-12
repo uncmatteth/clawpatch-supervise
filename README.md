@@ -6,7 +6,6 @@
 
 > The outside-the-repo supervisor that keeps a ClawPatch repair queue honest, resumable, and moving without skipping the finding that caused trouble.
 
-[![Cross-platform tests](https://github.com/uncmatteth/clawpatch-supervise/actions/workflows/test.yml/badge.svg)](https://github.com/uncmatteth/clawpatch-supervise/actions/workflows/test.yml)
 [![Latest release](https://img.shields.io/github/v/release/uncmatteth/clawpatch-supervise)](https://github.com/uncmatteth/clawpatch-supervise/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -434,10 +433,9 @@ Its setuptools and wheel versions are pinned identically in `pyproject.toml` and
 `requirements-test.txt`, so an index outage can affect only this opt-in lane and a future backend
 release cannot silently change the build.
 
-The `Packaging smoke` GitHub workflow makes that real build/install lane mandatory for pull
-requests, `main`, and version tags. Before describing a release as cross-platform, also run the
-full suite and native installer manually on Linux, macOS, and Windows with every supported Python
-version, and retain the command output as release evidence.
+This repository intentionally has no hosted workflow files. Run the real build/install lane and
+the full suite manually on Linux, macOS, and Windows before describing a release as
+cross-platform, and retain the command output as local release evidence.
 
 The release version is declared once as `clawpatch_supervise.__version__`; setuptools derives distribution metadata from that attribute, and the CLI reports the same value.
 
