@@ -20,6 +20,14 @@ NETWORK_TEST_ENV = "CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS"
 
 
 class InstalledConsoleScriptTests(unittest.TestCase):
+    def test_release_ci_runs_real_wheel_smoke(self) -> None:
+        workflow = (
+            REPOSITORY_ROOT / ".github" / "workflows" / "packaging-smoke.yml"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS: "1"', workflow)
+        self.assertIn("python -m unittest tests.test_installed_cli -v", workflow)
+
     def test_build_requirements_are_exactly_pinned_for_the_network_lane(self) -> None:
         manifest = tomllib.loads(
             (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -137,6 +145,23 @@ class InstalledConsoleScriptTests(unittest.TestCase):
                 timeout=120,
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
+
+            imported = subprocess.run(
+                [
+                    str(python),
+                    "-I",
+                    "-c",
+                    "import clawpatch_supervise; print(clawpatch_supervise.__version__)",
+                ],
+                capture_output=True,
+                check=False,
+                cwd=root,
+                env=environment,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(imported.returncode, 0, imported.stderr)
+            self.assertEqual(imported.stdout.strip(), __version__)
 
             def invoke(*arguments: str, cwd: Path = root) -> subprocess.CompletedProcess[str]:
                 return subprocess.run(

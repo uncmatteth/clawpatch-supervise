@@ -1,0 +1,26 @@
+name: Packaging smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  installed-wheel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS: "1"
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+      - name: Build and smoke-test the installed wheel
+        run: python -m unittest tests.test_installed_cli -v

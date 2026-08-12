@@ -418,9 +418,9 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
 The installed-wheel console-entry-point integration test intentionally uses isolated PEP 517 build
-requirements from the package index. It exercises the generated executable's version, help,
-doctor, cleanup dry-run, state-path, and argument-error modes. Run that explicit network lane
-separately:
+requirements from the package index. It imports the installed package from a clean virtual
+environment and exercises the generated executable's version, help, doctor, cleanup dry-run,
+state-path, and argument-error modes. Run that explicit network lane separately:
 
 ```bash
 CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS=1 PYTHONPATH=src python3 -m unittest \
@@ -431,7 +431,10 @@ Its setuptools and wheel versions are pinned identically in `pyproject.toml` and
 `requirements-test.txt`, so an index outage can affect only this opt-in lane and a future backend
 release cannot silently change the build.
 
-This project intentionally has no hosted CI workflows. Before describing a release as cross-platform, run the full suite and native installer manually on Linux, macOS, and Windows with every supported Python version, and retain the command output as release evidence.
+The `Packaging smoke` GitHub workflow makes that real build/install lane mandatory for pull
+requests, `main`, and version tags. Before describing a release as cross-platform, also run the
+full suite and native installer manually on Linux, macOS, and Windows with every supported Python
+version, and retain the command output as release evidence.
 
 The release version is declared once as `clawpatch_supervise.__version__`; setuptools derives distribution metadata from that attribute, and the CLI reports the same value.
 
