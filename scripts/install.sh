@@ -141,19 +141,21 @@ print(path)
 PY
 }
 
-command -v node >/dev/null 2>&1 || {
+node_command="$(resolve_executable node)" || {
   echo "Node.js 22 or newer is required." >&2
   exit 2
 }
-node_major="$(node --version | sed -n 's/^v\([0-9][0-9]*\).*/\1/p')"
+node_major="$("$node_command" --version | sed -n 's/^v\([0-9][0-9]*\).*/\1/p')"
 if [[ -z "$node_major" || "$node_major" -lt 22 ]]; then
   echo "Node.js 22 or newer is required." >&2
   exit 2
 fi
+node_dir="${node_command%/*}"
+clawpatch_lookup_path="$node_dir:$bin_dir:$PATH"
 
 managed_clawpatch=false
-if clawpatch_command="$(resolve_executable clawpatch)" && \
-  compatible_clawpatch "$clawpatch_command"; then
+if clawpatch_command="$(PATH="$clawpatch_lookup_path" resolve_executable clawpatch)" && \
+  PATH="$clawpatch_lookup_path" compatible_clawpatch "$clawpatch_command"; then
   :
 else
   command -v npm >/dev/null 2>&1 || {
@@ -203,11 +205,13 @@ PY
   }
   managed_clawpatch=true
 fi
-if ! compatible_clawpatch "$clawpatch_command"; then
+clawpatch_dir="${clawpatch_command%/*}"
+runtime_path="$node_dir:$clawpatch_dir:$bin_dir:$PATH"
+if ! PATH="$runtime_path" compatible_clawpatch "$clawpatch_command"; then
   echo "ClawPatch $minimum_clawpatch_version or newer is required." >&2
   exit 2
 fi
-clawpatch_installed_version="$("$clawpatch_command" --version)"
+clawpatch_installed_version="$(PATH="$runtime_path" "$clawpatch_command" --version)"
 
 package_to_install="$source_package"
 if [[ ! -d "$source_package" ]]; then
@@ -267,7 +271,7 @@ if [[ "$supervisor_installed_version" != "$expected_supervisor_version" ]]; then
 fi
 printf '%s\n' "$supervisor_installed_version"
 if [[ -n "$verify_repo" ]]; then
-  PATH="${clawpatch_command%/*}:$PATH" \
+  PATH="$runtime_path" \
     "$staging_venv/bin/clawpatch-supervise" doctor --repo "$verify_repo"
 fi
 printf '%s\n' "$clawpatch_installed_version"
@@ -349,21 +353,20 @@ PY
 )"
 fi
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
-clawpatch_dir="${clawpatch_command%/*}"
-"$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$bin_dir" "$clawpatch_dir" <<'PY'
+"$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$node_dir" "$bin_dir" "$clawpatch_dir" <<'PY'
 import os
 import shlex
 import sys
 from pathlib import Path
 
-destination, supervisor, bin_dir, clawpatch_dir = sys.argv[1:]
+destination, supervisor, node_dir, bin_dir, clawpatch_dir = sys.argv[1:]
 content = "\n".join(
     (
         "#!/bin/sh",
         "export PYTHONUTF8=1",
         "export PYTHONIOENCODING=utf-8",
         "export NODE_DISABLE_COMPILE_CACHE=1",
-        f"export PATH={shlex.quote(clawpatch_dir)}:{shlex.quote(bin_dir)}:\"$PATH\"",
+        f"export PATH={shlex.quote(node_dir)}:{shlex.quote(clawpatch_dir)}:{shlex.quote(bin_dir)}:\"$PATH\"",
         f"exec {shlex.quote(supervisor)} \"$@\"",
         "",
     )

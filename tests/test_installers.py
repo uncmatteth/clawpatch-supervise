@@ -79,6 +79,8 @@ class InstallerContractTests(unittest.TestCase):
         verify_repo: bool = False,
         relative_path: bool = False,
         exported_clawpatch_function: bool = False,
+        separate_clawpatch_directory: bool = False,
+        shadow_node_version: str | None = None,
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
@@ -99,7 +101,12 @@ class InstallerContractTests(unittest.TestCase):
             command_stub,
             "#!/bin/sh\n"
             'case "${0##*/}:$1" in\n'
-            '  clawpatch:--version) printf "%s\\n" "$CLAWPATCH_TEST_CLAWPATCH_VERSION" ;;\n'
+            '  clawpatch:--version)\n'
+            '    if [ -n "$CLAWPATCH_TEST_EXPECTED_NODE_VERSION" ]; then\n'
+            '      [ "$(node --version)" = "$CLAWPATCH_TEST_EXPECTED_NODE_VERSION" ] '
+            '|| exit 32\n'
+            '    fi\n'
+            '    printf "%s\\n" "$CLAWPATCH_TEST_CLAWPATCH_VERSION" ;;\n'
             '  clawhub:--cli-version) printf "%s\\n" "$CLAWPATCH_TEST_CLAWHUB_VERSION" ;;\n'
             '  clawpatch-supervise:--version)\n'
             '    [ "$CLAWPATCH_TEST_SUPERVISOR_VERSION_FAILS" != "true" ] || exit 26\n'
@@ -131,7 +138,13 @@ class InstallerContractTests(unittest.TestCase):
             "exit 0\n",
         )
         if clawpatch_present:
-            (fake_bin / "clawpatch").symlink_to(clawpatch_command or command_stub)
+            if separate_clawpatch_directory:
+                clawpatch_bin = root / "clawpatch-bin"
+                clawpatch_bin.mkdir()
+                shutil.copyfile(clawpatch_command or command_stub, clawpatch_bin / "clawpatch")
+                (clawpatch_bin / "clawpatch").chmod(0o755)
+            else:
+                (fake_bin / "clawpatch").symlink_to(clawpatch_command or command_stub)
         if clawhub_present:
             (fake_bin / "clawhub").symlink_to(command_stub)
 
@@ -201,6 +214,16 @@ class InstallerContractTests(unittest.TestCase):
             )
 
         install_root = root / "install"
+        installed_bin = root / "installed-bin"
+        if shadow_node_version is not None:
+            installed_bin.mkdir()
+            self._write_executable(
+                installed_bin / "node",
+                f"#!/bin/sh\nprintf '%s\\n' {shadow_node_version!r}\n",
+            )
+        path_entries = [str(fake_bin)]
+        if separate_clawpatch_directory:
+            path_entries.append(str(root / "clawpatch-bin"))
         environment = os.environ.copy()
         environment.update(
             {
@@ -211,6 +234,9 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_COMMAND_STUB": str(command_stub),
                 "CLAWPATCH_TEST_INSTALLED_COMMAND_STUB": str(installed_command_stub),
                 "CLAWPATCH_TEST_CLAWPATCH_VERSION": clawpatch_version,
+                "CLAWPATCH_TEST_EXPECTED_NODE_VERSION": (
+                    node_version if shadow_node_version is not None else ""
+                ),
                 "CLAWPATCH_TEST_CLAWHUB_VERSION": clawhub_version,
                 "CLAWPATCH_TEST_CLAWPATCH_MOVE_FAILS": str(
                     clawpatch_move_fails
@@ -231,7 +257,7 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_PAUSE_READY": str(root / "activation-ready"),
                 "CLAWPATCH_TEST_PAUSE_RELEASE": str(root / "activation-release"),
                 "CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE": "false",
-                "PATH": fake_bin.name if relative_path else str(fake_bin),
+                "PATH": fake_bin.name if relative_path else os.pathsep.join(path_entries),
             }
         )
         if exported_clawpatch_function:
@@ -548,6 +574,36 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(invocations, [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installed_wrapper_uses_validated_node(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="missing",
+            separate_clawpatch_directory=True,
+            shadow_node_version="v20.18.0",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(invocations, [])
+        wrapper = install_root.parent / "installed-bin" / "clawpatch-supervise"
+        installed_environment = os.environ.copy()
+        installed_environment.update(
+            {
+                "CLAWPATCH_TEST_CLAWPATCH_VERSION": CLAWPATCH_VERSION,
+                "CLAWPATCH_TEST_EXPECTED_NODE_VERSION": "v22.0.0",
+                "CLAWPATCH_TEST_NODE_VERSION": "v22.0.0",
+            }
+        )
+        installed_result = subprocess.run(
+            [str(wrapper), "doctor"],
+            capture_output=True,
+            check=False,
+            env=installed_environment,
+            text=True,
+        )
+        self.assertEqual(installed_result.returncode, 0, installed_result.stderr)
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_rejects_exported_clawpatch_function(self) -> None:
