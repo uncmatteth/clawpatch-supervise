@@ -394,6 +394,7 @@ def _remove_exact_owned_run_locked(candidate: Path, cleanup_root: Path) -> None:
         _remove_exact_directory(claimed, identity)
         _remove_exact_directory(quarantine, quarantine_identity)
     except BaseException as error:
+        restored = False
         if claimed.exists() or claimed.is_symlink():
             if candidate.exists() or candidate.is_symlink():
                 error.add_note(
@@ -402,11 +403,20 @@ def _remove_exact_owned_run_locked(candidate: Path, cleanup_root: Path) -> None:
             else:
                 try:
                     claimed.rename(candidate)
+                    restored = True
                 except OSError as restore_error:
                     error.add_note(
                         "The claimed supervisor-owned run directory could not be restored: "
                         f"{restore_error}"
                     )
+        if restored:
+            try:
+                _remove_exact_directory(quarantine, quarantine_identity)
+            except (OSError, SafetyError) as quarantine_error:
+                error.add_note(
+                    "The empty cleanup quarantine could not be removed: "
+                    f"{quarantine_error}"
+                )
         raise
 
 
@@ -432,6 +442,10 @@ def _serialized_cleanup_root(cleanup_root: Path) -> Iterator[None]:
 
 
 def _remove_exact_directory(path: Path, identity: tuple[int, int]) -> None:
+    if os.name == "nt":
+        _remove_exact_directory_windows(path, identity)
+        return
+
     required_dir_fd_functions = (os.open, os.stat, os.unlink, os.rmdir)
     if os.scandir not in os.supports_fd or any(
         function not in os.supports_dir_fd for function in required_dir_fd_functions
@@ -466,6 +480,54 @@ def _remove_exact_directory(path: Path, identity: tuple[int, int]) -> None:
             os.close(directory_descriptor)
     finally:
         os.close(parent_descriptor)
+
+
+def _remove_exact_directory_windows(path: Path, identity: tuple[int, int]) -> None:
+    metadata = path.lstat()
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or _windows_is_reparse_point(metadata)
+        or (metadata.st_dev, metadata.st_ino) != identity
+    ):
+        raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+
+    with os.scandir(path) as entries:
+        for entry in entries:
+            entry_path = path / entry.name
+            entry_metadata = entry.stat(follow_symlinks=False)
+            entry_identity = (entry_metadata.st_dev, entry_metadata.st_ino)
+            if stat.S_ISDIR(entry_metadata.st_mode) and not _windows_is_reparse_point(
+                entry_metadata
+            ):
+                _remove_exact_directory_windows(entry_path, entry_identity)
+            else:
+                current = entry_path.lstat()
+                if (
+                    (current.st_dev, current.st_ino) != entry_identity
+                    or stat.S_IFMT(current.st_mode) != stat.S_IFMT(entry_metadata.st_mode)
+                    or _windows_is_reparse_point(current)
+                    != _windows_is_reparse_point(entry_metadata)
+                ):
+                    raise SafetyError(
+                        "The supervisor-owned run directory changed during cleanup."
+                    )
+                if stat.S_ISDIR(current.st_mode):
+                    entry_path.rmdir()
+                else:
+                    entry_path.unlink()
+
+    current = path.lstat()
+    if (
+        not stat.S_ISDIR(current.st_mode)
+        or _windows_is_reparse_point(current)
+        or (current.st_dev, current.st_ino) != identity
+    ):
+        raise SafetyError("The supervisor-owned run directory changed during cleanup.")
+    path.rmdir()
+
+
+def _windows_is_reparse_point(metadata: os.stat_result) -> bool:
+    return bool(getattr(metadata, "st_file_attributes", 0) & 0x400)
 
 
 def _remove_exact_directory_entry(

@@ -381,6 +381,52 @@ class CleanupCommandTests(unittest.TestCase):
 
                 self.assertEqual(list(cleanup_root.iterdir()), [])
 
+    def test_owned_run_cleanup_succeeds_on_windows_without_directory_handles(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+
+            with (
+                patch.object(cleanup_module.os, "name", "nt"),
+                patch.object(cleanup_module.os, "supports_fd", set()),
+                patch.object(cleanup_module.os, "supports_dir_fd", set()),
+            ):
+                with owned_run_directory(root, root=cleanup_root) as owned_run:
+                    nested = owned_run.temporary_root / "venv" / "Lib" / "site-packages"
+                    nested.mkdir(parents=True)
+                    (nested / "artifact.pyc").write_bytes(b"compiled")
+
+            self.assertEqual(list(cleanup_root.iterdir()), [])
+
+    def test_failed_cleanup_restores_run_without_leaking_quarantine(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            cleanup_root = root / "clawpatch-supervise-runs"
+            retained: Path | None = None
+            blocked: list[Path] = []
+            original_remove = cleanup_module._remove_exact_directory
+
+            def fail_run_removal(path: Path, identity: tuple[int, int]) -> None:
+                if path.name.startswith("run-"):
+                    raise PermissionError(5, "Access is denied", str(path))
+                original_remove(path, identity)
+
+            with patch(
+                "clawpatch_supervise.cleanup._remove_exact_directory",
+                side_effect=fail_run_removal,
+            ):
+                with owned_run_directory(
+                    root,
+                    root=cleanup_root,
+                    on_blocked_cleanup=lambda path, _error: blocked.append(path),
+                ) as owned_run:
+                    retained = owned_run.path
+
+            self.assertEqual(blocked, [retained])
+            self.assertIsNotNone(retained)
+            self.assertTrue(retained.is_dir())
+            self.assertEqual(list(cleanup_root.iterdir()), [retained])
+
     def test_completed_run_warns_instead_of_stopping_when_windows_blocks_temp_cleanup(
         self,
     ) -> None:
