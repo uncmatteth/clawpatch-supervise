@@ -118,7 +118,17 @@ class InstallerContractTests(unittest.TestCase):
             "exit 0\n",
         )
 
-        for command in ("bash", "cp", "ln", "mkdir", "mktemp", "mv", "rm", "sed"):
+        for command in (
+            "bash",
+            "cp",
+            "ln",
+            "mkdir",
+            "mktemp",
+            "mv",
+            "rm",
+            "rmdir",
+            "sed",
+        ):
             command_path = shutil.which(command)
             self.assertIsNotNone(command_path)
             (fake_bin / command).symlink_to(command_path)
@@ -997,7 +1007,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(installed_supervisor.stat().st_mode & 0o777, 0o751)
         self.assertEqual(
             sorted(path.name for path in installed_bin.iterdir()),
-            [".clawpatch-supervise.install.lock", "clawpatch", "clawpatch-supervise"],
+            ["clawpatch", "clawpatch-supervise"],
         )
         self.assertEqual(
             sorted(path.name for path in install_root.iterdir()),
@@ -1056,8 +1066,8 @@ class InstallerContractTests(unittest.TestCase):
             ["clawpatch", "venv.0.1.20.previous"],
         )
         self.assertTrue(previous_venv.exists())
-        self.assertTrue(
-            (installed_bin / ".clawpatch-supervise.install.lock").is_file()
+        self.assertFalse(
+            (installed_bin / ".clawpatch-supervise.install.lock").exists()
         )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
@@ -1080,9 +1090,32 @@ class InstallerContractTests(unittest.TestCase):
         self.assertFalse(os.path.lexists(installed_bin / "clawpatch-supervise"))
         self.assertEqual(
             sorted(path.name for path in installed_bin.iterdir()),
-            [".clawpatch-supervise.install.lock"],
+            [],
         )
         self.assertEqual(list(install_root.iterdir()), [])
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_symlink_at_install_lock_without_modifying_target(
+        self,
+    ) -> None:
+        root = Path(self._temporary_directory.name)
+        sentinel = root / "sentinel"
+        sentinel.write_text("do not modify\n", encoding="utf-8")
+        installed_bin = root / "installed-bin"
+        installed_bin.mkdir()
+        lock_path = installed_bin / ".clawpatch-supervise.install.lock"
+        lock_path.symlink_to(sentinel)
+
+        result, _invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Install lock path is not a directory", result.stderr)
+        self.assertEqual(sentinel.read_text(encoding="utf-8"), "do not modify\n")
+        self.assertTrue(lock_path.is_symlink())
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_retains_backup_when_rollback_restore_fails(self) -> None:
