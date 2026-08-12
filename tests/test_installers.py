@@ -578,7 +578,7 @@ class InstallerContractTests(unittest.TestCase):
         result, invocations, _install_root = self._run_linux_installer(
             clawpatch_present=True,
             clawhub_present=False,
-            clawpatch_version="0.7.3",
+            clawpatch_version="clawpatch 0.7.3",
             npm_mode="missing",
         )
 
@@ -697,6 +697,19 @@ class InstallerContractTests(unittest.TestCase):
             clawhub_present=True,
             clawpatch_version="0.7.1",
             npm_mode="success",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_staged_clawpatch_install(invocations, install_root)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_clawpatch_output_with_unrelated_version(
+        self,
+    ) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            clawpatch_version="dependency 99.0.0\nclawpatch 0.1.0",
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)

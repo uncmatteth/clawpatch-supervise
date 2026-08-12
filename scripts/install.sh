@@ -106,13 +106,12 @@ import re
 import sys
 
 def version(value):
-    match = re.search(
-        r"(?<![0-9A-Za-z.-])"
+    match = re.fullmatch(
+        r"(?:clawpatch[ \t]+)?"
         r"(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)"
         r"(-(?:0|[1-9]\d*|[A-Za-z-][0-9A-Za-z-]*)"
         r"(?:\.(?:0|[1-9]\d*|[A-Za-z-][0-9A-Za-z-]*))*)?"
-        r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?"
-        r"(?![0-9A-Za-z.-])",
+        r"(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?",
         value,
     )
     if not match:
