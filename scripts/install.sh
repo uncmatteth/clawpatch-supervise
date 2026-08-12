@@ -22,6 +22,7 @@ previous_clawpatch_command=""
 activation_started=false
 activation_complete=false
 install_lock_held=false
+install_lock_dir=""
 supervisor_destination=""
 clawpatch_destination=""
 
@@ -71,7 +72,7 @@ cleanup() {
   [[ -z "$clawpatch_download_root" ]] || rm -rf "$clawpatch_download_root"
   [[ -z "$download_root" ]] || rm -rf "$download_root"
   if [[ "$install_lock_held" == true ]]; then
-    exec 9>&-
+    rmdir "$install_lock_dir"
   fi
   if [[ "$rollback_failed" == true ]]; then
     exit_status=1
@@ -277,14 +278,17 @@ fi
 printf '%s\n' "$clawpatch_installed_version"
 
 mkdir -p "$install_root" "$bin_dir"
-exec 9>"$bin_dir/.clawpatch-supervise.install.lock"
-"$python_command" - 9 <<'PY'
-import fcntl
-import sys
-
-fcntl.flock(int(sys.argv[1]), fcntl.LOCK_EX)
-PY
-install_lock_held=true
+install_lock_dir="$bin_dir/.clawpatch-supervise.install.lock"
+while [[ "$install_lock_held" != true ]]; do
+  if mkdir -m 700 "$install_lock_dir" 2>/dev/null; then
+    install_lock_held=true
+  elif [[ -L "$install_lock_dir" || ! -d "$install_lock_dir" ]]; then
+    echo "Install lock path is not a directory: $install_lock_dir" >&2
+    exit 2
+  else
+    "$python_command" -c 'import time; time.sleep(0.05)'
+  fi
+done
 supervisor_destination="$bin_dir/clawpatch-supervise"
 clawpatch_destination="$bin_dir/clawpatch"
 if [[ -d "$supervisor_destination" ]]; then
