@@ -119,6 +119,30 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertIn("UNOWNED", output.getvalue())
             self.assertIn("removed=1", output.getvalue())
 
+    @unittest.skipUnless(os.name == "posix", "POSIX PID probe behavior")
+    def test_cleanup_preserves_run_when_pid_probe_is_interrupted(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-interrupted-probe"
+            self._mark(candidate, pid=42, created_unix=0)
+
+            with (
+                patch("clawpatch_supervise.cleanup.os.kill", side_effect=InterruptedError),
+                patch(
+                    "clawpatch_supervise.cleanup._path_has_live_reference",
+                    return_value=False,
+                ),
+            ):
+                report = cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+            self.assertTrue(candidate.is_dir())
+            self.assertEqual([entry.status for entry in report.entries], ["ACTIVE"])
+            self.assertEqual(report.removed, 0)
+
     def test_cleanup_apply_keeps_an_undeletable_owned_run_and_continues(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             cleanup_root = Path(temp) / "clawpatch-supervise-runs"
