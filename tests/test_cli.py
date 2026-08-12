@@ -129,7 +129,12 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             "owned-validation-override",
         )
         self.assertEqual(result.get("PATH"), os.environ.get("PATH"))
-        self.assertEqual(result, expected)
+        platform_added = {"__CF_USER_TEXT_ENCODING"} if sys.platform == "darwin" else set()
+        self.assertEqual(set(result) - set(expected), platform_added)
+        self.assertEqual(
+            {name: value for name, value in result.items() if name not in platform_added},
+            expected,
+        )
 
     def test_state_query_failure_reports_bounded_stdout_and_stderr(self):
         repo = Path("/tmp/example-repository")
@@ -872,7 +877,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 )
 
         self.assertEqual(code, 0)
-        self.assertEqual(received_paths, [repo_a, repo_a, repo_a])
+        canonical_repo_a = repo_a.resolve()
+        self.assertEqual(received_paths, [canonical_repo_a] * 3)
 
     def test_resume_phase_explains_source_clean_planned_attempt(self):
         self.assertEqual(
@@ -1083,8 +1089,19 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["advance_uncertain"])
         self.assertTrue(calls[0][1]["fresh"])
 
-    def test_terminal_command_renders_stopped_state_without_retrying(self):
+    def test_plain_command_recovers_checkpointed_stop_and_restarts_fresh(self):
+        calls = []
+        recoveries = []
+
         def fake_sweep(_repo: Path, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 2:
+                return {
+                    "ok": True,
+                    "finding_count": 1,
+                    "open_findings": 0,
+                    "git_head": "abc123",
+                }
             kwargs["progress"](
                 {
                     "phase": "stopped",
@@ -1097,23 +1114,74 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             )
             raise SafetyError("one fix failed; no automatic continuation")
 
+        def fake_recovery(_repo: Path, *, reason: str):
+            recoveries.append(reason)
+            return {
+                "finding_id": "fnd_one",
+                "paths": ["app.py"],
+                "baseline_commit": "abc123",
+            }
+
         output = StringIO()
         with redirect_stdout(output):
             code = main(
-                ["--repo", "."],
+                ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=fake_sweep,
+                recover_interrupted_state=fake_recovery,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
             )
 
         rendered = output.getvalue()
-        self.assertEqual(code, 2)
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertEqual(recoveries, ["one fix failed; no automatic continuation"])
+        self.assertTrue(calls[1]["fresh"])
         self.assertIn(
             "[1/24] STOPPED - fix-validation-failed — 🛑💥🤬 FUCK. THIS SHIT ISN'T SAFE TO ADVANCE",
             rendered,
         )
         self.assertIn("source left in place: app.py", rendered)
-        self.assertNotIn("RETRY", rendered)
+        self.assertIn("RECOVERED SUPERVISOR STATE", rendered)
+        self.assertIn("COMPLETE", rendered)
+
+    def test_plain_command_recovers_terminal_clawpatch_stop_instead_of_exiting(self):
+        calls = []
+
+        def fake_sweep(_repo: Path, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise ClawpatchStop(
+                    "same finding made no further progress",
+                    repair_action=RepairAction.STOP_TERMINAL,
+                )
+            return {
+                "ok": True,
+                "finding_count": 1,
+                "open_findings": 0,
+                "git_head": "abc123",
+            }
+
+        output = StringIO()
+        with redirect_stdout(output):
+            code = main(
+                ["--repo", ".", "--retry-seconds", "0.001"],
+                run_sweep=fake_sweep,
+                recover_interrupted_state=lambda _repo, *, reason: {
+                    "finding_id": "fnd_one",
+                    "paths": [],
+                    "baseline_commit": "",
+                    "receipt": "/tmp/recovery.json",
+                },
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1]["fresh"])
+        self.assertIn("RECOVERED SUPERVISOR STATE", output.getvalue())
+        self.assertIn("COMPLETE", output.getvalue())
 
     def test_failed_sweep_reports_stopped_with_open_findings(self):
         def fake_sweep(_repo: Path, **_kwargs):
@@ -1272,9 +1340,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
     def test_preserved_state_retry_is_not_mislabeled_as_an_active_run(self):
         calls = []
+        recoveries = []
 
-        def fake_sweep(_repo: Path, **_kwargs):
-            calls.append(True)
+        def fake_sweep(_repo: Path, **kwargs):
+            calls.append(kwargs)
             if len(calls) == 1:
                 raise RepositoryBusyError(
                     "Interrupted Clawpatch release progress no longer owns the exact "
@@ -1297,13 +1366,24 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             code = main(
                 ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=fake_sweep,
+                recover_interrupted_state=lambda _repo, *, reason: (
+                    recoveries.append(reason)
+                    or {
+                        "finding_id": "fnd_one",
+                        "paths": [],
+                        "baseline_commit": "",
+                        "receipt": "/tmp/recovery.json",
+                    }
+                ),
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
             )
 
         self.assertEqual(code, 0)
         self.assertEqual(len(calls), 2)
-        self.assertIn("THIS REPOSITORY'S PRESERVED STATE", output.getvalue())
+        self.assertEqual(len(recoveries), 1)
+        self.assertTrue(calls[1]["fresh"])
+        self.assertIn("RECOVERED SUPERVISOR STATE", output.getvalue())
         self.assertNotIn("WAITING FOR THE ACTIVE RUN", output.getvalue())
 
     def test_plain_command_retries_a_transient_source_clean_command(self):
@@ -1335,6 +1415,38 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(len(calls), 2)
         self.assertIn("RETRYING AUTOMATICALLY", output.getvalue())
+
+    def test_plain_command_rebuilds_queue_after_nontransient_command_failure(self):
+        calls = []
+
+        def fake_sweep(_repo: Path, **kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                raise ClawpatchCommandFailure(
+                    "Clawpatch selected a missing finding",
+                    failure=classify_clawpatch_failure("show", 2),
+                )
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        output = StringIO()
+        with redirect_stdout(output):
+            code = main(
+                ["--repo", ".", "--retry-seconds", "0.001"],
+                run_sweep=fake_sweep,
+                recover_interrupted_state=lambda _repo, *, reason: {
+                    "finding_id": "unknown",
+                    "paths": [],
+                    "baseline_commit": "",
+                    "receipt": "/tmp/recovery.json",
+                },
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertEqual(len(calls), 2)
+        self.assertTrue(calls[1]["fresh"])
+        self.assertIn("RECOVERED SUPERVISOR STATE", output.getvalue())
 
     def test_keyboard_interrupt_warns_that_applied_changes_may_remain(self):
         with tempfile.TemporaryDirectory() as temp:

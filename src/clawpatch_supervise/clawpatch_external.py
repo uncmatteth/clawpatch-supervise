@@ -22,6 +22,7 @@ from .clawpatch_release import (
     _release_clawpatch_env,
     _source_paths,
     external_state_root,
+    recover_external_interrupted_state,
     release_sweep,
     require_external_clawpatch_preflight,
     runtime_doctor,
@@ -392,6 +393,9 @@ def main(
     ensure_repository_idle: Callable[[Path], dict[str, str] | None] = (
         require_external_clawpatch_preflight
     ),
+    recover_interrupted_state: Callable[..., dict[str, Any] | None] = (
+        recover_external_interrupted_state
+    ),
     heartbeat_seconds: float = 30,
     heartbeat_wait: Callable[[threading.Event, float], bool] | None = None,
     cleanup_root: Path | None = None,
@@ -430,7 +434,7 @@ def main(
         doctor_parser.add_argument("--repo", default=".")
         doctor_args = doctor_parser.parse_args(raw_argv[1:])
         try:
-            repo = Path(doctor_args.repo).resolve()
+            repo = Path(doctor_args.repo).resolve(strict=True)
         except (OSError, RuntimeError) as exc:
             print(
                 "NOT READY: Could not resolve repository path "
@@ -494,7 +498,7 @@ def main(
     if not math.isfinite(args.retry_seconds) or args.retry_seconds <= 0:
         parser.error("--retry-seconds must be a finite positive number")
     try:
-        repo = Path(args.repo).resolve()
+        repo = Path(args.repo).resolve(strict=not args.print_state_path)
     except (OSError, RuntimeError) as exc:
         print(
             "STOPPED: Could not resolve repository path "
@@ -527,6 +531,28 @@ def main(
     def display_after_external_preflight(event: dict[str, Any]) -> None:
         if event.get("phase") != "preflight":
             display(event)
+
+    def recover_after_failure(exc: SafetyError) -> dict[str, Any] | None:
+        recovery = recover_interrupted_state(repo, reason=str(exc))
+        if recovery is None:
+            return None
+        paths = recovery.get("paths", [])
+        baseline = recovery.get("baseline_commit", "")
+        preserved = (
+            f"committed the complete visible source as baseline {_terminal_safe(baseline)}"
+            if paths
+            else "kept the already-clean project source"
+        )
+        print(
+            "\nRECOVERED SUPERVISOR STATE: "
+            f"{preserved}, retired only the interrupted checkpoint, and will rebuild "
+            "the ClawPatch queue automatically.\n"
+            f"finding: {_terminal_safe(recovery.get('finding_id', ''))}\n"
+            f"paths: {_terminal_safe(paths)}\n"
+            f"receipt: {_terminal_safe(recovery.get('receipt', ''))}",
+            flush=True,
+        )
+        return recovery
 
     def heartbeat() -> None:
         wait = heartbeat_wait or threading.Event.wait
@@ -627,29 +653,45 @@ def main(
                     )
                     break
                 except ClawpatchStop as exc:
-                    if exc.repair_action is not RepairAction.STOP_TRANSIENT:
-                        raise
                     retry_attempt += 1
-                    print(
-                        "\nTRANSIENT: RETRYING AUTOMATICALLY from the exact durable "
-                        f"checkpoint in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
-                        f"{_terminal_safe_error(exc)}",
-                        flush=True,
-                    )
+                    if exc.repair_action is RepairAction.STOP_TRANSIENT:
+                        print(
+                            "\nTRANSIENT: RETRYING AUTOMATICALLY from the exact durable "
+                            f"checkpoint in {args.retry_seconds:g}s "
+                            f"(attempt {retry_attempt + 1}).\n"
+                            f"{_terminal_safe_error(exc)}",
+                            flush=True,
+                        )
+                    else:
+                        if recover_after_failure(exc) is None:
+                            raise
+                        resolved_fresh = True
+                        time.sleep(args.retry_seconds)
+                        continue
                 except ClawpatchCommandFailure as exc:
-                    if not exc.failure.transient:
-                        raise
                     retry_attempt += 1
-                    print(
-                        "\nTRANSIENT: RETRYING AUTOMATICALLY from the source-clean "
-                        f"command in {args.retry_seconds:g}s (attempt {retry_attempt + 1}).\n"
-                        f"{_terminal_safe_error(exc)}",
-                        flush=True,
-                    )
+                    if exc.failure.transient:
+                        print(
+                            "\nTRANSIENT: RETRYING AUTOMATICALLY from the source-clean "
+                            f"command in {args.retry_seconds:g}s "
+                            f"(attempt {retry_attempt + 1}).\n"
+                            f"{_terminal_safe_error(exc)}",
+                            flush=True,
+                        )
+                    else:
+                        if recover_after_failure(exc) is None:
+                            raise
+                        resolved_fresh = True
+                        time.sleep(args.retry_seconds)
+                        continue
                 except RepositoryBusyError as exc:
                     retry_attempt += 1
                     busy_reason = str(exc)
                     active_run = "already active" in busy_reason.casefold()
+                    if not active_run and recover_after_failure(exc) is not None:
+                        resolved_fresh = True
+                        time.sleep(args.retry_seconds)
+                        continue
                     heading = (
                         "WAITING FOR THIS REPOSITORY'S ACTIVE RUN"
                         if active_run
@@ -661,6 +703,13 @@ def main(
                         f"repo: {_terminal_safe(repo)}\n{_terminal_safe_error(exc)}",
                         flush=True,
                     )
+                except SafetyError as exc:
+                    if recover_after_failure(exc) is None:
+                        raise
+                    retry_attempt += 1
+                    resolved_fresh = True
+                    time.sleep(args.retry_seconds)
+                    continue
                 resolved_fresh = False
                 time.sleep(args.retry_seconds)
     except ClawpatchStop as exc:

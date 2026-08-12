@@ -80,7 +80,16 @@ class CommandRunnerEnvironmentTests(unittest.TestCase):
             "owned-validation-override",
         )
         self.assertEqual(observed_env.get("PATH"), os.environ.get("PATH"))
-        self.assertEqual(observed_env, child_env)
+        platform_added = {"__CF_USER_TEXT_ENCODING"} if sys.platform == "darwin" else set()
+        self.assertEqual(set(observed_env) - set(child_env), platform_added)
+        self.assertEqual(
+            {
+                name: value
+                for name, value in observed_env.items()
+                if name not in platform_added
+            },
+            child_env,
+        )
 
 
 class CommandRunnerLoggingTests(unittest.TestCase):

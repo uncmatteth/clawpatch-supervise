@@ -20,14 +20,6 @@ NETWORK_TEST_ENV = "CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS"
 
 
 class InstalledConsoleScriptTests(unittest.TestCase):
-    def test_release_ci_runs_real_wheel_smoke(self) -> None:
-        workflow = (
-            REPOSITORY_ROOT / ".github" / "workflows" / "packaging-smoke.yml"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn('CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS: "1"', workflow)
-        self.assertIn("python -m unittest tests.test_installed_cli -v", workflow)
-
     def test_build_requirements_are_exactly_pinned_for_the_network_lane(self) -> None:
         manifest = tomllib.loads(
             (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")

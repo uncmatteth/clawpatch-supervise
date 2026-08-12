@@ -6,7 +6,6 @@
 
 > The outside-the-repo supervisor that keeps a ClawPatch repair queue honest, resumable, and moving without skipping the finding that caused trouble.
 
-[![Cross-platform tests](https://github.com/uncmatteth/clawpatch-supervise/actions/workflows/test.yml/badge.svg)](https://github.com/uncmatteth/clawpatch-supervise/actions/workflows/test.yml)
 [![Latest release](https://img.shields.io/github/v/release/uncmatteth/clawpatch-supervise)](https://github.com/uncmatteth/clawpatch-supervise/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
@@ -71,7 +70,7 @@ Run this on Windows, Linux, or macOS after authenticating the configured provide
 clawpatch-supervise doctor --repo /absolute/path/to/repository
 ```
 
-`doctor` does not create, reset, or advance `.clawpatch`. It verifies the Git repository, Python runtime, installed ClawPatch, configured provider, and provider version. On Windows with the Codex provider, it also executes a harmless marker inside each discovered Codex nested sandbox, skips broken duplicate launchers, and passes the first working launcher directory into every later ClawPatch child. If no launcher works, supervision stops before the queue starts.
+`doctor` does not create, reset, or advance `.clawpatch`. It first resolves the repository to an existing canonical path, then verifies the Git repository, Python runtime, installed ClawPatch, configured provider, and provider version. On Windows with the Codex provider, it also executes a harmless marker inside each discovered Codex nested sandbox, skips broken duplicate launchers, and passes the first working launcher directory into every later ClawPatch child. If no launcher works, supervision stops before the queue starts.
 
 Configured Windows `.cmd` and `.bat` validation gates are launched with exact `cmd.exe` quoting, including when the executable is installed under a path containing spaces. Gate arguments containing `cmd.exe` metacharacters remain rejected.
 The initial existing-queue inspection uses the same Windows shim resolution, so a PATH-installed `clawpatch.cmd` works before any repair begins.
@@ -227,6 +226,7 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Ownerless source does not create an infinite wait.** If a bare external run finds source changes and no durable checkpoint owns them, it commits the exact complete changed tree as the input baseline, records a local baseline ref and external receipt, leaves `.clawpatch` untouched, and continues. Strict embedded Manageroo calls still reject pre-existing source instead of changing it.
 - **Published updates do not strand the next plain run.** When pushing is enabled and the current branch has no source changes, a strictly behind local HEAD is fast-forwarded to the stable live origin commit with local Git hooks disabled. A clean strictly ahead local HEAD is accepted for the authorized push path. Clean divergence is merged when possible; a conflicting merge preserves local history under a recovery ref, follows stable origin, restores the exact existing `.clawpatch` state, and continues. Detached, missing, or moving branches still stop safely.
 - **A rejected push does not invalidate its finished repair.** If a restart finds a `finalized` checkpoint and the current history contains one commit whose complete source-path set exactly matches that checkpoint, the supervisor retires only the checkpoint, keeps the committed repair, and continues to remote reconciliation. Uncommitted source or a path mismatch still prevents automatic recovery.
+- **Supervisor-owned failures recover at one boundary.** The plain external command no longer makes the operator repair its checkpoint or queue by hand. It commits any complete visible source tree as the next input baseline, preserves a malformed checkpoint verbatim in the external recovery directory, retires only active supervisor state, rebuilds the ClawPatch queue, and reviews again. A source-clean broken queue receives one automatic rebuild per Git/error boundary; if the exact same boundary fails again, it is reported as a real external failure instead of looping forever.
 - **Empty stop markers do not strand open findings.** If a stopped checkpoint owns no source, has no temporary commit, and ClawPatch still reports the exact finding open at the same HEAD, the supervisor retires only that empty wrapper. `clawpatch next` must return the same finding before its fix is attempted again.
 - **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor accepts both a retained dangling iteration and an iteration already included in that clean history, then retires only the obsolete recovery wrapper. Unrelated dirty paths do not keep that obsolete wrapper alive; they remain untouched and are handled as independent pre-existing work. The same recovery applies when a source-clean checkpoint owns no paths and has no temporary commit, because there is no repair content to lose. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract must declare an official `postgres@sha256:<64 lowercase hex characters>` image and always receives a newly owned loopback-only database from that exact immutable artifact. The sanitized environment is passed exactly so inherited database credentials and reset guards stay removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
@@ -433,10 +433,9 @@ Its setuptools and wheel versions are pinned identically in `pyproject.toml` and
 `requirements-test.txt`, so an index outage can affect only this opt-in lane and a future backend
 release cannot silently change the build.
 
-The `Packaging smoke` GitHub workflow makes that real build/install lane mandatory for pull
-requests, `main`, and version tags. Before describing a release as cross-platform, also run the
-full suite and native installer manually on Linux, macOS, and Windows with every supported Python
-version, and retain the command output as release evidence.
+This repository intentionally has no hosted workflow files. Run the real build/install lane and
+the full suite manually on Linux, macOS, and Windows before describing a release as
+cross-platform, and retain the command output as local release evidence.
 
 The release version is declared once as `clawpatch_supervise.__version__`; setuptools derives distribution metadata from that attribute, and the CLI reports the same value.
 

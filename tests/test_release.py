@@ -61,6 +61,7 @@ from clawpatch_supervise.clawpatch_release import (
     _windows_clawpatch_processes,
     _windows_codex_sandbox_path,
     _write_release_progress,
+    recover_external_interrupted_state,
     runtime_doctor,
     release_sweep,
 )
@@ -254,6 +255,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
 
     @unittest.skipUnless(os.name == "posix", "POSIX byte filenames")
+    @unittest.skipIf(sys.platform == "darwin", "macOS rejects surrogate-escaped filenames")
     def test_status_and_source_paths_preserve_distinct_non_utf8_filenames(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
@@ -709,6 +711,131 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
             self.assertEqual(_load_release_progress(repo, state_root=current_root), expected)
             self.assertFalse((legacy_root / "clawpatch-release-progress.json").exists())
+
+    def test_external_recovery_baselines_visible_source_and_retires_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            original_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            queue = repo / ".clawpatch" / "project.json"
+            queue.parent.mkdir()
+            queue.write_text('{"queue":"preserve"}\n', encoding="utf-8")
+            source.write_text("interrupted repair\n", encoding="utf-8")
+            state_home = root / "external-state"
+            state_root = _repository_state_root(state_home, repo)
+            _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=original_head,
+                phase="stopped",
+                owned_paths=["app.py"],
+                state_root=state_root,
+            )
+
+            with patch(
+                "clawpatch_supervise.clawpatch_release._external_state_home",
+                return_value=state_home,
+            ):
+                recovery = recover_external_interrupted_state(
+                    repo,
+                    reason="same finding made no further progress",
+                )
+
+            current_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            receipt = json.loads(Path(recovery["receipt"]).read_text(encoding="utf-8"))
+            source_content = source.read_text(encoding="utf-8")
+            queue_content = queue.read_text(encoding="utf-8")
+            remaining_source = _source_paths(repo)
+            checkpoint = _load_release_progress(repo, state_root=state_root)
+            baseline_parent = subprocess.check_output(
+                ["git", "rev-parse", f"{current_head}^"], cwd=repo, text=True
+            ).strip()
+
+        self.assertEqual(recovery["paths"], ["app.py"])
+        self.assertEqual(recovery["baseline_commit"], current_head)
+        self.assertEqual(source_content, "interrupted repair\n")
+        self.assertEqual(queue_content, '{"queue":"preserve"}\n')
+        self.assertEqual(remaining_source, [])
+        self.assertIsNone(checkpoint)
+        self.assertEqual(receipt["reason"], "unattended-checkpoint-recovery")
+        self.assertEqual(receipt["checkpoint"]["finding_id"], "fnd_one")
+        self.assertEqual(baseline_parent, original_head)
+
+    def test_external_recovery_quarantines_malformed_supervisor_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_repo(repo)
+            state_home = root / "external-state"
+            state_root = _repository_state_root(state_home, repo)
+            progress_path = state_root / "clawpatch-release-progress.json"
+            progress_path.parent.mkdir(parents=True)
+            malformed = b'{"phase":"stopped","broken":'
+            progress_path.write_bytes(malformed)
+
+            with patch(
+                "clawpatch_supervise.clawpatch_release._external_state_home",
+                return_value=state_home,
+            ):
+                recovery = recover_external_interrupted_state(
+                    repo,
+                    reason="Clawpatch release progress is unreadable",
+                )
+
+            quarantine = Path(recovery["quarantined_checkpoint"])
+            quarantined_content = quarantine.read_bytes()
+            active_exists = progress_path.exists()
+
+        self.assertEqual(recovery["finding_id"], "unknown")
+        self.assertEqual(recovery["paths"], [])
+        self.assertEqual(quarantined_content, malformed)
+        self.assertFalse(active_exists)
+
+    def test_external_recovery_rebuilds_a_broken_queue_once_per_git_boundary(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = root / "repo"
+            repo.mkdir()
+            self.init_repo(repo)
+            queue = repo / ".clawpatch" / "project.json"
+            queue.parent.mkdir()
+            queue.write_text('{"queue":"broken"}\n', encoding="utf-8")
+            state_home = root / "external-state"
+
+            with patch(
+                "clawpatch_supervise.clawpatch_release._external_state_home",
+                return_value=state_home,
+            ):
+                first = recover_external_interrupted_state(
+                    repo,
+                    reason="Clawpatch selected a missing finding",
+                )
+                second = recover_external_interrupted_state(
+                    repo,
+                    reason="Clawpatch selected a missing finding",
+                )
+
+            queue_content = queue.read_text(encoding="utf-8")
+
+        self.assertEqual(first["finding_id"], "unknown")
+        self.assertEqual(first["paths"], [])
+        self.assertIsNone(second)
+        self.assertEqual(queue_content, '{"queue":"broken"}\n')
 
     def test_external_progress_upgrades_a_verified_legacy_source_fingerprint(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -6291,7 +6418,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 baseline_commit,
             )
             self.assertEqual(_current_input_baseline_commit(repo), baseline_commit)
-            push_and_verify.assert_called_once_with(repo, "main", first=True)
+            push_and_verify.assert_called_once_with(repo.resolve(), "main", first=True)
             self.assertTrue(report["final_closure"]["pushed"])
 
     @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")

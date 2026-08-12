@@ -944,7 +944,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(actual_install_root, install_root)
         staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
         self.assertFalse(staged_root.exists())
-        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch)
+        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch.resolve())
         self.assertEqual(installed_supervisor.read_text(encoding="utf-8"), previous_wrapper)
         dependency = subprocess.run(
             [str(installed_supervisor), "--dependency-version"],
@@ -1052,7 +1052,7 @@ class InstallerContractTests(unittest.TestCase):
         staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
         self.assertFalse(staged_root.exists())
         self.assertTrue(installed_clawpatch.is_symlink())
-        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch)
+        self.assertEqual(installed_clawpatch.resolve(), previous_clawpatch.resolve())
         self.assertEqual(
             previous_clawpatch.read_text(encoding="utf-8"),
             previous_clawpatch_content,
@@ -1167,7 +1167,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertEqual(len(retained_backups), 1)
         retained_backup = retained_backups[0]
         self.assertTrue(retained_backup.is_symlink())
-        self.assertEqual(retained_backup.resolve(), previous_clawpatch)
+        self.assertEqual(retained_backup.resolve(), previous_clawpatch.resolve())
         self.assertIn(str(retained_backup), result.stderr)
         self.assertIn("Rollback failed", result.stderr)
 
@@ -1276,7 +1276,7 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 26)
         self.assertEqual(actual_install_root, install_root)
-        self.assertEqual(installed_command.resolve(), previous_supervisor)
+        self.assertEqual(installed_command.resolve(), previous_supervisor.resolve())
         previous_result = subprocess.run(
             [str(installed_command), "--version"],
             capture_output=True,
@@ -1501,7 +1501,7 @@ class InstallerContractTests(unittest.TestCase):
         self.assertIn("& $wrapper doctor --repo", windows)
         self.assertNotIn("& $supervisor doctor --repo", windows)
 
-    def test_repository_has_only_packaging_smoke_workflow(self) -> None:
+    def test_repository_has_no_hosted_workflow_files(self) -> None:
         workflow_root = REPOSITORY_ROOT / ".github" / "workflows"
 
         workflow_files = sorted(
@@ -1509,7 +1509,7 @@ class InstallerContractTests(unittest.TestCase):
             for path in workflow_root.rglob("*")
             if path.is_file()
         )
-        self.assertEqual(workflow_files, [Path("packaging-smoke.yml")])
+        self.assertEqual(workflow_files, [])
 
     def test_windows_installer_checks_compatibility_before_install_root_mutation(self) -> None:
         windows = (REPOSITORY_ROOT / "scripts" / "install.ps1").read_text(encoding="utf-8")
@@ -1553,9 +1553,10 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertNotEqual(result.returncode, 0)
+        normalized_stderr = " ".join(result.stderr.split())
         self.assertIn(
             f"expected clawpatch-supervise {__version__}, found clawpatch-supervise 0.1.20",
-            result.stderr,
+            normalized_stderr,
         )
         self.assertFalse(
             (install_root.parent / "installed-bin" / "clawpatch-supervise.cmd").exists()
