@@ -418,6 +418,11 @@ def _remove_exact_owned_run_locked(candidate: Path, cleanup_root: Path) -> None:
                     f"{quarantine_error}"
                 )
         raise
+    finally:
+        try:
+            quarantine.rmdir()
+        except OSError:
+            pass
 
 
 @contextmanager
