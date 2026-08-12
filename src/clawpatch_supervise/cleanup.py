@@ -152,6 +152,87 @@ def _windows_pid_is_running(pid: int) -> bool:
     return ctypes.get_last_error() != error_invalid_parameter
 
 
+def _windows_process_creation_identity(pid: int) -> str | None:
+    try:
+        import ctypes
+        from ctypes import wintypes
+    except ImportError:
+        return None
+
+    process_query_limited_information = 0x1000
+    try:
+        kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    except (AttributeError, OSError):
+        return None
+    open_process = kernel32.OpenProcess
+    open_process.argtypes = (wintypes.DWORD, wintypes.BOOL, wintypes.DWORD)
+    open_process.restype = wintypes.HANDLE
+    close_handle = kernel32.CloseHandle
+    close_handle.argtypes = (wintypes.HANDLE,)
+    close_handle.restype = wintypes.BOOL
+    get_process_times = kernel32.GetProcessTimes
+    filetime_pointer = ctypes.POINTER(wintypes.FILETIME)
+    get_process_times.argtypes = (
+        wintypes.HANDLE,
+        filetime_pointer,
+        filetime_pointer,
+        filetime_pointer,
+        filetime_pointer,
+    )
+    get_process_times.restype = wintypes.BOOL
+    try:
+        handle = open_process(process_query_limited_information, False, pid)
+    except (ctypes.ArgumentError, OverflowError, TypeError, ValueError):
+        return None
+    if not handle:
+        return None
+    creation = wintypes.FILETIME()
+    exit_time = wintypes.FILETIME()
+    kernel_time = wintypes.FILETIME()
+    user_time = wintypes.FILETIME()
+    try:
+        if not get_process_times(
+            handle,
+            ctypes.byref(creation),
+            ctypes.byref(exit_time),
+            ctypes.byref(kernel_time),
+            ctypes.byref(user_time),
+        ):
+            return None
+        value = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+        return f"windows-filetime:{value}"
+    finally:
+        close_handle(handle)
+
+
+def _process_creation_identity(pid: int) -> str | None:
+    if not _pid_is_platform_safe(pid):
+        return None
+    if os.name == "nt":
+        return _windows_process_creation_identity(pid)
+    try:
+        boot_identity = (_PROC_ROOT / "sys/kernel/random/boot_id").read_text(
+            encoding="ascii"
+        ).strip()
+        process_stat = (_PROC_ROOT / str(pid) / "stat").read_text(encoding="ascii")
+    except (OSError, UnicodeError):
+        return None
+    opening = process_stat.find("(")
+    closing = process_stat.rfind(")")
+    if (
+        not boot_identity
+        or any(character.isspace() for character in boot_identity)
+        or opening <= 0
+        or closing <= opening
+        or process_stat[:opening].strip() != str(pid)
+    ):
+        return None
+    fields = process_stat[closing + 1 :].split()
+    if len(fields) <= 19 or not fields[19].isdigit():
+        return None
+    return f"linux-proc:{boot_identity}:{fields[19]}"
+
+
 def _pid_is_running(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -325,6 +406,7 @@ def cleanup_owned_runs(
             continue
         pid = marker.get("pid")
         created = marker.get("created_unix")
+        process_identity = marker.get("process_identity")
         if not _pid_is_platform_safe(pid):
             entries.append(CleanupEntry(candidate, "UNSAFE", size))
             continue
@@ -339,7 +421,18 @@ def cleanup_owned_runs(
         if not math.isfinite(created_value) or created_value < 0:
             entries.append(CleanupEntry(candidate, "UNSAFE", size))
             continue
-        if _pid_is_running(pid):
+        if "process_identity" in marker and (
+            not isinstance(process_identity, str) or not process_identity
+        ):
+            entries.append(CleanupEntry(candidate, "UNSAFE", size))
+            continue
+        if process_identity is not None:
+            owner_is_active = _process_creation_identity(pid) == process_identity
+        else:
+            # Legacy markers predate process-instance identities. Preserve their
+            # existing fail-closed numeric PID behavior for compatibility.
+            owner_is_active = _pid_is_running(pid)
+        if owner_is_active:
             entries.append(CleanupEntry(candidate, "ACTIVE", size))
             continue
         live_reference = _path_has_live_reference(candidate)
@@ -626,15 +719,18 @@ def owned_run_directory(
     nonce = secrets.token_hex(12)
     candidate = cleanup_root / f"run-{nonce}"
     candidate.mkdir(mode=0o700)
+    pid = os.getpid()
     marker = {
         "schema": OWNERSHIP_SCHEMA,
         "owner": "clawpatch-supervise",
         "kind": "run-temp",
         "directory": candidate.name,
-        "pid": os.getpid(),
+        "pid": pid,
         "created_unix": created,
         "repo": str(repo.expanduser().resolve()),
     }
+    if (process_identity := _process_creation_identity(pid)) is not None:
+        marker["process_identity"] = process_identity
     marker_path = candidate / OWNERSHIP_MARKER
     marker_path.write_text(json.dumps(marker, sort_keys=True) + "\n", encoding="utf-8")
     temporary_root = candidate / "tmp"

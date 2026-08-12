@@ -25,20 +25,27 @@ from clawpatch_supervise.errors import SafetyError
 
 class CleanupCommandTests(unittest.TestCase):
     @staticmethod
-    def _mark(candidate: Path, *, pid: int, created_unix: int | float) -> None:
+    def _mark(
+        candidate: Path,
+        *,
+        pid: int,
+        created_unix: int | float,
+        process_identity: str | None = None,
+    ) -> None:
         candidate.mkdir(mode=0o700, parents=True)
         candidate.parent.chmod(0o700)
+        marker = {
+            "schema": 1,
+            "owner": "clawpatch-supervise",
+            "kind": "run-temp",
+            "directory": candidate.name,
+            "pid": pid,
+            "created_unix": created_unix,
+        }
+        if process_identity is not None:
+            marker["process_identity"] = process_identity
         (candidate / ".clawpatch-supervise-owned.json").write_text(
-            json.dumps(
-                {
-                    "schema": 1,
-                    "owner": "clawpatch-supervise",
-                    "kind": "run-temp",
-                    "directory": candidate.name,
-                    "pid": pid,
-                    "created_unix": created_unix,
-                }
-            ),
+            json.dumps(marker),
             encoding="utf-8",
         )
 
@@ -118,6 +125,73 @@ class CleanupCommandTests(unittest.TestCase):
             self.assertIn("RECENT", output.getvalue())
             self.assertIn("UNOWNED", output.getvalue())
             self.assertIn("removed=1", output.getvalue())
+
+    def test_cleanup_removes_stale_run_when_pid_was_reused(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-reused-pid"
+            self._mark(
+                candidate,
+                pid=42,
+                created_unix=0,
+                process_identity="original-process",
+            )
+
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup._process_creation_identity",
+                    return_value="replacement-process",
+                    create=True,
+                ),
+                patch(
+                    "clawpatch_supervise.cleanup._pid_is_running",
+                    return_value=True,
+                ),
+                patch(
+                    "clawpatch_supervise.cleanup._path_has_live_reference",
+                    return_value=False,
+                ),
+            ):
+                report = cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+            self.assertFalse(candidate.exists())
+            self.assertEqual([entry.status for entry in report.entries], ["STALE"])
+            self.assertEqual(report.removed, 1)
+
+    def test_cleanup_preserves_run_when_process_identity_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            cleanup_root = Path(temp) / "clawpatch-supervise-runs"
+            candidate = cleanup_root / "run-matching-process"
+            self._mark(
+                candidate,
+                pid=42,
+                created_unix=0,
+                process_identity="same-process",
+            )
+
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup._process_creation_identity",
+                    return_value="same-process",
+                ),
+                patch(
+                    "clawpatch_supervise.cleanup._path_has_live_reference",
+                    side_effect=AssertionError("matching owner must skip reference probing"),
+                ),
+            ):
+                report = cleanup_owned_runs(
+                    apply=True,
+                    root=cleanup_root,
+                    stale_after_seconds=0,
+                )
+
+            self.assertTrue(candidate.is_dir())
+            self.assertEqual([entry.status for entry in report.entries], ["ACTIVE"])
+            self.assertEqual(report.removed, 0)
 
     @unittest.skipUnless(os.name == "posix", "POSIX PID probe behavior")
     def test_cleanup_preserves_run_when_pid_probe_is_interrupted(self) -> None:
@@ -395,9 +469,9 @@ class CleanupCommandTests(unittest.TestCase):
             def fake_validation_environment(repo: Path, *, progress, temporary_root: Path):
                 observed["repo"] = repo
                 observed["temporary_root"] = temporary_root
-                observed["marker_exists"] = (
-                    temporary_root.parent / ".clawpatch-supervise-owned.json"
-                ).is_file()
+                marker_path = temporary_root.parent / ".clawpatch-supervise-owned.json"
+                observed["marker_exists"] = marker_path.is_file()
+                observed["marker"] = json.loads(marker_path.read_text(encoding="utf-8"))
                 yield {"TEST_ONLY": "yes"}
 
             def fake_sweep(_repo: Path, **kwargs):
@@ -409,7 +483,13 @@ class CleanupCommandTests(unittest.TestCase):
                     "git_head": "abc123",
                 }
 
-            with redirect_stdout(StringIO()):
+            with (
+                patch(
+                    "clawpatch_supervise.cleanup._process_creation_identity",
+                    return_value="current-process",
+                ),
+                redirect_stdout(StringIO()),
+            ):
                 code = main(
                     ["--repo", temp, "--fresh"],
                     cleanup_root=cleanup_root,
@@ -421,6 +501,7 @@ class CleanupCommandTests(unittest.TestCase):
 
             self.assertEqual(code, 0)
             self.assertTrue(observed["marker_exists"])
+            self.assertEqual(observed["marker"]["process_identity"], "current-process")
             temporary_root = observed["temporary_root"]
             self.assertIsInstance(temporary_root, Path)
             child_env = observed["child_env"]
