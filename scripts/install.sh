@@ -207,7 +207,14 @@ PY
   managed_clawpatch=true
 fi
 clawpatch_dir="${clawpatch_command%/*}"
-runtime_path="$node_dir:$clawpatch_dir:$bin_dir:$PATH"
+if [[ "$managed_clawpatch" == true ]]; then
+  runtime_first_dir="$clawpatch_dir"
+  runtime_second_dir="$node_dir"
+else
+  runtime_first_dir="$node_dir"
+  runtime_second_dir="$clawpatch_dir"
+fi
+runtime_path="$runtime_first_dir:$runtime_second_dir:$bin_dir:$PATH"
 if ! PATH="$runtime_path" compatible_clawpatch "$clawpatch_command"; then
   echo "ClawPatch $minimum_clawpatch_version or newer is required." >&2
   exit 2
@@ -308,20 +315,20 @@ if [[ "$managed_clawpatch" == true && -d "$clawpatch_destination" ]]; then
   exit 2
 fi
 pending_supervisor_link="$(mktemp "$bin_dir/.clawpatch-supervise.XXXXXX")"
-"$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$node_dir" "$bin_dir" "$clawpatch_dir" <<'PY'
+"$python_command" - "$pending_supervisor_link" "$staging_venv/bin/clawpatch-supervise" "$runtime_first_dir" "$runtime_second_dir" "$bin_dir" <<'PY'
 import os
 import shlex
 import sys
 from pathlib import Path
 
-destination, supervisor, node_dir, bin_dir, clawpatch_dir = sys.argv[1:]
+destination, supervisor, runtime_first_dir, runtime_second_dir, bin_dir = sys.argv[1:]
 content = "\n".join(
     (
         "#!/bin/sh",
         "export PYTHONUTF8=1",
         "export PYTHONIOENCODING=utf-8",
         "export NODE_DISABLE_COMPILE_CACHE=1",
-        f"export PATH={shlex.quote(node_dir)}:{shlex.quote(clawpatch_dir)}:{shlex.quote(bin_dir)}:\"$PATH\"",
+        f"export PATH={shlex.quote(runtime_first_dir)}:{shlex.quote(runtime_second_dir)}:{shlex.quote(bin_dir)}:\"$PATH\"",
         f"exec {shlex.quote(supervisor)} \"$@\"",
         "",
     )

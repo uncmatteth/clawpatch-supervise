@@ -84,6 +84,7 @@ class InstallerContractTests(unittest.TestCase):
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
+        doctor_clawpatch_log = root / "doctor-clawpatch.log"
         trusted_clawpatch_artifact = "verified clawpatch package"
         test_integrity = "sha512-" + base64.b64encode(
             hashlib.sha512(trusted_clawpatch_artifact.encode("ascii")).digest()
@@ -112,8 +113,11 @@ class InstallerContractTests(unittest.TestCase):
             '    [ "$CLAWPATCH_TEST_SUPERVISOR_VERSION_FAILS" != "true" ] || exit 26\n'
             '    printf "clawpatch-supervise %s\\n" "$CLAWPATCH_TEST_SUPERVISOR_VERSION" ;;\n'
             '  clawpatch-supervise:doctor)\n'
-            '    command -v clawpatch >/dev/null 2>&1 || exit 27\n'
-            '    clawpatch --version >/dev/null 2>&1 || exit 28 ;;\n'
+            '    clawpatch_path="$(command -v clawpatch)" || exit 27\n'
+            '    if [ -n "$CLAWPATCH_TEST_DOCTOR_CLAWPATCH_LOG" ]; then\n'
+            '      printf "%s\\n" "$clawpatch_path" >> "$CLAWPATCH_TEST_DOCTOR_CLAWPATCH_LOG"\n'
+            '    fi\n'
+            '    "$clawpatch_path" --version >/dev/null 2>&1 || exit 28 ;;\n'
             "esac\n"
             "exit 0\n",
         )
@@ -251,6 +255,7 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_CLAWPATCH_MOVE_FAILS": str(
                     clawpatch_move_fails
                 ).lower(),
+                "CLAWPATCH_TEST_DOCTOR_CLAWPATCH_LOG": str(doctor_clawpatch_log),
                 "CLAWPATCH_TEST_LOG": str(invocation_log),
                 "CLAWPATCH_TEST_NPM_ARTIFACT": trusted_clawpatch_artifact,
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
@@ -759,13 +764,37 @@ class InstallerContractTests(unittest.TestCase):
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_doctor_sees_installer_managed_clawpatch(self) -> None:
         result, invocations, install_root = self._run_linux_installer(
-            clawpatch_present=False,
+            clawpatch_present=True,
             clawhub_present=False,
+            clawpatch_version="0.7.1",
             verify_repo=True,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self._assert_staged_clawpatch_install(invocations, install_root)
+        staged_root = self._assert_staged_clawpatch_install(invocations, install_root)
+        managed_clawpatch = staged_root / "node_modules/.bin/clawpatch"
+        resolution_log = install_root.parent / "doctor-clawpatch.log"
+        self.assertEqual(
+            resolution_log.read_text(encoding="utf-8").splitlines(),
+            [str(managed_clawpatch)],
+        )
+
+        wrapper = install_root.parent / "installed-bin" / "clawpatch-supervise"
+        installed_result = subprocess.run(
+            [str(wrapper), "doctor"],
+            capture_output=True,
+            check=False,
+            env={
+                **os.environ,
+                "CLAWPATCH_TEST_DOCTOR_CLAWPATCH_LOG": str(resolution_log),
+            },
+            text=True,
+        )
+        self.assertEqual(installed_result.returncode, 0, installed_result.stderr)
+        self.assertEqual(
+            resolution_log.read_text(encoding="utf-8").splitlines(),
+            [str(managed_clawpatch), str(managed_clawpatch)],
+        )
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_requires_npm_when_clawpatch_is_missing(self) -> None:
