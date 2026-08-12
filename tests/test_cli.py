@@ -226,6 +226,72 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
 
+    def test_adopt_dirty_is_explicitly_forwarded(self):
+        calls = []
+
+        def fake_sweep(_repo: Path, **kwargs):
+            calls.append(kwargs)
+            return {"ok": True, "finding_count": 0, "open_findings": 0, "git_head": "abc"}
+
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(StringIO()),
+        ):
+            code = main(
+                ["--repo", ".", "--adopt-dirty"],
+                run_sweep=fake_sweep,
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 0)
+        self.assertTrue(calls[0]["adopt_dirty"])
+
+    def test_retry_budget_exhaustion_returns_for_service_manager(self):
+        def busy(_repo: Path):
+            raise RepositoryBusyError("another owner is active")
+
+        output = StringIO()
+        with redirect_stdout(output):
+            code = main(
+                ["--repo", ".", "--fresh", "--max-retries", "0"],
+                run_sweep=lambda _repo, **_kwargs: self.fail("sweep must not start"),
+                ensure_repository_idle=busy,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 75)
+        self.assertIn("FINITE SUPERVISOR BUDGET EXHAUSTED", output.getvalue())
+
+    def test_uncertain_result_never_prints_complete_or_exits_zero(self):
+        output = StringIO()
+        with (
+            patch(
+                "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
+                return_value=False,
+            ),
+            redirect_stdout(output),
+        ):
+            code = main(
+                ["--repo", "."],
+                run_sweep=lambda _repo, **_kwargs: {
+                    "ok": True,
+                    "finding_count": 1,
+                    "open_findings": 0,
+                    "uncertain_findings": 1,
+                    "git_head": "abc",
+                },
+                ensure_repository_idle=lambda _repo: None,
+                heartbeat_seconds=0,
+            )
+
+        self.assertEqual(code, 2)
+        self.assertIn("UNFINISHED", output.getvalue())
+        self.assertNotIn("COMPLETE", output.getvalue())
+
     def test_distribution_version_is_derived_from_package_version(self):
         manifest = tomllib.loads(
             (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
@@ -748,10 +814,9 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         )
         self.assertEqual(output.getvalue().count("PROCESS PREFLIGHT"), 1)
 
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
     def test_existing_state_queries_receive_preflight_environment_overrides(
-        self, _state_exists, _source_paths
+        self, _state_exists
     ):
         preflight_env = {
             "PATH": "/preflight/clawpatch/bin",
@@ -1084,9 +1149,9 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertNotIn("SWEEP FAILED", rendered)
         self.assertNotIn("QUEUE ISN'T CLEAN", rendered)
         self.assertEqual(calls[0][1]["branch"], "current")
-        self.assertEqual(calls[0][1]["push_mode"], "each")
+        self.assertEqual(calls[0][1]["push_mode"], "none")
         self.assertEqual(calls[0][1]["integration_mode"], "external")
-        self.assertTrue(calls[0][1]["advance_uncertain"])
+        self.assertFalse(calls[0][1]["advance_uncertain"])
         self.assertTrue(calls[0][1]["fresh"])
 
     def test_plain_command_recovers_checkpointed_stop_and_restarts_fresh(self):
@@ -1114,7 +1179,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             )
             raise SafetyError("one fix failed; no automatic continuation")
 
-        def fake_recovery(_repo: Path, *, reason: str):
+        def fake_recovery(_repo: Path, *, reason: str, adopt_dirty: bool = False):
+            self.assertFalse(adopt_dirty)
             recoveries.append(reason)
             return {
                 "finding_id": "fnd_one",
@@ -1167,7 +1233,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             code = main(
                 ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=fake_sweep,
-                recover_interrupted_state=lambda _repo, *, reason: {
+                recover_interrupted_state=lambda _repo, *, reason, adopt_dirty=False: {
                     "finding_id": "fnd_one",
                     "paths": [],
                     "baseline_commit": "",
@@ -1210,8 +1276,8 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         rendered = output.getvalue()
         self.assertEqual(code, 2)
-        self.assertIn("STOPPED: fixed=1 open=1", rendered)
-        self.assertIn("SWEEP FAILED. QUEUE ISN'T CLEAN", rendered)
+        self.assertIn("UNFINISHED: processed=1 open=1 uncertain=0", rendered)
+        self.assertIn("success output is forbidden", rendered)
         self.assertIn("open=1", rendered)
         self.assertNotIn("COMPLETE", rendered)
         self.assertNotIn("QUEUE'S CLEAN", rendered)
@@ -1327,6 +1393,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             code = main(
                 ["--repo", "."],
                 run_sweep=fake_sweep,
+                recover_interrupted_state=lambda _repo, **_kwargs: None,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
             )
@@ -1366,7 +1433,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             code = main(
                 ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=fake_sweep,
-                recover_interrupted_state=lambda _repo, *, reason: (
+                recover_interrupted_state=lambda _repo, *, reason, adopt_dirty=False: (
                     recoveries.append(reason)
                     or {
                         "finding_id": "fnd_one",
@@ -1433,7 +1500,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             code = main(
                 ["--repo", ".", "--retry-seconds", "0.001"],
                 run_sweep=fake_sweep,
-                recover_interrupted_state=lambda _repo, *, reason: {
+                recover_interrupted_state=lambda _repo, *, reason, adopt_dirty=False: {
                     "finding_id": "unknown",
                     "paths": [],
                     "baseline_commit": "",
@@ -1503,14 +1570,13 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["fresh"])
         self.assertEqual(calls[0][1]["child_timeout_seconds"], 900)
 
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
     @patch(
         "clawpatch_supervise.clawpatch_external._existing_queue_is_clean",
         side_effect=AssertionError("explicit --fresh must reset instead of inspecting queue contents"),
     )
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
     def test_explicit_fresh_resets_an_existing_open_queue(
-        self, _state_exists, _queue_is_clean, _source_paths
+        self, _state_exists, _queue_is_clean
     ):
         calls = []
 
@@ -1534,11 +1600,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(calls[0][1]["fresh"])
 
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
     def test_explicit_fresh_passes_retained_source_to_baseline_aware_sweep(
-        self, _state_exists, _queue_is_clean, _source_paths
+        self, _state_exists, _queue_is_clean
     ):
         calls = []
 
@@ -1558,11 +1623,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["fresh"])
         self.assertFalse(calls[0][1]["wait_on_preserved_source"])
 
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
     def test_explicit_fresh_resets_a_proven_clean_queue(
-        self, _state_exists, _queue_is_clean, _source_paths
+        self, _state_exists, _queue_is_clean
     ):
         calls = []
 
@@ -1626,11 +1690,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertFalse(calls[0][1]["fresh"])
 
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=[])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
     def test_default_run_starts_fresh_without_prompting_at_a_clean_completed_queue(
-        self, _state_exists, _queue_is_clean, _source
+        self, _state_exists, _queue_is_clean
     ):
         calls = []
 
@@ -1652,11 +1715,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertTrue(calls[0][1]["fresh"])
 
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._existing_queue_is_clean", return_value=True)
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=True)
     def test_clean_queue_with_dirty_source_starts_baseline_aware_fresh_review(
-        self, _state_exists, _queue_is_clean, _source
+        self, _state_exists, _queue_is_clean
     ):
         calls = []
 
@@ -1679,10 +1741,9 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertTrue(calls[0][1]["fresh"])
         self.assertFalse(calls[0][1]["wait_on_preserved_source"])
 
-    @patch("clawpatch_supervise.clawpatch_external._source_paths", return_value=["app.py"])
     @patch("clawpatch_supervise.clawpatch_external._clawpatch_state_exists", return_value=False)
     def test_default_run_without_queue_uses_baseline_aware_fresh_review(
-        self, _state_exists, _source
+        self, _state_exists
     ):
         calls = []
 

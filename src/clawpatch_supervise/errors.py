@@ -14,6 +14,10 @@ class RepositoryBusyError(SafetyError):
     """Another verified process currently owns the repository workflow."""
 
 
+class RuntimeBudgetExceeded(SafetyError):
+    """The finite interactive runtime or retry budget was exhausted."""
+
+
 class StateTransitionError(ClawpatchSuperviseError):
     """An invalid state transition was attempted."""
 

@@ -20,7 +20,6 @@ from .clawpatch_release import (
     _clawpatch_control_env_overrides,
     _parse_json_output,
     _release_clawpatch_env,
-    _source_paths,
     external_state_root,
     recover_external_interrupted_state,
     release_sweep,
@@ -28,8 +27,10 @@ from .clawpatch_release import (
     runtime_doctor,
 )
 from .cleanup import cleanup_owned_runs, owned_run_directory
-from .errors import RepositoryBusyError, SafetyError
+from .errors import RepositoryBusyError, RuntimeBudgetExceeded, SafetyError
+from .queue import QueueResult
 from .runner import CommandRunner
+from .runtime_budget import RuntimeBudget
 from .util import redact_text
 from .validation_services import provision_disposable_validation_environment
 
@@ -476,7 +477,12 @@ def main(
         help="print this repository's durable standalone state directory and exit",
     )
     parser.add_argument("--branch", default="current")
-    parser.add_argument("--push", choices=("none", "each", "final"), default="each")
+    parser.add_argument("--push", choices=("none", "each", "final"), default="none")
+    parser.add_argument(
+        "--adopt-dirty",
+        action="store_true",
+        help="explicitly commit all pre-existing dirty source as one input baseline",
+    )
     parser.add_argument("--publish-clawpatch-state", action="store_true")
     parser.add_argument("--trusted-host-codex-sandbox-bypass", action="store_true")
     start_mode = parser.add_mutually_exclusive_group()
@@ -504,11 +510,27 @@ def main(
         default=30,
         help="seconds to wait before automatically resuming a transient stop",
     )
+    parser.add_argument(
+        "--max-runtime-minutes",
+        type=float,
+        default=120,
+        help="finite total runtime for this invocation; default 120",
+    )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=20,
+        help="finite recoverable retry count for this invocation; default 20",
+    )
     args = parser.parse_args(raw_argv)
     if args.timeout_minutes < 1:
         parser.error("--timeout-minutes must be at least 1")
     if not math.isfinite(args.retry_seconds) or args.retry_seconds <= 0:
         parser.error("--retry-seconds must be a finite positive number")
+    if not math.isfinite(args.max_runtime_minutes) or args.max_runtime_minutes <= 0:
+        parser.error("--max-runtime-minutes must be a finite positive number")
+    if args.max_retries < 0:
+        parser.error("--max-retries must be a non-negative integer")
     try:
         repo = Path(args.repo).resolve(strict=not args.print_state_path)
     except (OSError, RuntimeError) as exc:
@@ -521,6 +543,10 @@ def main(
         print(_terminal_safe(external_state_root(repo)))
         return 0
     watchdog_seconds = args.timeout_minutes * 60
+    budget = RuntimeBudget.start(
+        minutes=args.max_runtime_minutes,
+        max_retries=args.max_retries,
+    )
 
     state: dict[str, Any] = {
         "phase": "starting",
@@ -545,7 +571,11 @@ def main(
             display(event)
 
     def recover_after_failure(exc: SafetyError) -> dict[str, Any] | None:
-        recovery = recover_interrupted_state(repo, reason=str(exc))
+        recovery = recover_interrupted_state(
+            repo,
+            reason=str(exc),
+            adopt_dirty=args.adopt_dirty,
+        )
         if recovery is None:
             return None
         paths = recovery.get("paths", [])
@@ -565,6 +595,11 @@ def main(
             flush=True,
         )
         return recovery
+
+    def wait_for_retry(reason: str) -> int:
+        attempt = budget.consume_retry(reason)
+        budget.sleep(args.retry_seconds)
+        return attempt
 
     def heartbeat() -> None:
         wait = heartbeat_wait or threading.Event.wait
@@ -586,7 +621,8 @@ def main(
         f"ClawPatch external supervisor: repo={_terminal_safe(repo)} "
         f"branch={_terminal_safe(args.branch)} push={args.push} "
         f"fresh={'auto' if args.fresh is None else args.fresh} "
-        f"timeout={args.timeout_minutes}m retry={args.retry_seconds:g}s",
+        f"child-timeout={args.timeout_minutes}m total-runtime={args.max_runtime_minutes:g}m "
+        f"max-retries={args.max_retries} retry-wait={args.retry_seconds:g}s",
         flush=True,
     )
     try:
@@ -611,7 +647,7 @@ def main(
                     f"checking again in {args.retry_seconds:g}s.\n{_terminal_safe_error(exc)}",
                     flush=True,
                 )
-                time.sleep(args.retry_seconds)
+                wait_for_retry(str(exc))
         resolved_fresh = _resolve_fresh_mode(
             repo,
             args.fresh,
@@ -660,12 +696,14 @@ def main(
                         progress=display_after_external_preflight,
                         integration_mode="external",
                         child_env_overrides=child_env_overrides,
-                        advance_uncertain=True,
+                        advance_uncertain=False,
                         wait_on_preserved_source=False,
+                        adopt_dirty=args.adopt_dirty,
+                        deadline_monotonic=budget.deadline,
                     )
                     break
                 except ClawpatchStop as exc:
-                    retry_attempt += 1
+                    retry_attempt = budget.consume_retry(str(exc))
                     if exc.repair_action is RepairAction.STOP_TRANSIENT:
                         print(
                             "\nTRANSIENT: RETRYING AUTOMATICALLY from the exact durable "
@@ -678,10 +716,10 @@ def main(
                         if recover_after_failure(exc) is None:
                             raise
                         resolved_fresh = True
-                        time.sleep(args.retry_seconds)
+                        budget.sleep(args.retry_seconds)
                         continue
                 except ClawpatchCommandFailure as exc:
-                    retry_attempt += 1
+                    retry_attempt = budget.consume_retry(str(exc))
                     if exc.failure.transient:
                         print(
                             "\nTRANSIENT: RETRYING AUTOMATICALLY from the source-clean "
@@ -694,15 +732,15 @@ def main(
                         if recover_after_failure(exc) is None:
                             raise
                         resolved_fresh = True
-                        time.sleep(args.retry_seconds)
+                        budget.sleep(args.retry_seconds)
                         continue
                 except RepositoryBusyError as exc:
-                    retry_attempt += 1
+                    retry_attempt = budget.consume_retry(str(exc))
                     busy_reason = str(exc)
                     active_run = "already active" in busy_reason.casefold()
                     if not active_run and recover_after_failure(exc) is not None:
                         resolved_fresh = True
-                        time.sleep(args.retry_seconds)
+                        budget.sleep(args.retry_seconds)
                         continue
                     heading = (
                         "WAITING FOR THIS REPOSITORY'S ACTIVE RUN"
@@ -718,12 +756,20 @@ def main(
                 except SafetyError as exc:
                     if recover_after_failure(exc) is None:
                         raise
-                    retry_attempt += 1
+                    retry_attempt = budget.consume_retry(str(exc))
                     resolved_fresh = True
-                    time.sleep(args.retry_seconds)
+                    budget.sleep(args.retry_seconds)
                     continue
                 resolved_fresh = False
-                time.sleep(args.retry_seconds)
+                budget.sleep(args.retry_seconds)
+    except RuntimeBudgetExceeded as exc:
+        print("\n⏱️ STOPPED: FINITE SUPERVISOR BUDGET EXHAUSTED.", flush=True)
+        print(f"\nTRANSIENT: {_terminal_safe_error(exc)}", flush=True)
+        print(
+            "A service manager may start the same command again; the durable checkpoint is preserved.",
+            flush=True,
+        )
+        return 75
     except ClawpatchStop as exc:
         print("\n🛑💥🤬 FUCK. SUPERVISOR STOPPED SAFELY.", flush=True)
         print(f"\nSTOPPED: {_terminal_safe_error(exc)}", flush=True)
@@ -761,23 +807,25 @@ def main(
         if thread is not None:
             thread.join(timeout=1)
 
-    if not report.get("ok"):
+    queue_result = QueueResult.from_report(report)
+    if not report.get("ok") or not queue_result.complete:
         print(
-            "\nSTOPPED: "
-            f"fixed={report.get('finding_count', 0)} "
-            f"open={report.get('open_findings', '?')} "
+            "\nUNFINISHED: "
+            f"processed={queue_result.processed} "
+            f"open={queue_result.open_findings} "
+            f"uncertain={queue_result.uncertain_findings} "
             f"fresh_review_generations={len(report.get('review_generations', []))} "
             f"head={report.get('git_head', '')} "
-            "— 🛑💥🤬 SWEEP FAILED. QUEUE ISN'T CLEAN.",
+            "— queue proof is not clean; success output is forbidden.",
             flush=True,
         )
         return 2
 
     print(
         "\nCOMPLETE: "
-        f"processed={report.get('finding_count', 0)} "
-        f"open={report.get('open_findings', '?')} "
-        f"uncertain={report.get('uncertain_findings', 0)} "
+        f"processed={queue_result.processed} "
+        f"open={queue_result.open_findings} "
+        f"uncertain={queue_result.uncertain_findings} "
         f"fresh_review_generations={len(report.get('review_generations', []))} "
         f"head={report.get('git_head', '')} "
         "— 🏁🔥🤘 FUCK YES. EVERY OPEN FINDING WAS PROCESSED.",

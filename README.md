@@ -83,7 +83,6 @@ Linux or macOS:
 clawpatch-supervise \
   --repo /absolute/path/to/your/repository \
   --branch current \
-  --push each \
   --timeout-minutes 15
 ```
 
@@ -93,11 +92,10 @@ Windows PowerShell:
 clawpatch-supervise `
   --repo "C:\absolute\path\to\your\repository" `
   --branch current `
-  --push each `
   --timeout-minutes 15
 ```
 
-From a target repository, bare `clawpatch-supervise` uses the current branch, pushes each verified repair, and processes the queue without a start-mode prompt. It resumes any exact stopped checkpoint automatically, preserves an open queue, revalidates every retained uncertain finding, and starts a fresh full review automatically when the existing queue is complete. If `.clawpatch` exists without its required `project.json`, automatic mode stops and preserves the incomplete state; only explicit `--fresh` permits discarding it. Interrupted progress recorded for a different branch is retired automatically, without switching branches or changing source, so stale release-sweep state cannot block supervision on the current branch. When current source cannot be safely resumed from a stopped checkpoint, the external supervisor commits the complete visible tree as an ordinary input-baseline commit on the active branch, records a local baseline ref and receipt, retires the stale wrapper, and reviews that exact current content. Ownerless pre-existing changes use the same baseline contract. Modified, deleted, and untracked files keep their visible content; they are not hidden or restored to an older `HEAD`. Clean divergent local and remote histories are merged automatically with hooks and signing disabled. If an input baseline genuinely conflicts with the remote branch, the baseline remains current and supervision stops for that real Git conflict instead of discarding either side. Another active run also makes the command wait, and transient provider, refusal, quota, or timeout failures retry from durable state every 30 seconds until they succeed or the operator interrupts the command. Use `--push none` to retain verified baseline and repair commits locally. Explicit `--fresh` first commits ownerless current source as the input baseline, then discards the existing ClawPatch queue and rebuilds it while preserving committed ClawPatch configuration. `--resume-stopped` remains available only as a compatibility override that forbids an automatic fresh start.
+From a target repository, bare `clawpatch-supervise` is the whole workflow: it uses the current branch, keeps commits local (`--push none`), resumes an exact stopped checkpoint, processes one ClawPatch-owned finding at a time, and runs fresh review generations until the queue is proven clean. You do not paste `map`, `next`, `show`, `fix`, or `revalidate` commands yourself. If `.clawpatch` exists without its required `project.json`, automatic mode stops and preserves the incomplete state; only explicit `--fresh` permits discarding it. Pre-existing dirty source is refused without changing it. Pass `--adopt-dirty` only when you intentionally want the complete visible dirty tree committed as one input baseline before supervision continues. Clean divergent local and remote histories can still be reconciled, but no push occurs unless `--push each` or `--push final` is explicit. The invocation has one finite total runtime and retry budget (defaults: 120 minutes and 20 retries); durable checkpoints let systemd or Task Scheduler start a new process when persistence is desired. `--resume-stopped` remains a compatibility override that forbids an automatic fresh start.
 
 When divergent-history recovery must align to the remote tree, the supervisor keeps a private `.clawpatch` snapshot outside the worktree, verifies a staged restore before renaming it into place, and retains and reports the snapshot path if restoration fails.
 
@@ -171,8 +169,8 @@ The supervisor provides:
 - complete map/review waves with a decreasing-pending proof;
 - automatic ClawPatch agent mapping when the heuristic mapper reports zero features, so unsupported languages such as Solidity are not falsely declared empty;
 - one-current-finding `next → show → fix → revalidate` ordering;
-- external unattended parity with the proven manual loop: commit/push an applied `uncertain`
-  repair, continue to the next open finding, and report the retained uncertain count at the end;
+- fail-closed uncertain handling: an uncertain finding stays in the same-finding repair loop and
+  can never produce completion proof or exit `0`;
 - exact-path temporary commits for genuine partial progress;
 - same-finding continuation only when ClawPatch produced a new source tree;
 - durable checkpoints outside the repository being repaired;
@@ -180,7 +178,7 @@ The supervisor provides:
 - automatic waiting when another verified run owns the repository;
 - a child-process watchdog that escalates surviving timed-out process groups from graceful
   termination to forced termination and proves the group exited before returning;
-- automatic in-process retry and exact-checkpoint resume for transient provider, refusal, quota, and timeout failures;
+- finite in-process retry and runtime budgets with exact-checkpoint resume across service-manager restarts;
 - one marked run-owned temporary root, automatic stale-run pruning, and explicit cleanup dry-run/apply commands;
 - optional verified `each` or `final` pushes;
 - fresh fixed-point review generations after repairs;
@@ -195,7 +193,7 @@ The supervisor provides:
 |---|---|
 | `fixed` with a verified repair | Create one exact-path repair commit, push if requested, continue. |
 | `open` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
-| `uncertain` from the external unattended command | Commit the exact applied repair, push when requested, continue to the next open finding, and revalidate retained uncertain findings during final closure and every later plain run. If no source repair was applied, retain a stopped checkpoint and do not advance. A still-uncertain result remains labeled uncertain. |
+| `uncertain` from the external unattended command | Preserve the exact repair and re-enter the same finding. Never advance to successful completion while uncertainty remains. |
 | `uncertain` from strict library/Manageroo mode | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
 | `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with new `open` or `uncertain` evidence. |
 | `fix` exits `6` without another source diff | Revalidate the code already present. If ClawPatch now proves it `fixed`, continue without demanding a duplicate edit or empty commit. |
@@ -206,13 +204,13 @@ The supervisor provides:
 | `false-positive` | Restore only the exact supervisor-owned repair paths to the finding's starting tree, retire the checkpoint, continue. |
 | Open or uncertain revalidation with no new source changes, including after a checkpointed repair | Feed the new evidence into up to two more same-finding attempts; never advance the queue or try to save the identical tree again. |
 | Same finding still returns the same tree after bounded recovery | Preserve the checkpoint and stop without losing source. |
-| Transient provider, refusal, quota, or timeout with no source progress | Wait, retry automatically, and resume the exact durable checkpoint or source-clean command without requiring a new invocation. |
-| Dirty source no longer matches a stale stopped checkpoint | Commit the complete current tree as the active input baseline, retain its visible content, record a baseline receipt, retire the stale checkpoint, and continue. |
-| Pre-existing source remains with no checkpoint owner in a bare external run | Commit the complete changed tree as the active input baseline, retain `.clawpatch`, and review the current content. |
+| Transient provider, refusal, quota, or timeout with no source progress | Retry within the total runtime/retry budget, then exit `75` with the durable checkpoint preserved for the service manager. |
+| Dirty source no longer matches a stale stopped checkpoint | Refuse it unchanged unless the operator explicitly supplied `--adopt-dirty`. |
+| Pre-existing source remains with no checkpoint owner in a bare external run | Refuse it unchanged unless `--adopt-dirty` explicitly authorizes one complete input-baseline commit. |
 | Conflicting clean local and remote histories | Preserve local history under a local-only recovery ref, align the active branch to stable origin, restore `.clawpatch`, and continue. |
 | A current input baseline conflicts with the remote branch | Keep the baseline current and stop on the real Git conflict; never replace it with remote source. |
 | Detached, missing, or moving Git state | Exit `2` and leave the evidence for inspection. |
-| External run reaches zero open findings with uncertain findings retained | Write `status: PROCESSED_WITH_UNCERTAIN`, include the exact uncertain count, retain `.clawpatch`, and exit `0` without claiming those findings are fixed. |
+| External run reaches zero open findings with uncertain findings retained | Do not write completion proof, do not print `COMPLETE`, and exit nonzero. |
 | Strict final review proves zero remaining work | Write `status: COMPLETE` proof, retain `.clawpatch` so `clawpatch status` remains verifiable, and exit `0`. |
 
 ## Built for real repositories
@@ -223,16 +221,16 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Checkpoints are exact.** Every stopped repair is bound to its repository, branch, finding, starting commit, owned paths, and source fingerprint.
 - **Restarts continue safely.** A later applied repair is resumed only when its finding, base commit, and complete current source-path set match the checkpoint boundary. If a stale checkpoint names an older finding, the plain external command may rebind it to exactly one newer applied attempt only when the complete dirty path set, preserved attempt base, attempt time, and an independent `clawpatch show` result all agree. Zero or multiple matches wait without adopting or touching the files.
 - **Stale checkpoint wrappers recover into the current tree.** When a stopped checkpoint no longer proves the current source changes, the external command commits every current changed source path as the active input baseline, writes a receipt that records the stale checkpoint boundary, retires only the wrapper, and reviews that exact tree. It does not hide the files or restore older content.
-- **Ownerless source does not create an infinite wait.** If a bare external run finds source changes and no durable checkpoint owns them, it commits the exact complete changed tree as the input baseline, records a local baseline ref and external receipt, leaves `.clawpatch` untouched, and continues. Strict embedded Manageroo calls still reject pre-existing source instead of changing it.
+- **Ownerless source does not create an implicit commit.** If a bare external run finds source changes and no durable checkpoint owns them, it stops unchanged and names `--adopt-dirty`. Only that explicit flag authorizes one complete-tree input baseline and receipt.
 - **Published updates do not strand the next plain run.** When pushing is enabled and the current branch has no source changes, a strictly behind local HEAD is fast-forwarded to the stable live origin commit with local Git hooks disabled. A clean strictly ahead local HEAD is accepted for the authorized push path. Clean divergence is merged when possible; a conflicting merge preserves local history under a recovery ref, follows stable origin, restores the exact existing `.clawpatch` state, and continues. Detached, missing, or moving branches still stop safely.
 - **A rejected push does not invalidate its finished repair.** If a restart finds a `finalized` checkpoint and the current history contains one commit whose complete source-path set exactly matches that checkpoint, the supervisor retires only the checkpoint, keeps the committed repair, and continues to remote reconciliation. Uncommitted source or a path mismatch still prevents automatic recovery.
-- **Supervisor-owned failures recover at one boundary.** The plain external command no longer makes the operator repair its checkpoint or queue by hand. It commits any complete visible source tree as the next input baseline, preserves a malformed checkpoint verbatim in the external recovery directory, retires only active supervisor state, rebuilds the ClawPatch queue, and reviews again. A source-clean broken queue receives one automatic rebuild per Git/error boundary; if the exact same boundary fails again, it is reported as a real external failure instead of looping forever.
+- **Supervisor-owned failures recover at one boundary.** The plain external command repairs source-clean checkpoint and queue state without making the operator paste internal commands. Dirty source is never silently adopted: recovery requires `--adopt-dirty` before making one complete visible-tree input baseline. A source-clean broken queue receives one automatic rebuild per Git/error boundary; repeated failure remains bounded.
 - **Empty stop markers do not strand open findings.** If a stopped checkpoint owns no source, has no temporary commit, and ClawPatch still reports the exact finding open at the same HEAD, the supervisor retires only that empty wrapper. `clawpatch next` must return the same finding before its fix is attempted again.
-- **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor accepts both a retained dangling iteration and an iteration already included in that clean history, then retires only the obsolete recovery wrapper. Unrelated dirty paths do not keep that obsolete wrapper alive; they remain untouched and are handled as independent pre-existing work. The same recovery applies when a source-clean checkpoint owns no paths and has no temporary commit, because there is no repair content to lose. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
+- **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor accepts both a retained dangling iteration and an iteration already included in that clean history, then retires only the obsolete recovery wrapper. Unrelated dirty paths remain untouched and require explicit adoption before a later baseline. The same recovery applies when a source-clean checkpoint owns no paths and has no temporary commit, because there is no repair content to lose. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract must declare an official `postgres@sha256:<64 lowercase hex characters>` image and always receives a newly owned loopback-only database from that exact immutable artifact. The sanitized environment is passed exactly so inherited database credentials and reset guards stay removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
 - **Python provisioning cannot run repository build hooks on the host.** Repositories with target-declared dependencies fail closed while no OS-enforced provisioning sandbox is available. Dependency-free projects receive only wheel-distributed pytest in a sanitized disposable venv; the target project is never installed, and a venv-local path file exposes its source only to the validation interpreter without putting repository paths in the ClawPatch control process environment.
-- **New evidence gets another chance in strict mode.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. The external unattended command instead records an applied uncertain repair and continues the remaining open queue, matching the documented manual workflow without falsely relabeling the result as fixed.
-- **Bare invocation owns recovery.** The default command resumes the current `.clawpatch` queue and exact stopped checkpoint, snapshots and clears ambiguous stopped-checkpoint source without data loss, revalidates retained uncertain findings, reconciles clean divergent Git histories without losing the local commit or queue state, waits for another active owner, and retries transient failures without exiting. It automatically resets only a proven-clean queue with clean project source.
+- **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. Uncertainty never advances into a successful result.
+- **Bare invocation owns the workflow, not infinity.** The default command resumes the current `.clawpatch` queue and exact stopped checkpoint, revalidates the same finding, reconciles clean Git histories, and retries transient failures within the invocation budget. A service manager owns repeated process starts.
 - **State queries keep JSON clean.** Existing-queue checks parse only command stdout; stderr diagnostics remain separate and are included with bounded stdout context when a query fails.
 - **Zero heuristic features are not completion.** The supervisor asks ClawPatch's own agent mapper to inspect the repository before accepting an empty map, which keeps Solidity and other unsupported heuristic languages in the real review flow.
 - **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary. If the repair was already present and a later `fix` has nothing new to edit, the supervisor revalidates that existing code instead of misclassifying the empty second diff as the repair disappearing.
@@ -270,11 +268,10 @@ Default state homes are:
 
 When a checkpoint moves from an older Manageroo installation, the supervisor upgrades its
 source fingerprint only after the legacy algorithm still proves the exact current files. A
-legacy mismatch never grants ownership to changed source; the external supervisor instead commits
-the complete current tree as its new input baseline before retiring the stale wrapper.
-For a stopped checkpoint that no longer proves the current dirty tree, every changed source path
-is included in the active baseline commit with a receipt in the external state directory. Visible
-file content stays in place, and the existing queue continues by reviewing that exact baseline.
+legacy mismatch never grants ownership to changed source. The supervisor refuses the dirty tree
+unchanged unless `--adopt-dirty` explicitly authorizes a complete input-baseline commit. When
+authorized, every changed source path is included in that baseline with a receipt in the external
+state directory before the existing queue reviews the exact adopted content.
 
 Repeated local iterations can create different temporary commit IDs for the same repair. Resume
 accepts an older attempt boundary only when its finding, parent, owned paths, and complete Git tree
@@ -307,6 +304,18 @@ Manageroo
 
 Separate does not mean removed. Manageroo is the front door and integration owner. `clawpatch-supervise` is the independently versioned queue runtime. ClawPatch remains the repair engine.
 
+### Runtime component boundaries
+
+`clawpatch_release.py` is now a compatibility façade, not the state-machine implementation. The engine is split by responsibility:
+
+- `git_ops.py` owns status, fingerprints, branch reconciliation, exact-path commits, and explicit dirty-source adoption;
+- `checkpoint.py` owns external durable state, recovery, migration, and checkpoint provenance;
+- `queue.py` owns map/review/current-finding iteration and fixed-point queue convergence;
+- `validation.py` owns ClawPatch commands, project gates, and revalidation transitions;
+- `proof.py` owns partial/final transitions and refuses completion proof unless both open and uncertain counts are zero.
+
+Each component stays below 3,000 lines, while the façade preserves the established Python patch points for Manageroo and existing integrations.
+
 ## Keep it running on Linux
 
 A systemd user service gives you a background process, logs, and typed restart behavior:
@@ -319,8 +328,8 @@ systemd-run --user \
   --property=Restart=on-failure \
   --property=RestartPreventExitStatus=2 \
   --property=RestartSec=30s \
-  clawpatch-supervise --repo "$PWD" --branch current --push each \
-    --timeout-minutes 15
+  clawpatch-supervise --repo "$PWD" --branch current \
+    --timeout-minutes 15 --max-runtime-minutes 120 --max-retries 20
 ```
 
 Watch it:
@@ -346,7 +355,7 @@ $Logs = "$env:LOCALAPPDATA\ClawPatchSupervise\logs"
 New-Item -ItemType Directory -Force -Path $Logs | Out-Null
 
 Start-Process -FilePath $Supervisor `
-  -ArgumentList @("--repo", $Repo, "--branch", "current", "--push", "each", "--timeout-minutes", "15") `
+  -ArgumentList @("--repo", $Repo, "--branch", "current", "--timeout-minutes", "15", "--max-runtime-minutes", "120", "--max-retries", "20") `
   -RedirectStandardOutput "$Logs\queue.out.log" `
   -RedirectStandardError "$Logs\queue.err.log" `
   -WindowStyle Hidden
@@ -354,7 +363,7 @@ Start-Process -FilePath $Supervisor `
 Get-Content "$Logs\queue.out.log" -Wait
 ```
 
-For unattended restart after sign-in or reboot, create a Windows Task Scheduler task that invokes the same installed `.exe` and arguments. The process handles transient retries itself; exit `2` remains a terminal safety/provenance stop that needs inspection.
+For unattended restart after sign-in or reboot, create a Windows Task Scheduler task that invokes the same installed `.exe` and arguments and restarts on exit `75`. Each process remains finite; Task Scheduler owns persistence. Exit `2` remains a terminal safety/provenance stop that needs inspection.
 
 ## Safety boundary
 
@@ -366,7 +375,7 @@ The supervisor never:
 - triages, hides, or marks a finding resolved;
 - switches providers or adds a fallback model;
 - stashes source changes;
-- commits unrelated or pre-existing files;
+- commits pre-existing files without explicit `--adopt-dirty` authorization;
 - publishes a temporary iteration commit;
 - treats an active process as completion;
 - edits or commits third-party submodule contents.
@@ -378,19 +387,22 @@ ClawPatch owns the findings and repairs. The supervisor owns the reliable journe
 ```text
 --repo PATH                 target Git repository; absolute paths are recommended
 --branch current            stay on the checked-out branch
---push none|each|final      local only, push every repair, or push final state
+--push none|each|final      local only (default), push every repair, or push final state
+--adopt-dirty               explicitly commit all pre-existing dirty source as one input baseline
 --fresh                     discard the existing queue and start a fresh full review
 --resume-stopped            resume existing state or one exact stopped checkpoint
 --timeout-minutes N         watchdog for each ClawPatch child; default 15
 --retry-seconds N           positive wait before an automatic transient/busy retry; default 30
+--max-runtime-minutes N     finite total runtime for this process; default 120
+--max-retries N             finite recoverable retry count for this process; default 20
 --print-state-path          print the external checkpoint/proof directory and exit
 --publish-clawpatch-state   explicitly commit safe generated ClawPatch state
 ```
 
 Exit codes:
 
-- `0`: complete;
-- `75`: classified transient stop outside the normal in-process retry boundary;
+- `0`: proven complete with zero open and zero uncertain findings;
+- `75`: total runtime/retry budget exhausted or another classified transient stop;
 - `2`: terminal, safety, or provenance stop.
 
 ## Install from source

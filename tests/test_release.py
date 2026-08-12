@@ -751,6 +751,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 recovery = recover_external_interrupted_state(
                     repo,
                     reason="same finding made no further progress",
+                    adopt_dirty=True,
                 )
 
             current_head = subprocess.check_output(
@@ -1096,6 +1097,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                     branch="current",
                     fresh=True,
                     integration_mode="external",
+                    adopt_dirty=True,
                 )
 
             self.assertEqual(source.read_bytes(), source_before)
@@ -2504,6 +2506,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                     apply=True,
                     branch="current",
                     integration_mode="external",
+                    adopt_dirty=True,
                 )
 
             baseline = report["ambiguous_checkpoint_baseline"]
@@ -5714,6 +5717,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                     apply=True,
                     branch="current",
                     integration_mode="external",
+                    adopt_dirty=True,
                 )
             checkpoint = _load_release_progress(repo, state_root=state_root)
 
@@ -6370,6 +6374,7 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                     branch="current",
                     push_mode="each",
                     integration_mode="external",
+                    adopt_dirty=True,
                 )
 
             baseline = report["preexisting_source_baseline"]
