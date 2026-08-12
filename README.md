@@ -413,25 +413,19 @@ py -3 -m venv .venv
 
 ## Test and release proof
 
-Run the complete offline local suite:
+Run the complete local suite:
 
 ```bash
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The installed-wheel console-entry-point integration test intentionally uses isolated PEP 517 build
-requirements from the package index. It imports the installed package from a clean virtual
-environment and exercises the generated executable's version, help, doctor, cleanup dry-run,
-state-path, and argument-error modes. Run that explicit network lane separately:
-
-```bash
-CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS=1 PYTHONPATH=src python3 -m unittest \
-  tests.test_installed_cli.InstalledConsoleScriptTests.test_clawpatch_supervise_entrypoint_from_installed_wheel -v
-```
-
-Its setuptools and wheel versions are pinned identically in `pyproject.toml` and
-`requirements-test.txt`, so an index outage can affect only this opt-in lane and a future backend
-release cannot silently change the build.
+The default suite includes the installed-wheel console-entry-point integration test. It
+intentionally uses isolated PEP 517 build requirements from the package index, imports the
+installed package from a clean virtual environment, and exercises the generated executable's
+version, help, doctor, cleanup dry-run, state-path, and argument-error modes. Its setuptools and
+wheel versions are pinned identically in `pyproject.toml` and `requirements-test.txt`, so an index
+outage fails this mandatory packaging check and a future backend release cannot silently change
+the build.
 
 This repository intentionally has no hosted workflow files. Run the real build/install lane and
 the full suite manually on Linux, macOS, and Windows before describing a release as

@@ -16,7 +16,6 @@ from clawpatch_supervise import __version__
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-NETWORK_TEST_ENV = "CLAWPATCH_SUPERVISE_RUN_NETWORK_TESTS"
 
 
 class InstalledConsoleScriptTests(unittest.TestCase):
@@ -48,10 +47,6 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             self.assertNotIn("PIP_NO_INDEX", run.call_args.kwargs["env"])
             self.assertNotIn("PIP_NO_BUILD_ISOLATION", run.call_args.kwargs["env"])
 
-    @unittest.skipUnless(
-        os.environ.get(NETWORK_TEST_ENV) == "1",
-        f"network integration test; set {NETWORK_TEST_ENV}=1 to run",
-    )
     def test_clawpatch_supervise_entrypoint_from_installed_wheel(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
