@@ -81,6 +81,7 @@ class InstallerContractTests(unittest.TestCase):
         exported_clawpatch_function: bool = False,
         separate_clawpatch_directory: bool = False,
         shadow_node_version: str | None = None,
+        git_present: bool = True,
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
@@ -136,7 +137,8 @@ class InstallerContractTests(unittest.TestCase):
             command_path = shutil.which(command)
             self.assertIsNotNone(command_path)
             (fake_bin / command).symlink_to(command_path)
-        (fake_bin / "git").symlink_to(command_stub)
+        if git_present:
+            (fake_bin / "git").symlink_to(command_stub)
         self._write_executable(
             fake_bin / "node",
             '#!/bin/sh\nprintf "%s\\n" "$CLAWPATCH_TEST_NODE_VERSION"\n',
@@ -815,6 +817,19 @@ class InstallerContractTests(unittest.TestCase):
             clawpatch_present=True,
             clawhub_present=False,
             npm_mode="missing",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(invocations, [])
+        self.assertTrue(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_does_not_require_git(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=False,
+            npm_mode="missing",
+            git_present=False,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
