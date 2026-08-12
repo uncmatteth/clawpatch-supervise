@@ -6,14 +6,14 @@ import signal
 import subprocess
 import time
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Callable, Mapping, Sequence
 
 from .errors import SafetyError
 from .util import atomic_write_json, ensure_within, redact_argv, redact_text, utc_now
 
 
-_CMD_ARGUMENT_METACHARACTERS = frozenset('&|<>()^%!"\r\n')
+_CMD_METACHARACTERS = frozenset('&|<>()^%!"\r\n')
 
 
 @dataclass(frozen=True)
@@ -176,13 +176,21 @@ def _platform_argv(argv: Sequence[str], env: Mapping[str, str]) -> list[str] | s
     if discovered:
         resolved[0] = discovered
     if resolved[0].casefold().endswith((".cmd", ".bat")):
-        if any(_CMD_ARGUMENT_METACHARACTERS.intersection(argument) for argument in resolved[1:]):
+        if any(_CMD_METACHARACTERS.intersection(argument) for argument in resolved):
             raise SafetyError(
-                "Windows batch command arguments cannot contain cmd.exe metacharacters."
+                "Windows batch commands cannot contain cmd.exe metacharacters."
+            )
+        command_interpreter = env.get("COMSPEC") or "cmd.exe"
+        if (
+            _CMD_METACHARACTERS.intersection(command_interpreter)
+            or PureWindowsPath(command_interpreter).name.casefold() != "cmd.exe"
+        ):
+            raise SafetyError(
+                "Windows batch commands require a safe cmd.exe COMSPEC launcher."
             )
         command_line = subprocess.list2cmdline(resolved)
         launcher = subprocess.list2cmdline(
-            [env.get("COMSPEC") or "cmd.exe", "/d", "/s", "/c"]
+            [command_interpreter, "/d", "/s", "/c"]
         )
         return f'{launcher} "{command_line}"'
     return resolved

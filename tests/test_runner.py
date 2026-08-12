@@ -22,7 +22,7 @@ from clawpatch_supervise.clawpatch_release import (
     _run,
 )
 from clawpatch_supervise.errors import SafetyError
-from clawpatch_supervise.runner import CommandRunner, _terminate_process_group
+from clawpatch_supervise.runner import CommandRunner, _platform_argv, _terminate_process_group
 
 
 class CommandRunnerEnvironmentTests(unittest.TestCase):
@@ -235,6 +235,31 @@ class WindowsProcessTreeTerminationTests(unittest.TestCase):
         self.assertTrue(process.killed)
 
 
+class WindowsCommandLineSafetyTests(unittest.TestCase):
+    @patch("clawpatch_supervise.runner.os.name", "nt")
+    def test_batch_executable_path_rejects_cmd_metacharacters(self) -> None:
+        with self.assertRaisesRegex(SafetyError, "cmd.exe metacharacters"):
+            _platform_argv(
+                [r"C:\tools\unsafe&command.cmd"],
+                {"COMSPEC": r"C:\Windows\System32\cmd.exe"},
+            )
+
+    @patch("clawpatch_supervise.runner.os.name", "nt")
+    def test_batch_command_rejects_unsafe_comspec_launcher(self) -> None:
+        for command_interpreter in (
+            r"C:\Windows\System32\cmd.exe&whoami",
+            r"C:\tools\not-cmd.exe",
+        ):
+            with (
+                self.subTest(command_interpreter=command_interpreter),
+                self.assertRaisesRegex(SafetyError, "safe cmd.exe COMSPEC launcher"),
+            ):
+                _platform_argv(
+                    [r"C:\tools\command.cmd"],
+                    {"COMSPEC": command_interpreter},
+                )
+
+
 @unittest.skipUnless(os.name == "posix", "POSIX process-group behavior")
 class PosixProcessTreeTerminationTests(unittest.TestCase):
     def test_signal_terminated_clawpatch_command_becomes_controlled_terminal_failure(
@@ -400,6 +425,21 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
 
 @unittest.skipUnless(os.name == "nt", "Windows command runner only")
 class WindowsCommandRunnerTests(unittest.TestCase):
+    def test_batch_file_with_operator_in_path_is_rejected_without_running(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            sentinel = root / "second-command-ran.txt"
+            command = root / "unsafe&command.cmd"
+            command.write_text(
+                '@echo off\r\necho escaped>"second-command-ran.txt"\r\n',
+                encoding="ascii",
+            )
+
+            with self.assertRaisesRegex(SafetyError, "cmd.exe metacharacters"):
+                CommandRunner().run([str(command)], cwd=root, timeout_seconds=30)
+
+            self.assertFalse(sentinel.exists())
+
     def test_batch_file_under_space_path_runs_without_quote_corruption(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
