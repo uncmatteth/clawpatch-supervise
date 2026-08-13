@@ -36,26 +36,21 @@
     "filesystem",
     "process-exec"
   ],
-  "status": "fixed",
+  "status": "reviewed",
   "lock": null,
-  "findingIds": [
-    "fnd_sig-feat-cli-command-5181306ec0-_5ff7b40b3c",
-    "fnd_sig-feat-cli-command-5181306ec0-_84251f8fbb",
-    "fnd_sig-feat-cli-command-5181306ec0-_06a2a45a04",
-    "fnd_sig-feat-cli-command-5181306ec0-_a880b33eb5"
-  ],
+  "findingIds": [],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260807T184035-c7b1f2",
+      "runId": "20260812T224557-88ae82",
       "kind": "review",
-      "summary": "4 finding(s); prompt=30710 bytes; approxTokens=7621; includedFiles=2; omittedFiles=0",
+      "summary": "0 finding(s); prompt=34355 bytes; approxTokens=8540; includedFiles=2; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-07T18:43:41.085Z"
+      "createdAt": "2026-08-12T22:47:30.017Z"
     }
   ],
-  "createdAt": "2026-08-07T18:40:35.513Z",
-  "updatedAt": "2026-08-09T20:35:12.751Z"
+  "createdAt": "2026-08-12T22:45:48.252Z",
+  "updatedAt": "2026-08-12T22:47:30.017Z"
 }

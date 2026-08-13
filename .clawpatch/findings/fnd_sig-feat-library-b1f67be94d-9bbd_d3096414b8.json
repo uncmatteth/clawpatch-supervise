@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b1f67be94d-9bbd_d3096414b8",
+  "featureId": "feat_library_b1f67be94d",
+  "title": "README documents obsolete external handling of uncertain findings",
+  "category": "docs-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "docs-gap",
+  "evidence": [
+    {
+      "path": "README.md",
+      "startLine": 172,
+      "endLine": 173,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "README.md",
+      "startLine": 196,
+      "endLine": 197,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "README.md",
+      "startLine": 205,
+      "endLine": 206,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "README.md",
+      "startLine": 213,
+      "endLine": 214,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The README says the external unattended command must remain on an uncertain finding and cannot advance. The governing project contract permits that command to commit an applied repair, advance to the next open finding, and retain and report the uncertainty honestly; only strict library mode retains the old stop behavior. The published CLI documentation therefore misstates a material queue-processing contract.",
+  "reproduction": null,
+  "recommendation": "Update every uncertain-outcome description to distinguish external unattended behavior from strict library behavior. Clarify that retained uncertainty still prevents completion proof and exit 0.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests are included for this feature, and runtime tests would not ordinarily detect stale documentation.",
+  "suggestedRegressionTest": "Add a documentation-contract test asserting that the README describes external uncertain advancement, strict-library retention, and nonzero completion while uncertainty remains.",
+  "minimumFixScope": "README.md uncertain-outcome and completion descriptions.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-b1f67be94d_9bbd11598d",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260812T224557-88ae82",
+  "createdAt": "2026-08-12T22:52:21.998Z",
+  "updatedAt": "2026-08-12T22:52:21.998Z"
+}

@@ -32,21 +32,23 @@
     "package"
   ],
   "trustBoundaries": [],
-  "status": "reviewed",
+  "status": "needs-fix",
   "lock": null,
-  "findingIds": [],
+  "findingIds": [
+    "fnd_sig-feat-library-b1f67be94d-9bbd_d3096414b8"
+  ],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260807T184035-c7b1f2",
+      "runId": "20260812T224557-88ae82",
       "kind": "review",
-      "summary": "0 finding(s); prompt=32151 bytes; approxTokens=7989; includedFiles=2; omittedFiles=0",
+      "summary": "1 finding(s); prompt=31657 bytes; approxTokens=7874; includedFiles=2; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-07T18:41:09.569Z"
+      "createdAt": "2026-08-12T22:52:21.998Z"
     }
   ],
-  "createdAt": "2026-08-07T18:40:35.513Z",
-  "updatedAt": "2026-08-09T20:35:12.751Z"
+  "createdAt": "2026-08-12T22:45:48.252Z",
+  "updatedAt": "2026-08-12T22:52:21.998Z"
 }

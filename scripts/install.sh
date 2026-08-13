@@ -265,7 +265,35 @@ fi
 mkdir -p "$install_root"
 staging_venv="$(mktemp -d "$install_root/venv.${version}.XXXXXX")"
 "$python_command" -m venv "$staging_venv"
-"$staging_venv/bin/python" -m pip install --disable-pip-version-check --upgrade "$package_to_install"
+"$staging_venv/bin/python" -m pip install --disable-pip-version-check --no-deps --upgrade "$package_to_install"
+"$python_command" - "$staging_venv" <<'PY'
+import email.parser
+import re
+import sys
+from pathlib import Path
+
+venv = Path(sys.argv[1])
+matching_metadata = []
+for metadata_path in venv.rglob("*.dist-info/METADATA"):
+    with metadata_path.open("rb") as metadata_file:
+        metadata = email.parser.BytesParser().parse(metadata_file, headersonly=True)
+    normalized_name = re.sub(r"[-_.]+", "-", metadata.get("Name", "")).lower()
+    if normalized_name == "clawpatch-supervise":
+        matching_metadata.append(metadata)
+
+if len(matching_metadata) != 1:
+    print("Installed supervisor metadata was not found exactly once.", file=sys.stderr)
+    raise SystemExit(2)
+
+runtime_dependencies = matching_metadata[0].get_all("Requires-Dist", [])
+if runtime_dependencies:
+    print(
+        "clawpatch-supervise must have no Python runtime dependencies; found: "
+        + ", ".join(runtime_dependencies),
+        file=sys.stderr,
+    )
+    raise SystemExit(2)
+PY
 
 supervisor_installed_version="$("$staging_venv/bin/clawpatch-supervise" --version)"
 expected_supervisor_version="clawpatch-supervise $version"

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260812T224557-88ae82",
+  "command": "review",
+  "args": [
+    "review",
+    "--limit",
+    "8"
+  ],
+  "rootPath": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+  "headSha": "8da2a898b7086db119030b3c5468a3aa32681d8e",
+  "startedAt": "2026-08-12T22:45:57.873Z",
+  "finishedAt": "2026-08-12T22:54:57.380Z",
+  "status": "completed",
+  "claimedFeatureIds": [
+    "feat_cli-command_5181306ec0",
+    "feat_config_cf96aef71d",
+    "feat_library_04c78af7f0",
+    "feat_library_2897a385df",
+    "feat_library_b1f67be94d",
+    "feat_library_e9500b5a4a",
+    "feat_test-suite_a6226f638f"
+  ],
+  "findingIds": [
+    "fnd_sig-feat-config-cf96aef71d-cf376_ab0ba8115d",
+    "fnd_sig-feat-library-04c78af7f0-7e3c_3e0bfc02d7",
+    "fnd_sig-feat-library-04c78af7f0-57cc_4d925b5405",
+    "fnd_sig-feat-library-04c78af7f0-3db4_71587618b1",
+    "fnd_sig-feat-library-b1f67be94d-9bbd_d3096414b8"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

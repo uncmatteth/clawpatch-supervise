@@ -82,6 +82,7 @@ class InstallerContractTests(unittest.TestCase):
         separate_clawpatch_directory: bool = False,
         shadow_node_version: str | None = None,
         git_present: bool = True,
+        runtime_dependency: str | None = None,
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
@@ -102,6 +103,10 @@ class InstallerContractTests(unittest.TestCase):
         self._write_executable(
             command_stub,
             "#!/bin/sh\n"
+            'if [ "${0##*/}:$1:$2" = "python:-m:pip" ]; then\n'
+            '  printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_PIP_LOG"\n'
+            "  exit 0\n"
+            "fi\n"
             'case "${0##*/}:$1" in\n'
             '  clawpatch:--version)\n'
             '    if [ -n "$CLAWPATCH_TEST_EXPECTED_NODE_VERSION" ]; then\n'
@@ -189,6 +194,15 @@ class InstallerContractTests(unittest.TestCase):
             '  mkdir -p "$3/bin"\n'
             '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/python"\n'
             '  cp "$CLAWPATCH_TEST_COMMAND_STUB" "$3/bin/clawpatch-supervise"\n'
+            '  metadata="$3/lib/python-test/site-packages/'
+            'clawpatch_supervise.dist-info/METADATA"\n'
+            '  mkdir -p "${metadata%/*}"\n'
+            '  printf "Name: clawpatch-supervise\\nVersion: %s\\n" '
+            '"$CLAWPATCH_TEST_SUPERVISOR_VERSION" > "$metadata"\n'
+            '  if [ -n "$CLAWPATCH_TEST_RUNTIME_DEPENDENCY" ]; then\n'
+            '    printf "Requires-Dist: %s\\n" "$CLAWPATCH_TEST_RUNTIME_DEPENDENCY" '
+            '>> "$metadata"\n'
+            "  fi\n"
             "fi\n"
             "exit 0\n",
         )
@@ -274,7 +288,9 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_PAUSE_READY": str(root / "activation-ready"),
                 "CLAWPATCH_TEST_PAUSE_RELEASE": str(root / "activation-release"),
                 "CLAWPATCH_TEST_PAUSE_SUPERVISOR_MOVE": "false",
+                "CLAWPATCH_TEST_PIP_LOG": str(root / "pip-invocations.log"),
                 "PATH": fake_bin.name if relative_path else os.pathsep.join(path_entries),
+                "CLAWPATCH_TEST_RUNTIME_DEPENDENCY": runtime_dependency or "",
             }
         )
         if exported_clawpatch_function:
@@ -941,6 +957,26 @@ class InstallerContractTests(unittest.TestCase):
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_runtime_dependencies_before_activation(self) -> None:
+        root = Path(self._temporary_directory.name)
+
+        result, _invocations, _install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            runtime_dependency="example-dependency>=1",
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("must have no Python runtime dependencies", result.stderr)
+        self.assertIn("example-dependency>=1", result.stderr)
+        self.assertIn(
+            "--disable-pip-version-check --no-deps --upgrade",
+            (root / "pip-invocations.log").read_text(encoding="utf-8"),
+        )
+        self.assertFalse((root / "installed-bin" / "clawpatch-supervise").exists())
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")
     def test_linux_installer_rejects_wheel_with_mismatched_digest_before_installation(self) -> None:

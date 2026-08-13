@@ -24,6 +24,10 @@
       "reason": "pytest file"
     },
     {
+      "path": "tests/test_installed_cli.py",
+      "reason": "pytest file"
+    },
+    {
       "path": "tests/test_installers.py",
       "reason": "pytest file"
     },
@@ -41,6 +45,10 @@
     },
     {
       "path": "tests/test_runner.py",
+      "reason": "pytest file"
+    },
+    {
+      "path": "tests/test_supervisor_contract.py",
       "reason": "pytest file"
     },
     {
@@ -62,6 +70,10 @@
       "reason": "nearby test"
     },
     {
+      "path": "tests/test_installed_cli.py",
+      "reason": "nearby test"
+    },
+    {
       "path": "tests/test_installers.py",
       "reason": "nearby test"
     },
@@ -79,6 +91,10 @@
     },
     {
       "path": "tests/test_runner.py",
+      "reason": "nearby test"
+    },
+    {
+      "path": "tests/test_supervisor_contract.py",
       "reason": "nearby test"
     },
     {
@@ -96,6 +112,10 @@
       "command": "pytest"
     },
     {
+      "path": "tests/test_installed_cli.py",
+      "command": "pytest"
+    },
+    {
       "path": "tests/test_installers.py",
       "command": "pytest"
     },
@@ -116,6 +136,10 @@
       "command": "pytest"
     },
     {
+      "path": "tests/test_supervisor_contract.py",
+      "command": "pytest"
+    },
+    {
       "path": "tests/test_validation_services.py",
       "command": "pytest"
     }
@@ -125,23 +149,21 @@
     "test"
   ],
   "trustBoundaries": [],
-  "status": "needs-fix",
+  "status": "reviewed",
   "lock": null,
-  "findingIds": [
-    "fnd_sig-feat-test-suite-a6226f638f-e_bd0704282d"
-  ],
+  "findingIds": [],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260807T184035-c7b1f2",
+      "runId": "20260812T224557-88ae82",
       "kind": "review",
-      "summary": "1 finding(s); prompt=142258 bytes; approxTokens=35548; includedFiles=9; omittedFiles=0",
+      "summary": "0 finding(s); prompt=217009 bytes; approxTokens=54244; includedFiles=11; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-07T18:41:49.141Z"
+      "createdAt": "2026-08-12T22:49:35.760Z"
     }
   ],
-  "createdAt": "2026-08-07T18:40:35.513Z",
-  "updatedAt": "2026-08-09T20:35:12.751Z"
+  "createdAt": "2026-08-12T22:45:48.252Z",
+  "updatedAt": "2026-08-12T22:49:35.760Z"
 }

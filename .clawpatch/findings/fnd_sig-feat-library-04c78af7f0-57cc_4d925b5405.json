@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-04c78af7f0-57cc_4d925b5405",
+  "featureId": "feat_library_04c78af7f0",
+  "title": "Machine-readable command output is corrupted by merging stderr into stdout",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_release.py",
+      "startLine": 256,
+      "endLine": 280,
+      "symbol": "_run",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_release.py",
+      "startLine": 312,
+      "endLine": 338,
+      "symbol": "_parse_json_output",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_release.py",
+      "startLine": 535,
+      "endLine": 539,
+      "symbol": "_process_repository_root",
+      "quote": null
+    }
+  ],
+  "reasoning": "_run appends stderr to stdout even when a command succeeds. Consumers parse the combined value as JSON or as one filesystem path. A benign warning can make valid JSON ambiguous or turn a valid Git root into a nonexistent path, which can make repository process ownership checks miss an active process.",
+  "reproduction": "Return successful command output with stdout '/repo\\n' and stderr 'warning'; after merging, _process_repository_root resolves the combined string rather than /repo.",
+  "recommendation": "Preserve stdout and stderr separately. Parse stdout only and add separately redacted stderr to diagnostics after a failure.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were supplied, and no visible test exercises successful commands that also produce stderr.",
+  "suggestedRegressionTest": "Simulate successful git and JSON commands with valid stdout plus warning text on stderr and assert parsing uses stdout unchanged.",
+  "minimumFixScope": "Change _run to retain separate streams and update machine-readable consumers and tests.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-04c78af7f0_57cc123b1c",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260812T224557-88ae82",
+  "createdAt": "2026-08-12T22:50:15.979Z",
+  "updatedAt": "2026-08-12T22:50:15.979Z"
+}

@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-cf96aef71d-cf376_ab0ba8115d",
+  "featureId": "feat_config_cf96aef71d",
+  "title": "Installer does not enforce the stdlib-only runtime dependency policy",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "scripts/install.sh",
+      "startLine": 265,
+      "endLine": 268,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The fresh environment installs the wheel without --no-deps or validation that its metadata contains no Requires-Dist entries. A mispackaged release could consequently install third-party packages from an index, violating the project's stdlib-only runtime policy and expanding its network and supply-chain exposure.",
+  "reproduction": "Build a clawpatch-supervise wheel with a Requires-Dist entry, provide it through CLAWPATCH_SUPERVISE_SOURCE with its SHA-256, and run the installer; pip resolves and installs the declared dependency.",
+  "recommendation": "Use --no-deps and reject the installation before activation when the installed distribution metadata contains any Requires-Dist entries.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were linked for this feature, and no supplied test exercises a dependency-bearing wheel or asserts that package-index access is prohibited.",
+  "suggestedRegressionTest": "Run the installer with a temporary wheel that declares a test dependency and assert that it fails without accessing a package index or activating either command.",
+  "minimumFixScope": "Change the pip invocation in scripts/install.sh, add a zero-runtime-dependencies metadata validation, and add an installer regression test.",
+  "status": "uncertain",
+  "history": [
+    {
+      "runId": "20260812T235449-a00ea7",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The repair is present, but targeted validation could not run without writable temporary storage. ✅ Done — finding revalidated as uncertain.",
+      "commands": [],
+      "createdAt": "2026-08-12T23:59:08.461Z"
+    }
+  ],
+  "signature": "sig_feat-config-cf96aef71d_cf376ef022",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-config-cf96aef71d-c_a9dcfc4d31"
+  ],
+  "createdByRunId": "20260812T224557-88ae82",
+  "createdAt": "2026-08-12T22:48:54.423Z",
+  "updatedAt": "2026-08-12T23:59:08.461Z"
+}

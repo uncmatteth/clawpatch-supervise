@@ -1,0 +1,109 @@
+{
+  "schemaVersion": 1,
+  "featureId": "feat_library_e9500b5a4a",
+  "title": "Python source src/clawpatch_supervise",
+  "summary": "Python source group src/clawpatch_supervise with 11 files.",
+  "kind": "library",
+  "source": "python-source-group",
+  "confidence": "medium",
+  "entrypoints": [
+    {
+      "path": "src/clawpatch_supervise",
+      "symbol": "src/clawpatch_supervise",
+      "route": null,
+      "command": null
+    }
+  ],
+  "ownedFiles": [
+    {
+      "path": "src/clawpatch_supervise/__init__.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/__main__.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/checkpoint.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/cleanup.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/errors.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/git_ops.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/proof.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/queue.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/runner.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/runtime_budget.py",
+      "reason": "source group src/clawpatch_supervise"
+    },
+    {
+      "path": "src/clawpatch_supervise/util.py",
+      "reason": "source group src/clawpatch_supervise"
+    }
+  ],
+  "contextFiles": [
+    {
+      "path": "pyproject.toml",
+      "reason": "python target runtime metadata"
+    },
+    {
+      "path": "tests/test_cleanup.py",
+      "reason": "associated test"
+    },
+    {
+      "path": "tests/test_runner.py",
+      "reason": "associated test"
+    }
+  ],
+  "tests": [
+    {
+      "path": "tests/test_cleanup.py",
+      "command": "pytest"
+    },
+    {
+      "path": "tests/test_runner.py",
+      "command": "pytest"
+    }
+  ],
+  "tags": [
+    "python",
+    "source-group"
+  ],
+  "trustBoundaries": [],
+  "status": "reviewed",
+  "lock": null,
+  "findingIds": [],
+  "patchAttemptIds": [],
+  "analysisHistory": [
+    {
+      "runId": "20260812T224557-88ae82",
+      "kind": "review",
+      "summary": "0 finding(s); prompt=226693 bytes; approxTokens=56674; includedFiles=14; omittedFiles=0",
+      "provider": "codex",
+      "model": null,
+      "reasoningEffort": null,
+      "createdAt": "2026-08-12T22:51:52.218Z"
+    }
+  ],
+  "createdAt": "2026-08-12T22:45:48.252Z",
+  "updatedAt": "2026-08-12T22:51:52.218Z"
+}
