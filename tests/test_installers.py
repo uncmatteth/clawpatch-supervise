@@ -83,6 +83,7 @@ class InstallerContractTests(unittest.TestCase):
         shadow_node_version: str | None = None,
         git_present: bool = True,
         runtime_dependency: str | None = None,
+        mixed_node_toolchain: bool = False,
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
@@ -144,8 +145,12 @@ class InstallerContractTests(unittest.TestCase):
             (fake_bin / command).symlink_to(command_path)
         if git_present:
             (fake_bin / "git").symlink_to(command_stub)
+        node_toolchain_bin = (
+            root / "node-toolchain-bin" if mixed_node_toolchain else fake_bin
+        )
+        node_toolchain_bin.mkdir(exist_ok=True)
         self._write_executable(
-            fake_bin / "node",
+            node_toolchain_bin / "node",
             '#!/bin/sh\nprintf "%s\\n" "$CLAWPATCH_TEST_NODE_VERSION"\n',
         )
         installed_command_stub = root / "installed-command-stub"
@@ -211,8 +216,12 @@ class InstallerContractTests(unittest.TestCase):
         npm_prefix = root / "npm-prefix"
         if npm_mode != "missing":
             self._write_executable(
-                fake_bin / "npm",
+                node_toolchain_bin / "npm",
                 "#!/bin/sh\n"
+                'if [ -n "$CLAWPATCH_TEST_EXPECTED_NPM_NODE_DIR" ]; then\n'
+                '  [ "${PATH%%:*}" = "$CLAWPATCH_TEST_EXPECTED_NPM_NODE_DIR" ] '
+                "|| exit 34\n"
+                "fi\n"
                 'printf "%s\\n" "$*" >> "$CLAWPATCH_TEST_LOG"\n'
                 'if [ "$1" = "pack" ]; then\n'
                 '  mkdir -p "$4"\n'
@@ -242,6 +251,8 @@ class InstallerContractTests(unittest.TestCase):
                 "fi\n"
                 "exit 25\n",
             )
+            if mixed_node_toolchain:
+                self._write_executable(fake_bin / "npm", "#!/bin/sh\nexit 33\n")
 
         install_root = root / "install"
         installed_bin = root / "installed-bin"
@@ -252,6 +263,8 @@ class InstallerContractTests(unittest.TestCase):
                 f"#!/bin/sh\nprintf '%s\\n' {shadow_node_version!r}\n",
             )
         path_entries = [str(fake_bin)]
+        if mixed_node_toolchain:
+            path_entries.append(str(node_toolchain_bin))
         if separate_clawpatch_directory:
             path_entries.append(str(root / "clawpatch-bin"))
         environment = os.environ.copy()
@@ -274,6 +287,9 @@ class InstallerContractTests(unittest.TestCase):
                 "CLAWPATCH_TEST_DOCTOR_CLAWPATCH_LOG": str(doctor_clawpatch_log),
                 "CLAWPATCH_TEST_LOG": str(invocation_log),
                 "CLAWPATCH_TEST_NPM_ARTIFACT": trusted_clawpatch_artifact,
+                "CLAWPATCH_TEST_EXPECTED_NPM_NODE_DIR": (
+                    str(node_toolchain_bin) if mixed_node_toolchain else ""
+                ),
                 "CLAWPATCH_TEST_NPM_MODE": npm_mode,
                 "CLAWPATCH_TEST_NPM_PREFIX": str(npm_prefix),
                 "CLAWPATCH_TEST_REAL_PYTHON": sys.executable,
@@ -754,6 +770,17 @@ class InstallerContractTests(unittest.TestCase):
         result, invocations, install_root = self._run_linux_installer(
             clawpatch_present=False,
             clawhub_present=False,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self._assert_staged_clawpatch_install(invocations, install_root)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_uses_npm_from_validated_node_toolchain(self) -> None:
+        result, invocations, install_root = self._run_linux_installer(
+            clawpatch_present=False,
+            clawhub_present=False,
+            mixed_node_toolchain=True,
         )
 
         self.assertEqual(result.returncode, 0, result.stderr)

@@ -155,7 +155,7 @@ if clawpatch_command="$(PATH="$clawpatch_lookup_path" resolve_executable clawpat
   PATH="$clawpatch_lookup_path" compatible_clawpatch "$clawpatch_command"; then
   :
 else
-  command -v npm >/dev/null 2>&1 || {
+  npm_command="$(PATH="$node_dir:$PATH" resolve_executable npm)" || {
     echo "npm is required to install ClawPatch." >&2
     exit 2
   }
@@ -163,7 +163,8 @@ else
   staging_clawpatch_root="$(mktemp -d "$install_root/clawpatch.XXXXXX")"
   clawpatch_download_root="$(mktemp -d)"
   clawpatch_package="$clawpatch_download_root/clawpatch-${release_clawpatch_version}.tgz"
-  npm pack --ignore-scripts --pack-destination "$clawpatch_download_root" \
+  PATH="$node_dir:$PATH" "$npm_command" pack --ignore-scripts \
+    --pack-destination "$clawpatch_download_root" \
     "clawpatch@$release_clawpatch_version" >/dev/null
   test -f "$clawpatch_package" || {
     echo "ClawPatch download did not create its release tarball." >&2
@@ -193,7 +194,8 @@ if not hmac.compare_digest(actual_digest, expected_digest):
     print(f"ClawPatch artifact SHA-512 mismatch: expected {expected}, found {actual}.", file=sys.stderr)
     raise SystemExit(2)
 PY
-  npm install --prefix "$staging_clawpatch_root" --no-fund --no-audit \
+  PATH="$node_dir:$PATH" "$npm_command" install \
+    --prefix "$staging_clawpatch_root" --no-fund --no-audit \
     --ignore-scripts "$clawpatch_package"
   clawpatch_command="$staging_clawpatch_root/node_modules/.bin/clawpatch"
   test -x "$clawpatch_command" || {
