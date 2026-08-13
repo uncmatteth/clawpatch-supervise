@@ -49,13 +49,26 @@
         "PYTHONPATH=src python3 -m unittest tests.test_validation_services.DisposablePythonValidationTests.test_repository_imports_are_scoped_to_the_validation_interpreter -v"
       ],
       "createdAt": "2026-08-13T12:39:49.040Z"
+    },
+    {
+      "runId": "20260813T125319-fb3710",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The original evidence symbols still exist at moved lines 206, 244, and 306. The named process-control variables are rejected, but supported Python validation emits PATH at validation_services.py:449-465 and clawpatch_external.py:685-688 passes it into the rejecting validation-service override path. That raises SafetyError before supervision, so the repair remains incomplete. Concrete blocker: the enforced strict-JSON response format cannot end with an additional raw completion line. 🚧 Manageroo: waiting on an external blocker. ✅ Done — revalidated the finding as still open",
+      "commands": [
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest -v -k release_environment tests.test_release",
+        "git diff --check"
+      ],
+      "createdAt": "2026-08-13T12:55:51.888Z"
     }
   ],
   "signature": "sig_feat-library-04c78af7f0_7e3c313529",
   "linkedPatchAttemptIds": [
-    "pat_fnd-sig-feat-library-04c78af7f0-_bc5013bb87"
+    "pat_fnd-sig-feat-library-04c78af7f0-_bc5013bb87",
+    "pat_fnd-sig-feat-library-04c78af7f0-_29de31adcb"
   ],
   "createdByRunId": "20260812T224557-88ae82",
   "createdAt": "2026-08-12T22:50:15.979Z",
-  "updatedAt": "2026-08-13T12:39:49.040Z"
+  "updatedAt": "2026-08-13T12:55:51.888Z"
 }

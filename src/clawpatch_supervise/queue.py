@@ -1429,6 +1429,7 @@ def _impl_release_sweep_locked(
     progress: Callable[[dict[str, Any]], None] | None = None,
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
+    supervisor_path_override: str | None = None,
     advance_uncertain: bool = False,
     wait_on_preserved_source: bool = False,
     adopt_dirty: bool = False,
@@ -1552,6 +1553,7 @@ def _impl_release_sweep_locked(
         child_timeout_seconds=child_timeout_seconds,
         deadline_monotonic=deadline_monotonic,
         child_env_overrides=child_env_overrides,
+        supervisor_path_override=supervisor_path_override,
     )
     if integration_mode == "external":
         _migrate_legacy_external_progress(root, state_root=state_root)
@@ -2788,6 +2790,7 @@ def _impl_release_sweep_locked(
             progress=progress,
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
+            supervisor_path_override=supervisor_path_override,
             advance_uncertain=advance_uncertain,
             adopt_dirty=adopt_dirty,
             deadline_monotonic=deadline_monotonic,

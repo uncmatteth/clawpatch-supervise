@@ -1770,6 +1770,16 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         child_env_overrides={name: "/target-controlled"},
                     )
 
+    def test_release_environment_accepts_only_supervisor_owned_path_override(self):
+        child = _release_clawpatch_env(
+            trusted_host_codex_sandbox_bypass=False,
+            child_env_overrides={"TEST_DATABASE_URL": "postgresql://127.0.0.1/test"},
+            supervisor_path_override="C:\\trusted-codex-bin",
+        )
+
+        self.assertEqual(child["PATH"], "C:\\trusted-codex-bin")
+        self.assertEqual(child["TEST_DATABASE_URL"], "postgresql://127.0.0.1/test")
+
     def test_process_matcher_ignores_clawpatch_mentions_inside_gbrain_context(self):
         gbrain = [
             "bun",

@@ -91,12 +91,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         },
     )
     def test_state_query_uses_exact_sanitized_release_environment(self):
-        validation_overrides = {
-            "CLAWPATCH_TEST_VALIDATION_OVERRIDE": "owned-validation-override"
-        }
+        preflight_overrides = {"PATH": "/supervisor-selected-path"}
         expected = _release_clawpatch_env(
             trusted_host_codex_sandbox_bypass=False,
-            child_env_overrides=validation_overrides,
+            supervisor_path_override=preflight_overrides["PATH"],
         )
 
         result = _run_state_query(
@@ -106,7 +104,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 "-c",
                 "import json, os; print(json.dumps(dict(os.environ), sort_keys=True))",
             ],
-            preflight_env_overrides=validation_overrides,
+            preflight_env_overrides=preflight_overrides,
         )
 
         sensitive_environment = {
@@ -124,17 +122,21 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
             self.assertNotIn(value, json.dumps(result))
         self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", expected)
         self.assertNotIn("CLAWPATCH_TEST_AMBIENT_SENTINEL", result)
-        self.assertEqual(
-            result["CLAWPATCH_TEST_VALIDATION_OVERRIDE"],
-            "owned-validation-override",
-        )
-        self.assertEqual(result.get("PATH"), os.environ.get("PATH"))
+        self.assertEqual(result["PATH"], "/supervisor-selected-path")
         platform_added = {"__CF_USER_TEXT_ENCODING"} if sys.platform == "darwin" else set()
         self.assertEqual(set(result) - set(expected), platform_added)
         self.assertEqual(
             {name: value for name, value in result.items() if name not in platform_added},
             expected,
         )
+
+    def test_state_query_rejects_non_path_preflight_override(self):
+        with self.assertRaisesRegex(SafetyError, "unexpected preflight environment"):
+            _run_state_query(
+                Path.cwd(),
+                [sys.executable, "-c", "raise SystemExit(0)"],
+                preflight_env_overrides={"NODE_OPTIONS": "--require=target-controlled.js"},
+            )
 
     def test_state_query_failure_reports_bounded_stdout_and_stderr(self):
         repo = Path("/tmp/example-repository")
@@ -804,7 +806,11 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         child_env = calls[0][1]["child_env_overrides"]
         self.assertEqual(child_env["TEST_DATABASE_URL"], "postgresql://127.0.0.1:49152/test")
         self.assertEqual(child_env["BTT_ALLOW_DATABASE_RESET"], "true")
-        self.assertEqual(child_env["PATH"], "C:\\working-codex-bin")
+        self.assertNotIn("PATH", child_env)
+        self.assertEqual(
+            calls[0][1]["supervisor_path_override"],
+            "C:\\working-codex-bin",
+        )
         for variable in ("TMPDIR", "TMP", "TEMP"):
             self.assertEqual(child_env[variable], str(lifecycle[1][2]))
         self.assertIn("VALIDATION SERVICE START", output.getvalue())
@@ -820,7 +826,6 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
     ):
         preflight_env = {
             "PATH": "/preflight/clawpatch/bin",
-            "CLAWPATCH_PREFLIGHT_SENTINEL": "ready",
         }
         completed = [
             SimpleNamespace(
@@ -865,7 +870,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         )
         expected_env = _release_clawpatch_env(
             trusted_host_codex_sandbox_bypass=False,
-            child_env_overrides=preflight_env,
+            supervisor_path_override=preflight_env["PATH"],
         )
         self.assertTrue(all(item.kwargs["env"] == expected_env for item in run.call_args_list))
 

@@ -230,6 +230,17 @@ def _clawpatch_control_env_overrides(
     return overrides
 
 
+def _clawpatch_supervisor_path_override(source: dict[str, str] | None) -> str | None:
+    if not source:
+        return None
+    if set(source) != {"PATH"}:
+        raise SafetyError("The supervisor received an unexpected preflight environment override.")
+    path = source["PATH"]
+    if not path or "\x00" in path:
+        raise SafetyError("The supervisor received an invalid preflight PATH override.")
+    return path
+
+
 def _release_clawpatch_env(
     *,
     trusted_host_codex_sandbox_bypass: bool,
@@ -237,6 +248,7 @@ def _release_clawpatch_env(
     child_timeout_seconds: int = CLAWPATCH_CHILD_WATCHDOG_SECONDS,
     deadline_monotonic: float | None = None,
     child_env_overrides: dict[str, str] | None = None,
+    supervisor_path_override: str | None = None,
 ) -> dict[str, str]:
     if child_timeout_seconds < 60:
         raise SafetyError("Clawpatch child timeout must be at least 60 seconds.")
@@ -246,6 +258,10 @@ def _release_clawpatch_env(
         if (value := os.environ.get(name)) is not None
     }
     overrides = _clawpatch_control_env_overrides(child_env_overrides or {})
+    if supervisor_path_override is not None:
+        if not supervisor_path_override or "\x00" in supervisor_path_override:
+            raise SafetyError("The supervisor received an invalid preflight PATH override.")
+        child_env["PATH"] = supervisor_path_override
     child_env["CLAWPATCH_CODEX_TIMEOUT_MS"] = str(child_timeout_seconds * 1_000)
     child_env["MANAGEROO_CLAWPATCH_CHILD_TIMEOUT_SECONDS"] = str(child_timeout_seconds)
     if deadline_monotonic is not None:
@@ -2196,6 +2212,7 @@ def release_sweep(
     progress: Callable[[dict[str, Any]], None] | None = None,
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
+    supervisor_path_override: str | None = None,
     advance_uncertain: bool = False,
     wait_on_preserved_source: bool = False,
     adopt_dirty: bool = False,
@@ -2216,6 +2233,7 @@ def release_sweep(
             progress=progress,
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
+            supervisor_path_override=supervisor_path_override,
             advance_uncertain=advance_uncertain,
             wait_on_preserved_source=wait_on_preserved_source,
             adopt_dirty=adopt_dirty,
@@ -2234,6 +2252,7 @@ def release_sweep(
             progress=progress,
             integration_mode=integration_mode,
             child_env_overrides=child_env_overrides,
+            supervisor_path_override=supervisor_path_override,
             advance_uncertain=advance_uncertain,
             wait_on_preserved_source=wait_on_preserved_source,
             adopt_dirty=adopt_dirty,
@@ -2254,6 +2273,7 @@ def _release_sweep_locked(
     progress: Callable[[dict[str, Any]], None] | None = None,
     integration_mode: str = "manageroo",
     child_env_overrides: dict[str, str] | None = None,
+    supervisor_path_override: str | None = None,
     advance_uncertain: bool = False,
     wait_on_preserved_source: bool = False,
     adopt_dirty: bool = False,
@@ -2295,6 +2315,7 @@ def _release_sweep_locked(
         progress=progress,
         integration_mode=integration_mode,
         child_env_overrides=child_env_overrides,
+        supervisor_path_override=supervisor_path_override,
         advance_uncertain=advance_uncertain,
         wait_on_preserved_source=wait_on_preserved_source,
         adopt_dirty=adopt_dirty,

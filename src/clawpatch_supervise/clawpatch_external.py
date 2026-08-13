@@ -18,6 +18,7 @@ from .clawpatch_release import (
     ClawpatchCommandFailure,
     ClawpatchStop,
     _clawpatch_control_env_overrides,
+    _clawpatch_supervisor_path_override,
     _parse_json_output,
     _release_clawpatch_env,
     external_state_root,
@@ -58,7 +59,9 @@ def _run_state_query(
         timeout_seconds=120,
         env=_release_clawpatch_env(
             trusted_host_codex_sandbox_bypass=False,
-            child_env_overrides=preflight_env_overrides,
+            supervisor_path_override=_clawpatch_supervisor_path_override(
+                preflight_env_overrides
+            ),
         ),
         kill_process_group=True,
     )
@@ -640,6 +643,9 @@ def main(
             )
             try:
                 preflight_env_overrides = ensure_repository_idle(repo) or {}
+                supervisor_path_override = _clawpatch_supervisor_path_override(
+                    preflight_env_overrides
+                )
                 break
             except RepositoryBusyError as exc:
                 print(
@@ -679,7 +685,6 @@ def main(
             child_env_overrides = _clawpatch_control_env_overrides(
                 validation_env_overrides,
                 owned_run.child_environment(),
-                preflight_env_overrides,
             )
             retry_attempt = 0
             while True:
@@ -696,6 +701,7 @@ def main(
                         progress=display_after_external_preflight,
                         integration_mode="external",
                         child_env_overrides=child_env_overrides,
+                        supervisor_path_override=supervisor_path_override,
                         advance_uncertain=False,
                         wait_on_preserved_source=False,
                         adopt_dirty=args.adopt_dirty,
