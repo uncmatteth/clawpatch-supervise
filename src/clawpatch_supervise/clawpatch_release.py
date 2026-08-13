@@ -272,12 +272,10 @@ def _run(
         errors="surrogateescape",
         timeout_start_barrier=timeout_start_barrier,
     )
-    output = result.stdout
-    if result.stderr:
-        output = output + ("\n" if output else "") + result.stderr
+    stderr = result.stderr
     if result.timed_out:
-        output = output + ("\n" if output else "") + "TIMEOUT"
-    return subprocess.CompletedProcess(command, result.exit_code, output, None)
+        stderr = stderr + ("\n" if stderr else "") + "TIMEOUT"
+    return subprocess.CompletedProcess(command, result.exit_code, result.stdout, stderr)
 
 
 def _platform_command(argv: list[str], *, platform_name: str) -> list[str]:
@@ -301,10 +299,12 @@ def _must_run(
     result = _run(argv, cwd=cwd, timeout=timeout, env=env)
     if result.returncode:
         safe_argv = redact_argv(argv)
-        safe_output = redact_text(result.stdout)
+        safe_stdout = redact_text(result.stdout or "")
+        safe_stderr = redact_text(result.stderr or "")
         raise SafetyError(
             f"command: {shlex.join(safe_argv)}\nexit code: {result.returncode}\n"
-            f"failed requirement: command must exit 0\noutput:\n{safe_output[-6000:]}"
+            f"failed requirement: command must exit 0\n"
+            f"stdout:\n{safe_stdout[-4000:]}\nstderr:\n{safe_stderr[-4000:]}"
         )
     return result.stdout
 
@@ -903,7 +903,7 @@ def _must_clawpatch(
         _component_ops(
             'SafetyError', '_ClawpatchCommandFailure', '_MissingFinding', '_child_timeout_seconds',
             '_clawpatch_command_phase', '_run_clawpatch', '_source_paths', 'classify_clawpatch_failure',
-            'shlex',
+            'redact_text', 'shlex',
         ),
         repo,
         argv,

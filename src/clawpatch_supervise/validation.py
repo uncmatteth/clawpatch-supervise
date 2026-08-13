@@ -189,6 +189,7 @@ def _impl_must_clawpatch(
     _run_clawpatch = ops['_run_clawpatch']
     _source_paths = ops['_source_paths']
     classify_clawpatch_failure = ops['classify_clawpatch_failure']
+    redact_text = ops['redact_text']
     shlex = ops['shlex']
     resolved_timeout = _child_timeout_seconds(env) if timeout is None else timeout
     command_phase = phase or _clawpatch_command_phase(argv)
@@ -227,11 +228,14 @@ def _impl_must_clawpatch(
         if result.returncode == 124
         else "command must exit 0"
     )
+    stdout = redact_text(output)[-4000:]
+    stderr = redact_text(result.stderr or "")[-4000:]
     raise _ClawpatchCommandFailure(
         f"phase: Clawpatch command\ncommand: {shlex.join(argv)}\nfinding ID: "
         f"{finding_id or 'N/A'}\nexit code: {result.returncode}\n"
         f"failed requirement: {watchdog}; this command is not retried\n"
-        f"changed source paths: {_source_paths(repo)}\noutput:\n{output[-6000:]}",
+        f"changed source paths: {_source_paths(repo)}\n"
+        f"stdout:\n{stdout}\nstderr:\n{stderr}",
         failure=classify_clawpatch_failure(command_phase, result.returncode),
     )
 

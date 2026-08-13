@@ -413,8 +413,8 @@ class PosixProcessTreeTerminationTests(unittest.TestCase):
                 timeout_start_barrier=lambda _process: wait_for_path(ready),
             )
 
-            self.assertEqual(result.returncode, 124, result.stdout)
-            self.assertIn("TIMEOUT", result.stdout)
+            self.assertEqual(result.returncode, 124, result.stderr)
+            self.assertIn("TIMEOUT", result.stderr)
             self.assertTrue(ready.is_file())
             assert_blocked_descendant_exited(
                 ready=ready,

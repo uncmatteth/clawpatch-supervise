@@ -42,6 +42,7 @@ from clawpatch_supervise.clawpatch_release import (
     _patch_attempt_from_show,
     _platform_command,
     _prepare_fresh_release,
+    _process_repository_root,
     _process_finding_until_fixed,
     _publish_final_state,
     _push_and_verify,
@@ -52,6 +53,7 @@ from clawpatch_supervise.clawpatch_release import (
     _resume_stopped_attempt,
     _revalidate,
     _review_all_features,
+    _run,
     _run_project_gates,
     _source_state_fingerprint,
     _status_entries,
@@ -93,16 +95,19 @@ def _hold_clawpatch_release_lock(repo: str, acquired, release) -> None:
 class ClawpatchReleaseSweepTests(unittest.TestCase):
     @staticmethod
     def completed(
-        argv: list[str], output: str = "", code: int = 0
+        argv: list[str], output: str = "", code: int = 0, stderr: str | None = None
     ) -> subprocess.CompletedProcess[str]:
-        return subprocess.CompletedProcess(argv, code, output, None)
+        return subprocess.CompletedProcess(argv, code, output, stderr)
 
     def test_must_run_redacts_failed_command_argv_and_output(self):
         with tempfile.TemporaryDirectory() as temp:
             argv = [
                 sys.executable,
                 "-c",
-                "print('authorization: Bearer stdout-secret'); raise SystemExit(9)",
+                (
+                    "import sys; print('authorization: Bearer stdout-secret'); "
+                    "print('password=stderr-secret', file=sys.stderr); raise SystemExit(9)"
+                ),
                 "--token",
                 "argument-secret",
             ]
@@ -113,8 +118,42 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         message = str(raised.exception)
         self.assertNotIn("argument-secret", message)
         self.assertNotIn("stdout-secret", message)
+        self.assertNotIn("stderr-secret", message)
         self.assertIn("<REDACTED>", message)
         self.assertIn("exit code: 9", message)
+        self.assertIn("stdout:\n", message)
+        self.assertIn("stderr:\n", message)
+
+    def test_machine_readable_consumers_ignore_successful_command_stderr(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            git_result = SimpleNamespace(
+                exit_code=0,
+                stdout=f"{root}\n",
+                stderr="warning: optional Git metadata unavailable\n",
+                timed_out=False,
+            )
+            json_result = SimpleNamespace(
+                exit_code=0,
+                stdout='{"openFindings": 0}\n',
+                stderr="warning: optional ClawPatch metadata unavailable\n",
+                timed_out=False,
+            )
+            with patch(
+                "clawpatch_supervise.clawpatch_release.CommandRunner.run",
+                side_effect=[git_result, json_result],
+            ):
+                self.assertEqual(_process_repository_root(root), root)
+                completed = _run(["clawpatch", "status", "--json"], cwd=root)
+
+        self.assertEqual(
+            _parse_json_output(completed.stdout, command="status --json"),
+            {"openFindings": 0},
+        )
+        self.assertEqual(
+            completed.stderr,
+            "warning: optional ClawPatch metadata unavailable\n",
+        )
 
     def test_windows_codex_preflight_skips_broken_long_path_launcher(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -6263,14 +6302,23 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
     @patch("clawpatch_supervise.clawpatch_release._run_clawpatch")
     def test_nonfix_clawpatch_timeout_stops_without_a_hidden_retry(self, run_clawpatch):
         argv = ["clawpatch", "show", "--finding", "fnd_one", "--json"]
-        run_clawpatch.return_value = self.completed(argv, "partial\nTIMEOUT", 124)
+        run_clawpatch.return_value = self.completed(
+            argv,
+            "partial output",
+            124,
+            "TIMEOUT",
+        )
 
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
             self.init_repo(repo)
-            with self.assertRaisesRegex(SafetyError, "this command is not retried"):
+            with self.assertRaisesRegex(
+                SafetyError, "this command is not retried"
+            ) as raised:
                 _must_clawpatch(repo, argv, env={})
 
+        self.assertIn("stdout:\npartial output", str(raised.exception))
+        self.assertIn("stderr:\nTIMEOUT", str(raised.exception))
         self.assertEqual(run_clawpatch.call_count, 1)
 
     @patch("clawpatch_supervise.clawpatch_release._run_clawpatch")

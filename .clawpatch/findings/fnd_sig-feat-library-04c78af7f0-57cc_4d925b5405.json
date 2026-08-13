@@ -36,11 +36,45 @@
   "whyTestsDoNotAlreadyCoverThis": "No linked tests were supplied, and no visible test exercises successful commands that also produce stderr.",
   "suggestedRegressionTest": "Simulate successful git and JSON commands with valid stdout plus warning text on stderr and assert parsing uses stdout unchanged.",
   "minimumFixScope": "Change _run to retain separate streams and update machine-readable consumers and tests.",
-  "status": "open",
-  "history": [],
+  "status": "uncertain",
+  "history": [
+    {
+      "runId": "20260813T121133-e5eb8f",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original paths and symbols still exist, but the current uncommitted repair separates stdout from stderr, and a no-write reproduction confirms Git-root and JSON consumers use clean stdout. A regression test covers valid stdout plus warning stderr. However, the targeted unittest could not run because no writable temporary directory was available; the linked attempt’s ruff/pytest commands also failed with exit 127. Per the validation rule, this cannot be marked fixed yet. Concrete blocker: rerun the targeted and full unittest suites with writable temporary storage.\n🚧 Manageroo: waiting on an external blocker",
+      "commands": [
+        "git status --short --branch && git log -5 --oneline --decorate",
+        "git diff -- README.md src/clawpatch_supervise/clawpatch_release.py src/clawpatch_supervise/validation.py tests/test_release.py tests/test_runner.py",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_release.ClawpatchReleaseSweepTests.test_machine_readable_consumers_ignore_successful_command_stderr -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'from pathlib import Path; from types import SimpleNamespace; from unittest.mock import patch; from clawpatch_supervise.clawpatch_release import _process_repository_root, _run, _parse_json_output; root=Path.cwd().resolve(); git_result=SimpleNamespace(exit_code=0, stdout=f\"{root}\\n\", stderr=\"warning: git\\n\", timed_out=False); json_result=SimpleNamespace(exit_code=0, stdout=\"{\\\"openFindings\\\": 0}\\n\", stderr=\"warning: json\\n\", timed_out=False); context=patch(\"clawpatch_supervise.clawpatch_release.CommandRunner.run\", side_effect=[git_result, json_result]); context.start(); assert _process_repository_root(root)==root; completed=_run([\"clawpatch\", \"status\", \"--json\"], cwd=root); context.stop(); assert _parse_json_output(completed.stdout, command=\"status --json\")=={\"openFindings\": 0}; assert completed.stderr==\"warning: json\\n\"; print(\"PASS: stdout remains machine-readable and stderr remains separate\")'"
+      ],
+      "createdAt": "2026-08-13T12:13:04.870Z"
+    },
+    {
+      "runId": "20260813T121705-49c679",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original evidence still exists at clawpatch_release.py lines 256-278, 312-338, and 535-539. The current uncommitted repair preserves stdout and stderr separately, and a direct no-write reproduction confirms both Git-root and JSON consumers receive clean stdout. A focused regression test exists at tests/test_release.py:127-156, and git diff --check passes. However, both the targeted test and full 350-test suite failed because no writable temporary directory is available; the targeted validation therefore did not pass, so fixed cannot be returned. Concrete blocker: rerun the targeted and full unittest suites with writable temporary storage.\n🚧 Manageroo: waiting on an external blocker\n✅ Done — revalidated the current finding as uncertain pending executable test proof",
+      "commands": [
+        "git status --short --branch && git log -5 --oneline --decorate",
+        "git diff -- README.md src/clawpatch_supervise/clawpatch_release.py src/clawpatch_supervise/validation.py tests/test_release.py tests/test_runner.py",
+        "rg -n \"^def _run\\(|^def _parse_json_output\\(|^def _process_repository_root\\(|machine_readable_consumers_ignore|successful.*stderr|stderr.*stdout\" src/clawpatch_supervise/clawpatch_release.py tests README.md",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_release.ClawpatchReleaseSweepTests.test_machine_readable_consumers_ignore_successful_command_stderr -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'from pathlib import Path; from types import SimpleNamespace; from unittest.mock import patch; from clawpatch_supervise.clawpatch_release import _process_repository_root, _run, _parse_json_output; root=Path.cwd().resolve(); git_result=SimpleNamespace(exit_code=0, stdout=f\"{root}\\n\", stderr=\"warning: git\\n\", timed_out=False); json_result=SimpleNamespace(exit_code=0, stdout=\"{\\\"openFindings\\\": 0}\\n\", stderr=\"warning: json\\n\", timed_out=False); context=patch(\"clawpatch_supervise.clawpatch_release.CommandRunner.run\", side_effect=[git_result, json_result]); context.start(); assert _process_repository_root(root)==root; completed=_run([\"clawpatch\", \"status\", \"--json\"], cwd=root); context.stop(); assert _parse_json_output(completed.stdout, command=\"status --json\")=={\"openFindings\": 0}; assert completed.stderr==\"warning: json\\n\"; print(\"PASS: stdout remains machine-readable and stderr remains separate\")'",
+        "git diff --check",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-13T12:18:56.258Z"
+    }
+  ],
   "signature": "sig_feat-library-04c78af7f0_57cc123b1c",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-04c78af7f0-_6e851ff656"
+  ],
   "createdByRunId": "20260812T224557-88ae82",
   "createdAt": "2026-08-12T22:50:15.979Z",
-  "updatedAt": "2026-08-12T22:50:15.979Z"
+  "updatedAt": "2026-08-13T12:18:56.258Z"
 }
