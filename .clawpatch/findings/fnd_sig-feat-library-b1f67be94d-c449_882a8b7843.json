@@ -57,13 +57,28 @@
         "✅ Done — finding revalidated against the current repository; it remains open"
       ],
       "createdAt": "2026-08-13T14:42:49.149Z"
+    },
+    {
+      "runId": "20260813T195929-d071ba",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "README evidence moved to lines 174-177, 200-201, and 217-218. Current external mode still passes advance_uncertain=False, QueueResult.complete requires uncertain_findings == 0, and tests require retained uncertainty to exit 2 without COMPLETE. The README-only repair remains unsupported. ✅ Done — finding revalidated against the current repository; it remains open",
+      "commands": [
+        "git status --short",
+        "nl -ba README.md | sed -n '160,225p'",
+        "rg -n \"advance_uncertain|uncertain_findings|retained uncertain\" README.md src tests",
+        "git diff -- README.md"
+      ],
+      "createdAt": "2026-08-13T20:02:28.021Z"
     }
   ],
   "signature": "sig_feat-library-b1f67be94d_c44901c174",
   "linkedPatchAttemptIds": [
-    "pat_fnd-sig-feat-library-b1f67be94d-_8d6b3482bb"
+    "pat_fnd-sig-feat-library-b1f67be94d-_8d6b3482bb",
+    "pat_fnd-sig-feat-library-b1f67be94d-_644c1aa50e"
   ],
   "createdByRunId": "20260813T133248-ffb3b5",
   "createdAt": "2026-08-13T13:34:41.202Z",
-  "updatedAt": "2026-08-13T14:42:49.149Z"
+  "updatedAt": "2026-08-13T20:02:28.021Z"
 }
