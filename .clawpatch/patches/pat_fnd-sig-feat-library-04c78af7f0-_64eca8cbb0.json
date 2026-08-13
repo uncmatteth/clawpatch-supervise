@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-library-04c78af7f0-_64eca8cbb0",
+  "findingIds": [
+    "fnd_sig-feat-library-04c78af7f0-3db4_71587618b1"
+  ],
+  "featureIds": [
+    "feat_library_04c78af7f0"
+  ],
+  "status": "failed",
+  "plan": " ✅ Done — Windows process preflight is repository-scoped, recognizes clawpatch-supervise.exe, and has focused regression coverage. ",
+  "filesChanged": [
+    "README.md",
+    "src/clawpatch_supervise/clawpatch_release.py",
+    "tests/test_release.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    }
+  ],
+  "testResults": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-08-13T02:00:37.730Z",
+    "finishedAt": "2026-08-13T02:11:28.823Z"
+  },
+  "git": {
+    "baseSha": "eee014f57b458b349325177af9ea6e83b6ff5d76",
+    "commitSha": null,
+    "branchName": "main",
+    "prUrl": null
+  },
+  "createdAt": "2026-08-13T02:00:37.729Z",
+  "updatedAt": "2026-08-13T02:11:28.823Z"
+}

@@ -613,8 +613,8 @@ def _windows_clawpatch_processes(root: Path) -> list[dict[str, Any]]:
         raise SafetyError("Could not inspect live Clawpatch processes on Windows.")
     script = (
         "$rows = Get-CimInstance Win32_Process | Where-Object { "
-        "$_.ProcessId -ne $PID -and $_.CommandLine -and "
-        "$_.CommandLine -match '(?i)(^|[\\\\/\\s])clawpatch(?:\\.cmd|\\.exe|\\.js)?(?:\\s|$)' }; "
+        f"$_.ProcessId -ne $PID -and $_.ProcessId -ne {os.getpid()} -and $_.CommandLine"
+        " }; "
         "$rows | Select-Object ProcessId,CommandLine | ConvertTo-Json -Compress"
     )
     result = _run(
@@ -635,11 +635,40 @@ def _windows_clawpatch_processes(root: Path) -> list[dict[str, Any]]:
     for row in rows:
         if not isinstance(row, dict):
             raise SafetyError("Windows returned malformed Clawpatch process data.")
+        command = str(row.get("CommandLine") or "").strip()
+        try:
+            argv = [
+                value[1:-1] if len(value) >= 2 and value[0] == value[-1] == '"' else value
+                for value in shlex.split(command, posix=False)
+            ]
+        except ValueError:
+            argv = []
+        if not _is_clawpatch_argv(argv):
+            continue
+        declared_roots = [
+            next(value for value in match.groups() if value is not None)
+            for match in re.finditer(
+                r'(?i)(?:^|\s)--(?:repo|root)(?:=|\s+)(?:"([^"]+)"|(\S+))',
+                command,
+            )
+        ]
+        process_root = None
+        if len(declared_roots) == 1 and PureWindowsPath(declared_roots[0]).is_absolute():
+            process_root = _process_repository_root(Path(declared_roots[0]))
+        if process_root is None:
+            raise SafetyError(
+                f"Could not establish repository ownership for Clawpatch process "
+                f"{row.get('ProcessId')}."
+            )
+        if str(PureWindowsPath(process_root)).rstrip("\\/").casefold() != str(
+            PureWindowsPath(root)
+        ).rstrip("\\/").casefold():
+            continue
         found.append(
             {
                 "pid": row.get("ProcessId"),
-                "cwd": "unknown; Windows process inspection is conservative",
-                "command": str(row.get("CommandLine") or "").strip(),
+                "cwd": str(process_root),
+                "command": command,
             }
         )
     return found

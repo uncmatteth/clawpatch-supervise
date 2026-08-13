@@ -102,6 +102,7 @@ When divergent-history recovery must align to the remote tree, the supervisor ke
 Bare `clawpatch-supervise` uses ClawPatch's finding-level validation and does not run Manageroo's configured full-repository gates, even when the target repository contains `.manageroo/config.toml`. Full project builds and other Manageroo proof gates remain owned by a controlled Manageroo run.
 
 The supervisor resolves `--repo` to one canonical path before preflight and uses that same path for the entire run, so retargeting a repository symlink cannot redirect later repair work.
+On Windows, process preflight applies the same executable matcher used on other platforms—including `clawpatch-supervise.exe`—and compares the canonical Git root declared by an absolute `--repo` or `--root`; processes for other repositories are ignored, while a recognized candidate whose repository cannot be proven still fails closed.
 
 ### Clean up transient run data without deleting receipts
 

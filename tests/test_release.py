@@ -2286,19 +2286,39 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
     @patch("clawpatch_supervise.clawpatch_release._run")
     @patch("clawpatch_supervise.clawpatch_release.shutil.which", return_value="powershell.exe")
-    def test_windows_process_inventory_uses_native_powershell(self, _which, run):
+    @patch("clawpatch_supervise.clawpatch_release._process_repository_root")
+    def test_windows_process_inventory_is_repository_scoped(self, process_root, _which, run):
+        process_root.side_effect = lambda path: path
         run.return_value = self.completed(
             ["powershell.exe"],
             json.dumps(
-                {
-                    "ProcessId": 42,
-                    "CommandLine": "node C:/Users/Test/AppData/Roaming/npm/node_modules/clawpatch review",
-                }
+                [
+                    {
+                        "ProcessId": 42,
+                        "CommandLine": "C:/Tools/clawpatch-supervise.exe --repo C:/repo",
+                    },
+                    {
+                        "ProcessId": 43,
+                        "CommandLine": "C:/Tools/clawpatch.exe --root C:/other review",
+                    },
+                    {
+                        "ProcessId": 44,
+                        "CommandLine": "C:/Tools/unrelated.exe --repo C:/repo",
+                    },
+                ]
             ),
         )
         processes = _windows_clawpatch_processes(Path("C:/repo"))
-        self.assertEqual(processes[0]["pid"], 42)
-        self.assertIn("conservative", processes[0]["cwd"])
+        self.assertEqual(
+            processes,
+            [
+                {
+                    "pid": 42,
+                    "cwd": "C:/repo",
+                    "command": "C:/Tools/clawpatch-supervise.exe --repo C:/repo",
+                }
+            ],
+        )
         self.assertEqual(run.call_args.args[0][0], "powershell.exe")
 
     def test_exhausted_checkpoint_follows_only_a_disjoint_supervisor_upgrade(self):

@@ -36,11 +36,25 @@
   "whyTestsDoNotAlreadyCoverThis": "No Windows process-detection tests were linked or included.",
   "suggestedRegressionTest": "Mock same-repository clawpatch-supervise.exe, other-repository clawpatch.exe, and unrelated processes; assert only the same-repository supervisor is returned.",
   "minimumFixScope": "Replace or extend _windows_clawpatch_processes and add repository-scoping and executable-name tests.",
-  "status": "open",
-  "history": [],
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260813T022911-f6c612",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "Original evidence remains present; current code and focused tests support the repair.",
+      "commands": [
+        " ✅ Done — revalidated the Windows process-preflight finding as fixed in the current worktree."
+      ],
+      "createdAt": "2026-08-13T02:36:05.581Z"
+    }
+  ],
   "signature": "sig_feat-library-04c78af7f0_3db4093ba8",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-04c78af7f0-_64eca8cbb0"
+  ],
   "createdByRunId": "20260812T224557-88ae82",
   "createdAt": "2026-08-12T22:50:15.979Z",
-  "updatedAt": "2026-08-12T22:50:15.979Z"
+  "updatedAt": "2026-08-13T02:36:05.581Z"
 }
