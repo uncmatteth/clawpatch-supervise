@@ -103,6 +103,33 @@ _CLAWPATCH_POLICY_ENV_NAMES = frozenset(
     }
 )
 _PYTHON_IMPORT_ENV_NAMES = frozenset({"PYTHONHOME", "PYTHONPATH"})
+_PROCESS_CONTROL_ENV_NAMES = frozenset(
+    {
+        "BASH_ENV",
+        "COMSPEC",
+        "DOTNET_STARTUP_HOOKS",
+        "ENV",
+        "JDK_JAVA_OPTIONS",
+        "JAVA_TOOL_OPTIONS",
+        "KSHENV",
+        "LIBPATH",
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "PATH",
+        "PATHEXT",
+        "PERL5LIB",
+        "PERL5OPT",
+        "PHPRC",
+        "PHP_INI_SCAN_DIR",
+        "RUBYLIB",
+        "RUBYOPT",
+        "SHELL",
+        "SHLIB_PATH",
+        "ZDOTDIR",
+        "_JAVA_OPTIONS",
+    }
+)
+_PROCESS_CONTROL_ENV_PREFIXES = ("DYLD_", "LD_")
 _SUPERVISOR_UPGRADE_PATHS = frozenset(
     {
         "AGENTS.md",
@@ -189,9 +216,16 @@ def _clawpatch_control_env_overrides(
             raise SafetyError(
                 f"Validation services cannot override Python import environment variable {name}."
             )
-        if name.upper() in _CLAWPATCH_POLICY_ENV_NAMES:
+        normalized_name = name.upper()
+        if normalized_name in _CLAWPATCH_POLICY_ENV_NAMES:
             raise SafetyError(
                 f"Validation services cannot override policy-owned supervisor variable {name}."
+            )
+        if normalized_name in _PROCESS_CONTROL_ENV_NAMES or normalized_name.startswith(
+            _PROCESS_CONTROL_ENV_PREFIXES
+        ):
+            raise SafetyError(
+                f"Validation services cannot override process-control environment variable {name}."
             )
     return overrides
 

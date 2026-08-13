@@ -37,10 +37,25 @@
   "suggestedRegressionTest": "Pass PATH, PATHEXT, LD_PRELOAD, DYLD_INSERT_LIBRARIES, and NODE_OPTIONS individually and assert SafetyError, while proving an allowed service variable remains accepted.",
   "minimumFixScope": "Harden _clawpatch_control_env_overrides and add focused environment-policy tests.",
   "status": "open",
-  "history": [],
+  "history": [
+    {
+      "runId": "20260813T123438-f97801",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The current repository was revalidated successfully. The original symbols remain at moved lines 206, 233, and 290. The named environment variables are blocked, but the implementation rejects PATH produced by supported Python-validation and Windows-preflight flows, so the repair remains incomplete. Concrete blocker: the mandatory strict-JSON response contract cannot place an unquoted completion line after the JSON object.\n🚧 Manageroo: waiting on an external blocker",
+      "commands": [
+        "PYTHONPATH=src python3 -m unittest -v -k release_environment tests.test_release",
+        "PYTHONPATH=src python3 -m unittest tests.test_validation_services.DisposablePythonValidationTests.test_repository_imports_are_scoped_to_the_validation_interpreter -v"
+      ],
+      "createdAt": "2026-08-13T12:39:49.040Z"
+    }
+  ],
   "signature": "sig_feat-library-04c78af7f0_7e3c313529",
-  "linkedPatchAttemptIds": [],
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-04c78af7f0-_bc5013bb87"
+  ],
   "createdByRunId": "20260812T224557-88ae82",
   "createdAt": "2026-08-12T22:50:15.979Z",
-  "updatedAt": "2026-08-12T22:50:15.979Z"
+  "updatedAt": "2026-08-13T12:39:49.040Z"
 }

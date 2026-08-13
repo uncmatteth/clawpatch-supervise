@@ -114,13 +114,8 @@ class DisposablePythonValidationTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(created.returncode, 0, created.stderr)
-            executable_dir = environment / ("Scripts" if os.name == "nt" else "bin")
-            validation_python = executable_dir / (
-                "python.exe" if os.name == "nt" else "python"
-            )
             _expose_repository_to_validation_python(environment, repo)
             validation_overrides = {
-                "PATH": str(executable_dir) + os.pathsep + os.environ.get("PATH", ""),
                 "VIRTUAL_ENV": str(environment),
             }
             control_env = _release_clawpatch_env(

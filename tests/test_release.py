@@ -1754,6 +1754,22 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                         child_env_overrides={name: "/target-controlled"},
                     )
 
+    def test_release_environment_rejects_process_control_overrides(self):
+        for name in (
+            "PATH",
+            "PATHEXT",
+            "LD_PRELOAD",
+            "DYLD_INSERT_LIBRARIES",
+            "NODE_OPTIONS",
+            "BASH_ENV",
+        ):
+            with self.subTest(name=name):
+                with self.assertRaisesRegex(SafetyError, "process-control environment"):
+                    _release_clawpatch_env(
+                        trusted_host_codex_sandbox_bypass=False,
+                        child_env_overrides={name: "/target-controlled"},
+                    )
+
     def test_process_matcher_ignores_clawpatch_mentions_inside_gbrain_context(self):
         gbrain = [
             "bun",
