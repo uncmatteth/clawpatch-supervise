@@ -630,6 +630,31 @@ def _process_repository_root(cwd: Path) -> Path | None:
     return Path(result.stdout.strip()).resolve()
 
 
+def _clawpatch_process_repository_root(argv: list[str], cwd: Path) -> Path | None:
+    supervisor_tokens = {
+        "clawpatch-supervise",
+        "clawpatch-supervise.exe",
+        "clawpatch_supervise",
+        "clawpatch_supervise.clawpatch_external",
+        "manageroo.clawpatch_external",
+    }
+    is_supervisor = any(
+        value in supervisor_tokens or _command_name(value) in supervisor_tokens
+        for value in argv
+    )
+    declared_repo: str | None = None
+    if is_supervisor:
+        for index, value in enumerate(argv):
+            if value == "--repo" and index + 1 < len(argv):
+                declared_repo = argv[index + 1]
+            elif value.startswith("--repo="):
+                declared_repo = value.partition("=")[2]
+    candidate = Path(declared_repo) if declared_repo is not None else cwd
+    if not candidate.is_absolute():
+        candidate = cwd / candidate
+    return _process_repository_root(candidate)
+
+
 def _active_clawpatch_processes(repo: Path) -> list[dict[str, Any]]:
     root = repo.resolve()
     found: list[dict[str, Any]] = []
@@ -650,7 +675,7 @@ def _active_clawpatch_processes(repo: Path) -> list[dict[str, Any]]:
                 cwd = (entry / "cwd").resolve()
             except (FileNotFoundError, PermissionError, OSError):
                 continue
-            if _process_repository_root(cwd) == root:
+            if _clawpatch_process_repository_root(argv, cwd) == root:
                 found.append({"pid": int(entry.name), "cwd": str(cwd), "command": cmdline.strip()})
         return found
     if os.name == "nt":
@@ -676,7 +701,7 @@ def _active_clawpatch_processes(repo: Path) -> list[dict[str, Any]]:
         if not _is_clawpatch_argv(argv):
             continue
         cwd = _unix_process_cwd(pid, root)
-        if cwd is not None and _process_repository_root(cwd) == root:
+        if cwd is not None and _clawpatch_process_repository_root(argv, cwd) == root:
             found.append({"pid": pid, "cwd": str(cwd), "command": command})
     return found
 

@@ -1913,6 +1913,54 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ],
             )
 
+    @unittest.skipIf(os.name == "nt", "POSIX process inventory only")
+    @patch("clawpatch_supervise.clawpatch_release.Path.is_dir", return_value=False)
+    @patch("clawpatch_supervise.clawpatch_release.os.getpid", return_value=101)
+    @patch("clawpatch_supervise.clawpatch_release.shutil.which", return_value="/usr/bin/lsof")
+    @patch("clawpatch_supervise.clawpatch_release._run")
+    def test_unix_process_inventory_uses_supervisor_repo_argument(
+        self, run, _which, _getpid, _is_dir
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            repo = (root / "repo").resolve()
+            outside = (root / "outside").resolve()
+            repo.mkdir()
+            outside.mkdir()
+
+            def inspect(argv, **kwargs):
+                if argv[0] == "ps":
+                    return self.completed(
+                        argv,
+                        f"202 clawpatch-supervise --repo {repo}\n"
+                        "303 python3 -m clawpatch_supervise --repo=../repo\n",
+                    )
+                if argv[0] == "git":
+                    cwd = Path(kwargs["cwd"]).resolve()
+                    if cwd == repo:
+                        return self.completed(argv, f"{repo}\n")
+                    return self.completed(argv, code=128)
+                pid = argv[argv.index("-p") + 1]
+                return self.completed(argv, f"p{pid}\nfcwd\nn{outside}\n")
+
+            run.side_effect = inspect
+
+            self.assertEqual(
+                _active_clawpatch_processes(repo),
+                [
+                    {
+                        "pid": 202,
+                        "cwd": str(outside),
+                        "command": f"clawpatch-supervise --repo {repo}",
+                    },
+                    {
+                        "pid": 303,
+                        "cwd": str(outside),
+                        "command": "python3 -m clawpatch_supervise --repo=../repo",
+                    },
+                ],
+            )
+
     def test_pushable_branch_accepts_a_clean_local_ahead_history_before_fixing(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
