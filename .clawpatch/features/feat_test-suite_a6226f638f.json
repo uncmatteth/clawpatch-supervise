@@ -149,21 +149,23 @@
     "test"
   ],
   "trustBoundaries": [],
-  "status": "reviewed",
+  "status": "fixed",
   "lock": null,
-  "findingIds": [],
+  "findingIds": [
+    "fnd_sig-feat-test-suite-a6226f638f-3_2035fb688e"
+  ],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260812T224557-88ae82",
+      "runId": "20260813T133248-ffb3b5",
       "kind": "review",
-      "summary": "0 finding(s); prompt=217009 bytes; approxTokens=54244; includedFiles=11; omittedFiles=0",
+      "summary": "1 finding(s); prompt=216660 bytes; approxTokens=54157; includedFiles=11; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-12T22:49:35.760Z"
+      "createdAt": "2026-08-13T13:37:13.388Z"
     }
   ],
-  "createdAt": "2026-08-12T22:45:48.252Z",
-  "updatedAt": "2026-08-12T22:49:35.760Z"
+  "createdAt": "2026-08-13T13:32:48.439Z",
+  "updatedAt": "2026-08-13T14:10:40.609Z"
 }

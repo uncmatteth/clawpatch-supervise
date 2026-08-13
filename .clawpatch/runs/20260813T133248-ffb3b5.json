@@ -1,16 +1,17 @@
 {
   "schemaVersion": 1,
-  "runId": "20260812T224557-88ae82",
+  "runId": "20260813T133248-ffb3b5",
   "command": "review",
   "args": [
     "review",
     "--limit",
-    "8"
+    "7",
+    "--json"
   ],
   "rootPath": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
-  "headSha": "8da2a898b7086db119030b3c5468a3aa32681d8e",
-  "startedAt": "2026-08-12T22:45:57.873Z",
-  "finishedAt": "2026-08-12T22:54:57.380Z",
+  "headSha": "ad64213c366f553da1489e4a5ff5516f6a1caab9",
+  "startedAt": "2026-08-13T13:32:48.693Z",
+  "finishedAt": "2026-08-13T13:37:19.715Z",
   "status": "completed",
   "claimedFeatureIds": [
     "feat_cli-command_5181306ec0",
@@ -22,11 +23,11 @@
     "feat_test-suite_a6226f638f"
   ],
   "findingIds": [
-    "fnd_sig-feat-config-cf96aef71d-cf376_ab0ba8115d",
-    "fnd_sig-feat-library-04c78af7f0-7e3c_3e0bfc02d7",
-    "fnd_sig-feat-library-04c78af7f0-57cc_4d925b5405",
-    "fnd_sig-feat-library-04c78af7f0-3db4_71587618b1",
-    "fnd_sig-feat-library-b1f67be94d-9bbd_d3096414b8"
+    "fnd_sig-feat-library-b1f67be94d-c449_882a8b7843",
+    "fnd_sig-feat-config-cf96aef71d-9a409_49e4e3f5ee",
+    "fnd_sig-feat-test-suite-a6226f638f-3_2035fb688e",
+    "fnd_sig-feat-library-04c78af7f0-ad12_9d33aede4f",
+    "fnd_sig-feat-library-04c78af7f0-3f6b_cb142aa0f9"
   ],
   "patchAttemptIds": [],
   "errors": []

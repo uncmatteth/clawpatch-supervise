@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-04c78af7f0-ad12_9d33aede4f",
+  "featureId": "feat_library_04c78af7f0",
+  "title": "Windows command resolution ignores the child environment's vetted PATH",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_release.py",
+      "startLine": 285,
+      "endLine": 320,
+      "symbol": "_release_clawpatch_env",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_release.py",
+      "startLine": 347,
+      "endLine": 380,
+      "symbol": "_run / _platform_command",
+      "quote": null
+    }
+  ],
+  "reasoning": "On Windows, _platform_command calls shutil.which before CommandRunner receives the supplied child environment. Resolution therefore uses the ambient PATH instead of the preflight-selected child PATH and can execute a different ClawPatch binary.",
+  "reproduction": "Put different clawpatch.cmd files on the ambient PATH and env[\"PATH\"], then call _run([\"clawpatch\"], env=env). The ambient executable is resolved.",
+  "recommendation": "Pass the effective child PATH into _platform_command and call shutil.which with that explicit path.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests or Windows PATH-resolution assertions were supplied.",
+  "suggestedRegressionTest": "Assert that Windows resolution selects clawpatch exclusively from env[\"PATH\"], not os.environ[\"PATH\"].",
+  "minimumFixScope": "Update _run and _platform_command and add a Windows regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260813T135624-b1d29b",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence remains. Current _run passes env[\"PATH\"] into _platform_command, which supplies that path explicitly to shutil.which. Both focused Windows PATH-resolution regressions pass; the linked attempt’s failures were unrelated to this repair. ✅ Done — Windows child-PATH command resolution revalidated as fixed.",
+      "commands": [
+        "PYTHONPATH=src python3 -m unittest -v tests.test_release.ClawpatchReleaseSweepTests.test_windows_resolves_clawpatch_command_shim_without_a_shell tests.test_release.ClawpatchReleaseSweepTests.test_windows_run_resolves_clawpatch_from_child_path"
+      ],
+      "createdAt": "2026-08-13T13:59:02.399Z"
+    }
+  ],
+  "signature": "sig_feat-library-04c78af7f0_ad12356c22",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-04c78af7f0-_5d485333d2"
+  ],
+  "createdByRunId": "20260813T133248-ffb3b5",
+  "createdAt": "2026-08-13T13:37:19.714Z",
+  "updatedAt": "2026-08-13T13:59:02.399Z"
+}

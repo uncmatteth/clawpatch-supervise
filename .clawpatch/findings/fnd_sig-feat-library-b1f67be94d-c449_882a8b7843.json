@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b1f67be94d-c449_882a8b7843",
+  "featureId": "feat_library_b1f67be94d",
+  "title": "README documents obsolete external-mode uncertain handling",
+  "category": "docs-gap",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "docs-gap",
+  "evidence": [
+    {
+      "path": "README.md",
+      "startLine": 173,
+      "endLine": 174,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "README.md",
+      "startLine": 197,
+      "endLine": 198,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "README.md",
+      "startLine": 214,
+      "endLine": 215,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The README says external unattended mode retains uncertain findings in the same-finding repair loop, while the authoritative project contract permits committing an uncertain repair, advancing to the next open finding, and honestly reporting the retained uncertainty. Only strict library mode retains the stop behavior.",
+  "reproduction": null,
+  "recommendation": "Update the README to distinguish external unattended behavior from strict library behavior, including completion-proof and exit-status semantics.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are linked to this feature, and behavioral tests would not detect stale documentation.",
+  "suggestedRegressionTest": "Add a documentation contract check requiring distinct descriptions of external and strict-library uncertain handling.",
+  "minimumFixScope": "README.md uncertain-handling descriptions only.",
+  "status": "open",
+  "history": [
+    {
+      "runId": "20260813T142956-a65aeb",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "README evidence was rewritten, but current runtime still disables external uncertain advancement and retained-uncertainty completion; required validation failed. ✅ Done — revalidation finished; finding remains open ",
+      "commands": [],
+      "createdAt": "2026-08-13T14:38:42.230Z"
+    },
+    {
+      "runId": "20260813T143842-227764",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "README evidence moved, but current external behavior still disables uncertain advancement and successful retained-uncertainty completion.",
+      "commands": [
+        "✅ Done — finding revalidated against the current repository; it remains open"
+      ],
+      "createdAt": "2026-08-13T14:42:49.149Z"
+    }
+  ],
+  "signature": "sig_feat-library-b1f67be94d_c44901c174",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-b1f67be94d-_8d6b3482bb"
+  ],
+  "createdByRunId": "20260813T133248-ffb3b5",
+  "createdAt": "2026-08-13T13:34:41.202Z",
+  "updatedAt": "2026-08-13T14:42:49.149Z"
+}

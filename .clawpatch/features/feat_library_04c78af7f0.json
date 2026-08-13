@@ -40,25 +40,24 @@
     "source-group"
   ],
   "trustBoundaries": [],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": [
-    "fnd_sig-feat-library-04c78af7f0-7e3c_3e0bfc02d7",
-    "fnd_sig-feat-library-04c78af7f0-57cc_4d925b5405",
-    "fnd_sig-feat-library-04c78af7f0-3db4_71587618b1"
+    "fnd_sig-feat-library-04c78af7f0-ad12_9d33aede4f",
+    "fnd_sig-feat-library-04c78af7f0-3f6b_cb142aa0f9"
   ],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260812T224557-88ae82",
+      "runId": "20260813T133248-ffb3b5",
       "kind": "review",
-      "summary": "3 finding(s); prompt=68861 bytes; approxTokens=17167; includedFiles=4; omittedFiles=0",
+      "summary": "2 finding(s); prompt=68873 bytes; approxTokens=17170; includedFiles=4; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-12T22:50:15.980Z"
+      "createdAt": "2026-08-13T13:37:19.715Z"
     }
   ],
-  "createdAt": "2026-08-12T22:45:48.252Z",
-  "updatedAt": "2026-08-12T22:50:15.980Z"
+  "createdAt": "2026-08-13T13:32:48.439Z",
+  "updatedAt": "2026-08-13T13:59:02.400Z"
 }

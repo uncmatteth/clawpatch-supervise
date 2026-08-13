@@ -35,20 +35,20 @@
   "status": "needs-fix",
   "lock": null,
   "findingIds": [
-    "fnd_sig-feat-library-b1f67be94d-9bbd_d3096414b8"
+    "fnd_sig-feat-library-b1f67be94d-c449_882a8b7843"
   ],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260812T224557-88ae82",
+      "runId": "20260813T133248-ffb3b5",
       "kind": "review",
-      "summary": "1 finding(s); prompt=31657 bytes; approxTokens=7874; includedFiles=2; omittedFiles=0",
+      "summary": "1 finding(s); prompt=31655 bytes; approxTokens=7872; includedFiles=2; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-12T22:52:21.998Z"
+      "createdAt": "2026-08-13T13:34:41.203Z"
     }
   ],
-  "createdAt": "2026-08-12T22:45:48.252Z",
-  "updatedAt": "2026-08-12T22:52:21.998Z"
+  "createdAt": "2026-08-13T13:32:48.439Z",
+  "updatedAt": "2026-08-13T13:34:41.203Z"
 }

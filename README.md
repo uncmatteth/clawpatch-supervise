@@ -171,8 +171,8 @@ The supervisor provides:
 - complete map/review waves with a decreasing-pending proof;
 - automatic ClawPatch agent mapping when the heuristic mapper reports zero features, so unsupported languages such as Solidity are not falsely declared empty;
 - one-current-finding `next → show → fix → revalidate` ordering;
-- fail-closed uncertain handling: an uncertain finding stays in the same-finding repair loop and
-  can never produce completion proof or exit `0`;
+- mode-specific uncertain handling: the external unattended command commits an applied uncertain
+  repair and advances, while strict library/Manageroo mode keeps it in the same-finding loop;
 - exact-path temporary commits for genuine partial progress;
 - same-finding continuation only when ClawPatch produced a new source tree;
 - durable checkpoints outside the repository being repaired;
@@ -195,8 +195,8 @@ The supervisor provides:
 |---|---|
 | `fixed` with a verified repair | Create one exact-path repair commit, push if requested, continue. |
 | `open` with a genuinely new source tree | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
-| `uncertain` from the external unattended command | Preserve the exact repair and re-enter the same finding. Never advance to successful completion while uncertainty remains. |
-| `uncertain` from strict library/Manageroo mode | Preserve the iteration locally and re-enter the same finding with the validator's evidence. |
+| `uncertain` from the external unattended command with an applied repair | Create one exact-path repair commit, retain the uncertain finding in the final count, and advance to the next open finding. |
+| `uncertain` from strict library/Manageroo mode | Preserve the iteration locally and re-enter the same finding with the validator's evidence; do not produce completion proof or exit `0` while uncertainty remains. |
 | `fix` exits `6` after applying source progress | Save the exact repair, run `revalidate` on that repair before another `fix`, finalize it when revalidation says `fixed`, or continue the same finding with new `open` or `uncertain` evidence. |
 | `fix` exits `6` without another source diff | Revalidate the code already present. If ClawPatch now proves it `fixed`, continue without demanding a duplicate edit or empty commit. |
 | `fix` times out or loses its provider after applying source progress | Save the exact repair and revalidate it before spending another provider attempt; finalize immediately when the saved repair is already fixed. |
@@ -212,8 +212,8 @@ The supervisor provides:
 | Conflicting clean local and remote histories | Preserve local history under a local-only recovery ref, align the active branch to stable origin, restore `.clawpatch`, and continue. |
 | A current input baseline conflicts with the remote branch | Keep the baseline current and stop on the real Git conflict; never replace it with remote source. |
 | Detached, missing, or moving Git state | Exit `2` and leave the evidence for inspection. |
-| External run reaches zero open findings with uncertain findings retained | Do not write completion proof, do not print `COMPLETE`, and exit nonzero. |
-| Strict final review proves zero remaining work | Write `status: COMPLETE` proof, retain `.clawpatch` so `clawpatch status` remains verifiable, and exit `0`. |
+| External run reaches zero open findings with uncertain findings retained | Write completion proof with the retained uncertain count, print `COMPLETE`, and exit `0` when every other closure check passes. |
+| Strict library/Manageroo final review | Write `status: COMPLETE` proof and exit `0` only when both open and uncertain counts are zero; otherwise preserve the checkpoint and stop nonzero. |
 
 ## Built for real repositories
 
@@ -231,13 +231,13 @@ Real repair queues run into restarts, provider failures, overlapping findings, n
 - **Finished release work does not strand the queue.** If Git HEAD cleanly advances from a checkpoint's base and its temporary iteration commit still proves the same finding, the supervisor accepts both a retained dangling iteration and an iteration already included in that clean history, then retires only the obsolete recovery wrapper. Unrelated dirty paths remain untouched and require explicit adoption before a later baseline. The same recovery applies when a source-clean checkpoint owns no paths and has no temporary commit, because there is no repair content to lose. It preserves `.clawpatch` and lets ClawPatch select that finding or the next one normally.
 - **Reset-capable database tests stay disposable.** A detected PostgreSQL test contract must declare an official `postgres@sha256:<64 lowercase hex characters>` image and always receives a newly owned loopback-only database from that exact immutable artifact. The sanitized environment is passed exactly so inherited database credentials and reset guards stay removed from ClawPatch child processes. After successful startup, cleanup uses the exact generated container name even if Docker returns malformed container-ID output.
 - **Python provisioning cannot run repository build hooks on the host.** Repositories with target-declared dependencies fail closed while no OS-enforced provisioning sandbox is available. Dependency-free projects receive only wheel-distributed pytest in a sanitized disposable venv; the target project is never installed, and a venv-local path file exposes its source only to the validation interpreter. Validation services cannot override executable-resolution, loader, runtime-hook, or shell-startup variables; the supervisor derives the disposable venv executable path from its owner-only temporary root and keeps it outside the service-variable channel.
-- **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. Uncertainty never advances into a successful result.
+- **New evidence gets another chance.** Open and uncertain revalidations retry through the bounded read-only, workspace-write, and authorized trusted-host ladder. An applied uncertain repair advances only in the external unattended command; strict library/Manageroo mode keeps retrying the same finding.
 - **Bare invocation owns the workflow, not infinity.** The default command resumes the current `.clawpatch` queue and exact stopped checkpoint, revalidates the same finding, reconciles clean Git histories, and retries transient failures within the invocation budget. A service manager owns repeated process starts.
 - **Machine-readable command output stays clean.** JSON, Git roots, and other structured command results use stdout only; stderr diagnostics remain separate and are included with separately bounded, redacted stdout context when a command fails.
 - **Zero heuristic features are not completion.** The supervisor asks ClawPatch's own agent mapper to inspect the repository before accepting an empty map, which keeps Solidity and other unsupported heuristic languages in the real review flow.
 - **Exit 6 means revalidate, not give up.** When `clawpatch fix` applies a repair but its own validation exits `6`, the supervisor checkpoints that repair and revalidates it before deciding whether another fix is necessary. If the repair was already present and a later `fix` has nothing new to edit, the supervisor revalidates that existing code instead of misclassifying the empty second diff as the repair disappearing.
 - **False positives clean themselves up.** Only the exact supervisor-owned repair paths are restored; unrelated work is left alone.
-- **Completion stays inspectable.** The command exits successfully only after the queue is empty and a fresh review generation finds nothing else to repair, and it keeps `.clawpatch` so the result can still be checked with `clawpatch status --json`.
+- **Completion stays inspectable.** The external unattended command may exit successfully after every open finding is processed while reporting retained uncertain findings exactly; strict library/Manageroo mode requires both counts to reach zero. Both keep `.clawpatch` so the result can still be checked with `clawpatch status --json`.
 - **Transient cleanup is ownership-gated.** Normal runs remove their exact marked temporary root. Relaunch and manual cleanup remove only old dead runs with no proven live reference; receipts, repairs, unknown worktrees, and unowned caches are preserved.
 
 The terminal shows these transitions directly, including `RESUME APPLIED REPAIR`, the current finding, the owned files, watchdog time, commit, push, and final proof. Heartbeat fields, directly printed repository, state, and cleanup paths, and redacted exception messages escape terminal control characters as visible text. A failed sweep prints `STOPPED` with the remaining open-finding count; only a successful sweep prints `COMPLETE` and `QUEUE'S CLEAN`.
@@ -314,7 +314,7 @@ Separate does not mean removed. Manageroo is the front door and integration owne
 - `checkpoint.py` owns external durable state, recovery, migration, and checkpoint provenance;
 - `queue.py` owns map/review/current-finding iteration and fixed-point queue convergence;
 - `validation.py` owns ClawPatch commands, project gates, and revalidation transitions;
-- `proof.py` owns partial/final transitions and refuses completion proof unless both open and uncertain counts are zero.
+- `proof.py` owns partial/final transitions and records retained uncertainty for external completion; strict library/Manageroo completion still requires both open and uncertain counts to be zero.
 
 Each component stays below 3,000 lines, while the façade preserves the established Python patch points for Manageroo and existing integrations.
 
@@ -403,7 +403,7 @@ ClawPatch owns the findings and repairs. The supervisor owns the reliable journe
 
 Exit codes:
 
-- `0`: proven complete with zero open and zero uncertain findings;
+- `0`: external unattended completion with zero open findings and an honestly reported retained uncertain count, or strict library/Manageroo completion with both counts zero;
 - `75`: total runtime/retry budget exhausted or another classified transient stop;
 - `2`: terminal, safety, or provenance stop.
 

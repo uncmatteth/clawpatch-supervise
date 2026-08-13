@@ -32,23 +32,23 @@
     "filesystem",
     "network"
   ],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": [
-    "fnd_sig-feat-config-cf96aef71d-cf376_ab0ba8115d"
+    "fnd_sig-feat-config-cf96aef71d-9a409_49e4e3f5ee"
   ],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260812T224557-88ae82",
+      "runId": "20260813T133248-ffb3b5",
       "kind": "review",
-      "summary": "1 finding(s); prompt=21653 bytes; approxTokens=5414; includedFiles=1; omittedFiles=0",
+      "summary": "1 finding(s); prompt=22790 bytes; approxTokens=5698; includedFiles=1; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-12T22:48:54.424Z"
+      "createdAt": "2026-08-13T13:36:55.199Z"
     }
   ],
-  "createdAt": "2026-08-12T22:45:48.252Z",
-  "updatedAt": "2026-08-12T22:48:54.424Z"
+  "createdAt": "2026-08-13T13:32:48.439Z",
+  "updatedAt": "2026-08-13T14:22:37.176Z"
 }
