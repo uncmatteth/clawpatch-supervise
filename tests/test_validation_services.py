@@ -114,6 +114,10 @@ class DisposablePythonValidationTests(unittest.TestCase):
                 check=False,
             )
             self.assertEqual(created.returncode, 0, created.stderr)
+            validation_python = environment / (
+                "Scripts/python.exe" if os.name == "nt" else "bin/python"
+            )
+            self.assertTrue(validation_python.is_file())
             _expose_repository_to_validation_python(environment, repo)
             validation_overrides = {
                 "VIRTUAL_ENV": str(environment),
