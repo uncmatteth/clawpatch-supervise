@@ -73,7 +73,7 @@ clawpatch-supervise doctor --repo /absolute/path/to/repository
 `doctor` does not create, reset, or advance `.clawpatch`. It first resolves the repository to an existing canonical path, then verifies the Git repository, Python runtime, installed ClawPatch, configured provider, and provider version. On Windows with the Codex provider, it also executes a harmless marker inside each discovered Codex nested sandbox, skips broken duplicate launchers, and passes the first working launcher directory into every later ClawPatch child. If no launcher works, supervision stops before the queue starts.
 
 Configured Windows `.cmd` and `.bat` validation gates are launched with exact `cmd.exe` quoting, including when the executable is installed under a path containing spaces. Executable paths and arguments containing `cmd.exe` metacharacters are rejected, as is a `COMSPEC` launcher that is not a plain `cmd.exe` path.
-The initial existing-queue inspection uses the same Windows shim resolution, so a PATH-installed `clawpatch.cmd` works before any repair begins.
+The initial existing-queue inspection uses the same Windows shim resolution, so a PATH-installed `clawpatch.cmd` works before any repair begins. Later Windows ClawPatch child launches also resolve the shim only from the sanitized child `PATH`, not the supervisor's ambient `PATH`.
 
 ### Run a queue
 

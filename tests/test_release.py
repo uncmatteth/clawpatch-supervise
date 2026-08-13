@@ -2426,10 +2426,53 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
     @patch("clawpatch_supervise.clawpatch_release.shutil.which")
     def test_windows_resolves_clawpatch_command_shim_without_a_shell(self, which):
+        child_path = r"C:\vetted-clawpatch"
         which.return_value = r"C:\Users\Test\AppData\Roaming\npm\clawpatch.cmd"
-        command = _platform_command(["clawpatch", "next", "--json"], platform_name="nt")
+        command = _platform_command(
+            ["clawpatch", "next", "--json"],
+            platform_name="nt",
+            path=child_path,
+        )
         self.assertEqual(command[0], which.return_value)
         self.assertEqual(command[1:], ["next", "--json"])
+        which.assert_called_once_with("clawpatch", path=child_path)
+
+    def test_windows_run_resolves_clawpatch_from_child_path(self):
+        child_path = r"C:\vetted-clawpatch"
+        resolved = child_path + r"\clawpatch.cmd"
+        ambient_resolved = r"C:\ambient-clawpatch\clawpatch.cmd"
+        argv = ["clawpatch", "next", "--json"]
+        cwd = Path("C:/repo")
+        result = SimpleNamespace(
+            exit_code=0,
+            stdout="",
+            stderr="",
+            timed_out=False,
+        )
+
+        def resolve(_command, *, path=None):
+            return resolved if path == child_path else ambient_resolved
+
+        with (
+            patch("clawpatch_supervise.clawpatch_release.os.name", "nt"),
+            patch(
+                "clawpatch_supervise.clawpatch_release.shutil.which",
+                side_effect=resolve,
+            ) as which,
+            patch(
+                "clawpatch_supervise.clawpatch_release.CommandRunner.run",
+                return_value=result,
+            ) as run,
+        ):
+            completed = _run(
+                argv,
+                cwd=cwd,
+                env={"PATH": child_path},
+            )
+
+        which.assert_called_once_with("clawpatch", path=child_path)
+        self.assertEqual(completed.args[0], resolved)
+        self.assertEqual(run.call_args.args[0][0], resolved)
 
     @patch("clawpatch_supervise.clawpatch_release._run")
     @patch("clawpatch_supervise.clawpatch_release.shutil.which", return_value="powershell.exe")

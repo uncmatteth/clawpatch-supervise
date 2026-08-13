@@ -353,7 +353,11 @@ def _run(
     kill_process_group: bool = True,
     timeout_start_barrier: Callable[[subprocess.Popen[str]], None] | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    command = _platform_command(argv, platform_name=os.name)
+    command = _platform_command(
+        argv,
+        platform_name=os.name,
+        path=env.get("PATH") if env is not None else None,
+    )
     result = CommandRunner().run(
         command,
         cwd=cwd,
@@ -369,12 +373,19 @@ def _run(
     return subprocess.CompletedProcess(command, result.exit_code, result.stdout, stderr)
 
 
-def _platform_command(argv: list[str], *, platform_name: str) -> list[str]:
+def _platform_command(
+    argv: list[str],
+    *,
+    platform_name: str,
+    path: str | None = None,
+) -> list[str]:
     command = list(argv)
     if platform_name == "nt" and command:
         executable = PureWindowsPath(command[0]).name.lower()
         if executable in {"clawpatch", "clawpatch.exe", "clawpatch.cmd", "clawpatch.bat"}:
-            resolved = shutil.which(command[0]) or shutil.which("clawpatch")
+            resolved = shutil.which(command[0], path=path) or shutil.which(
+                "clawpatch", path=path
+            )
             if resolved:
                 command[0] = resolved
     return command
