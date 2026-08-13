@@ -241,6 +241,47 @@ def _clawpatch_supervisor_path_override(source: dict[str, str] | None) -> str | 
     return path
 
 
+def _clawpatch_validation_path_override(
+    source: dict[str, str],
+    *,
+    temporary_root: Path,
+    supervisor_path_override: str | None,
+) -> str | None:
+    virtual_env = source.get("VIRTUAL_ENV")
+    if virtual_env is None:
+        return supervisor_path_override
+    if not virtual_env or "\x00" in virtual_env:
+        raise SafetyError("The supervisor received an invalid validation Python environment.")
+    try:
+        trusted_root = temporary_root.resolve(strict=True)
+        environment = Path(virtual_env)
+        if not environment.is_absolute() or environment.is_symlink():
+            raise ValueError
+        resolved_environment = environment.resolve(strict=True)
+        unresolved_executable_dir = resolved_environment / (
+            "Scripts" if os.name == "nt" else "bin"
+        )
+        if unresolved_executable_dir.is_symlink():
+            raise ValueError
+        executable_dir = unresolved_executable_dir.resolve(strict=True)
+        executable_dir.relative_to(trusted_root)
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise SafetyError(
+            "The validation Python environment is outside the supervisor-owned temporary root."
+        ) from exc
+    if executable_dir.parent != resolved_environment:
+        raise SafetyError(
+            "The validation Python environment is outside the supervisor-owned temporary root."
+        )
+    python = executable_dir / ("python.exe" if os.name == "nt" else "python")
+    if not executable_dir.is_dir() or not python.is_file():
+        raise SafetyError("The supervisor received an incomplete validation Python environment.")
+    trusted_path = supervisor_path_override
+    if trusted_path is None:
+        trusted_path = os.environ.get("PATH")
+    return str(executable_dir) + (os.pathsep + trusted_path if trusted_path else "")
+
+
 def _release_clawpatch_env(
     *,
     trusted_host_codex_sandbox_bypass: bool,

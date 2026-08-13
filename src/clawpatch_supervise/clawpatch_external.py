@@ -19,6 +19,7 @@ from .clawpatch_release import (
     ClawpatchStop,
     _clawpatch_control_env_overrides,
     _clawpatch_supervisor_path_override,
+    _clawpatch_validation_path_override,
     _parse_json_output,
     _release_clawpatch_env,
     external_state_root,
@@ -682,6 +683,11 @@ def main(
                 temporary_root=owned_run.temporary_root,
             ) as validation_env_overrides,
         ):
+            validation_path_override = _clawpatch_validation_path_override(
+                validation_env_overrides,
+                temporary_root=owned_run.temporary_root,
+                supervisor_path_override=supervisor_path_override,
+            )
             child_env_overrides = _clawpatch_control_env_overrides(
                 validation_env_overrides,
                 owned_run.child_environment(),
@@ -701,7 +707,7 @@ def main(
                         progress=display_after_external_preflight,
                         integration_mode="external",
                         child_env_overrides=child_env_overrides,
-                        supervisor_path_override=supervisor_path_override,
+                        supervisor_path_override=validation_path_override,
                         advance_uncertain=False,
                         wait_on_preserved_source=False,
                         adopt_dirty=args.adopt_dirty,

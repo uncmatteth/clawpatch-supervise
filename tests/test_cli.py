@@ -754,6 +754,10 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         @contextmanager
         def fake_provision(repo: Path, *, progress, temporary_root: Path):
             lifecycle.append(("start", repo, temporary_root))
+            environment = temporary_root / "validation-venv"
+            executable_dir = environment / ("Scripts" if os.name == "nt" else "bin")
+            executable_dir.mkdir(parents=True)
+            (executable_dir / ("python.exe" if os.name == "nt" else "python")).touch()
             progress(
                 {
                     "phase": "validation-service-start",
@@ -768,6 +772,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 yield {
                     "TEST_DATABASE_URL": "postgresql://127.0.0.1:49152/test",
                     "BTT_ALLOW_DATABASE_RESET": "true",
+                    "VIRTUAL_ENV": str(environment),
                 }
             finally:
                 lifecycle.append(("cleanup", repo))
@@ -787,6 +792,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
 
         output = StringIO()
         with (
+            tempfile.TemporaryDirectory() as temp,
             patch(
                 "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
                 return_value=False,
@@ -799,6 +805,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
                 provision_validation_environment=fake_provision,
                 ensure_repository_idle=fake_idle,
                 heartbeat_seconds=0,
+                cleanup_root=Path(temp) / "cleanup",
             )
 
         self.assertEqual(code, 0)
@@ -807,9 +814,12 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(child_env["TEST_DATABASE_URL"], "postgresql://127.0.0.1:49152/test")
         self.assertEqual(child_env["BTT_ALLOW_DATABASE_RESET"], "true")
         self.assertNotIn("PATH", child_env)
+        validation_bin = Path(child_env["VIRTUAL_ENV"]) / (
+            "Scripts" if os.name == "nt" else "bin"
+        )
         self.assertEqual(
             calls[0][1]["supervisor_path_override"],
-            "C:\\working-codex-bin",
+            str(validation_bin) + os.pathsep + "C:\\working-codex-bin",
         )
         for variable in ("TMPDIR", "TMP", "TEMP"):
             self.assertEqual(child_env[variable], str(lifecycle[1][2]))

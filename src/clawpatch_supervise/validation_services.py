@@ -442,12 +442,7 @@ def _provision_python_test_environment(
                 env=install_env,
             )
             _expose_repository_to_validation_python(environment, repo)
-            child_path = str(executable_dir)
-            inherited_path = os.environ.get("PATH")
-            if inherited_path:
-                child_path += os.pathsep + inherited_path
             child_env = {
-                "PATH": child_path,
                 "VIRTUAL_ENV": str(environment),
                 "PYTHONNOUSERSITE": "1",
                 "PIP_DISABLE_PIP_VERSION_CHECK": "1",

@@ -258,6 +258,7 @@ class DisposablePythonValidationTests(unittest.TestCase):
                     self.assertEqual(environment["PIP_CONFIG_FILE"], os.devnull)
                     self.assertEqual(environment["PIP_NO_INPUT"], "1")
                 self.assertNotIn("PYTHONPATH", child_env)
+                self.assertNotIn("PATH", child_env)
                 environment = next(
                     temporary_root.glob("manageroo-validation-python-*/venv")
                 )

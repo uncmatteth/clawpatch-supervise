@@ -23,6 +23,7 @@ from clawpatch_supervise.clawpatch_release import (
     _checkpoint_later_applied_attempt,
     _checkpoint_unapplied_attempt,
     _clawpatch_doctor,
+    _clawpatch_validation_path_override,
     _clawpatch_version,
     _commit_attempt,
     _current_input_baseline_commit,
@@ -1779,6 +1780,39 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
         self.assertEqual(child["PATH"], "C:\\trusted-codex-bin")
         self.assertEqual(child["TEST_DATABASE_URL"], "postgresql://127.0.0.1/test")
+
+    def test_validation_python_path_is_derived_from_the_supervisor_owned_environment(self):
+        with tempfile.TemporaryDirectory() as temp:
+            temporary_root = Path(temp).resolve()
+            environment = temporary_root / "validation-venv"
+            executable_dir = environment / ("Scripts" if os.name == "nt" else "bin")
+            executable_dir.mkdir(parents=True)
+            (executable_dir / ("python.exe" if os.name == "nt" else "python")).touch()
+
+            path = _clawpatch_validation_path_override(
+                {"VIRTUAL_ENV": str(environment)},
+                temporary_root=temporary_root,
+                supervisor_path_override="trusted-host-path",
+            )
+
+        self.assertEqual(path, str(executable_dir) + os.pathsep + "trusted-host-path")
+
+    def test_validation_python_path_rejects_an_environment_outside_the_owned_root(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp).resolve()
+            temporary_root = root / "owned"
+            temporary_root.mkdir()
+            environment = root / "outside-venv"
+            executable_dir = environment / ("Scripts" if os.name == "nt" else "bin")
+            executable_dir.mkdir(parents=True)
+            (executable_dir / ("python.exe" if os.name == "nt" else "python")).touch()
+
+            with self.assertRaisesRegex(SafetyError, "outside the supervisor-owned"):
+                _clawpatch_validation_path_override(
+                    {"VIRTUAL_ENV": str(environment)},
+                    temporary_root=temporary_root,
+                    supervisor_path_override="trusted-host-path",
+                )
 
     def test_process_matcher_ignores_clawpatch_mentions_inside_gbrain_context(self):
         gbrain = [
