@@ -1519,6 +1519,7 @@ def _revalidate(
     progress: Callable[[dict[str, Any]], None] | None = None,
     current: int | str = "?",
     total: int | str = "?",
+    escalate_uncertain: bool = True,
 ) -> dict[str, Any]:
     if sorted(expected_paths) != _source_paths(repo):
         raise SafetyError(
@@ -1561,10 +1562,14 @@ def _revalidate(
                 failure=classify_clawpatch_failure("revalidation", 23),
             ) from exc
         raise
-    if outcome in {"open", "uncertain"} and env.get("CLAWPATCH_CODEX_SANDBOX") in {
-        None,
-        "read-only",
-    }:
+    if (
+        escalate_uncertain
+        and outcome in {"open", "uncertain"}
+        and env.get("CLAWPATCH_CODEX_SANDBOX") in {
+            None,
+            "read-only",
+        }
+    ):
         initial_outcome = outcome
         escalated_env = dict(env)
         escalated_env["CLAWPATCH_CODEX_SANDBOX"] = "workspace-write"
@@ -3697,6 +3702,7 @@ def _process_finding_until_fixed(
                 total=total,
                 require_project_gates=require_project_gates,
                 finalize=False,
+                **({"escalate_revalidation": False} if advance_uncertain else {}),
             )
         except _UnresolvedFinding as exc:
             failure = exc.failure or failure_from_legacy_outcome(exc.outcome)
@@ -3721,6 +3727,7 @@ def _process_finding_until_fixed(
                         progress=progress,
                         current=current,
                         total=total,
+                        **({"escalate_uncertain": False} if advance_uncertain else {}),
                     )
                 except BaseException:
                     _stop_finding_iteration(
@@ -3848,6 +3855,7 @@ def _process_finding_until_fixed(
                         progress=progress,
                         current=current,
                         total=total,
+                        **({"escalate_uncertain": False} if advance_uncertain else {}),
                     )
                 except BaseException:
                     _stop_finding_iteration(
@@ -4198,6 +4206,7 @@ def _execute_fix(
     total: int | str = "?",
     require_project_gates: bool = True,
     finalize: bool = False,
+    escalate_revalidation: bool = True,
 ) -> tuple[dict[str, Any], bool]:
     if _source_paths(repo):
         raise SafetyError("Pre-existing source changes block the current Clawpatch fix.")
@@ -4230,6 +4239,7 @@ def _execute_fix(
         progress=progress,
         current=current,
         total=total,
+        escalate_uncertain=escalate_revalidation,
     )
     revalidation_outcome = str(validation.get("outcome"))
     commit = (
@@ -4433,6 +4443,7 @@ def _resume_stopped_attempt(
                 env=env,
                 expected_paths=owned_paths,
                 progress=progress,
+                **({"escalate_uncertain": False} if advance_uncertain else {}),
             )
         except _UnresolvedFinding as exc:
             if exc.outcome == "revalidation-provider-failed":
@@ -4749,6 +4760,7 @@ def _resolve_uncertain_findings(
             progress=progress,
             current=displayed,
             total=display_total,
+            **({"escalate_uncertain": False} if retain_uncertain else {}),
         )
         record = {
             "finding_id": finding_id,

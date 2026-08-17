@@ -2486,6 +2486,28 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(child_env["CLAWPATCH_CONFIG"], "/tmp/revalidate.json")
         self.assertNotIn("MANAGEROO_CLAWPATCH_REVALIDATE_CONFIG", child_env)
 
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_unattended_revalidation_accepts_first_uncertain_result(self, json_clawpatch):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            json_clawpatch.return_value = {
+                "finding": "fnd_one",
+                "outcome": "uncertain",
+                "reasoning": "validation could not prove the repair",
+            }
+
+            result = _revalidate(
+                repo,
+                "fnd_one",
+                env={},
+                expected_paths=[],
+                escalate_uncertain=False,
+            )
+
+        self.assertEqual(result["outcome"], "uncertain")
+        self.assertEqual(json_clawpatch.call_count, 1)
+
     @patch("clawpatch_supervise.clawpatch_release._revalidation_payload")
     def test_revalidation_watchdog_is_service_retryable(self, revalidation_payload):
         failure = classify_clawpatch_failure("revalidation", 124)
