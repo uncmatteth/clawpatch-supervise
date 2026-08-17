@@ -9,7 +9,7 @@
 [![Latest release](https://img.shields.io/github/v/release/uncmatteth/clawpatch-supervise)](https://github.com/uncmatteth/clawpatch-supervise/releases/latest)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-`clawpatch-supervise` runs the long job around [ClawPatch](https://www.npmjs.com/package/clawpatch). ClawPatch still reviews the code, selects the current finding, writes the repair, and revalidates it. This supervisor remembers exactly where the queue was, protects real source progress, prevents unchanged retry loops, commits only verified repair paths, optionally pushes them, and refuses to call the job complete until a fresh review generation proves there is nothing left.
+`clawpatch-supervise` runs the long job around [ClawPatch](https://www.npmjs.com/package/clawpatch). ClawPatch still reviews the code, selects the current finding, writes the repair, and revalidates it. This supervisor remembers exactly where the queue was, protects real source progress, prevents unchanged retry loops, commits only verified repair paths, optionally pushes them, and refuses to call the job complete until a fresh review generation proves there are no open findings. Strict library/Manageroo mode also requires no uncertain findings; the external unattended command reports any retained uncertainty in its completion proof.
 
 It is a standalone Python package and command-line program. It runs on Linux, macOS, and Windows and has no Python runtime dependencies outside the standard library.
 
@@ -163,7 +163,7 @@ next → show → fix → revalidate
 fresh map and complete review generation
                               │
                               ▼
-COMPLETE only at zero remaining work
+external COMPLETE at zero open findings; strict COMPLETE at zero open and uncertain findings
 ```
 
 The supervisor provides:
