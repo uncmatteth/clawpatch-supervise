@@ -9,7 +9,7 @@ from clawpatch_supervise.clawpatch_external import _supervisor_clawpatch_config
 
 
 class SupervisedCodexConfigTests(unittest.TestCase):
-    def test_code_mode_off(self):
+    def test_repository_codex_config_is_preserved(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             repo = root / "repository"
@@ -42,7 +42,7 @@ class SupervisedCodexConfigTests(unittest.TestCase):
                 generated["provider"]["codexConfig"]["model_context_window"], 123_456
             )
             self.assertIs(
-                generated["provider"]["codexConfig"]["features.code_mode_host"], False
+                generated["provider"]["codexConfig"]["features.code_mode_host"], True
             )
 
 

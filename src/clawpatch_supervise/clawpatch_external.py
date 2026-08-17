@@ -54,7 +54,6 @@ def _supervisor_clawpatch_config(repo: Path, temporary_root: Path) -> Path | Non
         codex_config = provider.get("codexConfig", {})
         if not isinstance(codex_config, dict):
             return None
-        codex_config["features.code_mode_host"] = False
         provider["codexConfig"] = codex_config
         destination = temporary_root / "clawpatch-supervise-config.json"
         atomic_write_json(destination, config)
