@@ -87,7 +87,7 @@ def failure_from_legacy_outcome(outcome: str | None) -> ClawpatchFailure | None:
         "provider-quota": ("fix", 5),
         "fix-validation-failed": ("fix", 6),
         "timeout": ("fix", 124),
-        "revalidation-provider-failed": ("revalidation", 4),
+        "revalidation-provider-failed": ("revalidation", 1),
         "revalidation-command-failed-with-source-progress": ("revalidation", 23),
         "revalidation-mutated-source": ("revalidation", 23),
     }

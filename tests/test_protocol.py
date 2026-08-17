@@ -115,7 +115,12 @@ class ClawpatchProtocolTests(unittest.TestCase):
     def test_legacy_checkpoint_outcomes_enter_the_same_typed_policy(self):
         failure = failure_from_legacy_outcome("revalidation-provider-failed")
         self.assertIsNotNone(failure)
-        self.assertEqual(failure.kind, ClawpatchFailureKind.PROVIDER_REFUSED)
+        self.assertEqual(failure.kind, ClawpatchFailureKind.PROVIDER_FAILED)
+        decision = decide_repair_transition(
+            failure=failure,
+            has_source_progress=True,
+        )
+        self.assertTrue(decision.reason.startswith("provider-failed"))
         self.assertIsNone(failure_from_legacy_outcome("made-up"))
 
 
