@@ -413,10 +413,11 @@ def _impl_validate_attempt_paths_syntax(
             not path
             or posix.is_absolute()
             or windows.is_absolute()
+            or bool(windows.drive)
             or ".." in posix.parts
             or ".." in windows.parts
-            or path == ".clawpatch"
-            or path.startswith(".clawpatch/")
+            or bool(windows.parts)
+            and windows.parts[0].casefold() == ".clawpatch"
         ):
             invalid.append(path)
     if invalid:

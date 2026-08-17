@@ -61,6 +61,7 @@ from clawpatch_supervise.clawpatch_release import (
     _source_paths,
     _source_paths_fingerprint,
     _UnresolvedFinding,
+    _validate_attempt_paths_syntax,
     _windows_clawpatch_processes,
     _windows_codex_sandbox_path,
     _write_release_progress,
@@ -69,6 +70,26 @@ from clawpatch_supervise.clawpatch_release import (
     release_sweep,
 )
 from clawpatch_supervise.errors import GateFailure, RepositoryBusyError, SafetyError
+
+
+class AttemptPathSyntaxTests(unittest.TestCase):
+    def test_rejects_windows_drive_and_state_paths(self) -> None:
+        unsafe_paths = (
+            "C:outside",
+            "C:",
+            r"\\server\share\outside",
+            r"\\?\C:\outside",
+            ".clawpatch",
+            ".clawpatch/state",
+            r".clawpatch\state",
+        )
+
+        for path in unsafe_paths:
+            with self.subTest(path=path), self.assertRaises(SafetyError):
+                _validate_attempt_paths_syntax([path])
+
+    def test_accepts_relative_source_paths_with_either_separator(self) -> None:
+        _validate_attempt_paths_syntax(["src/module.py", r"src\module.py"])
 
 
 def _hold_clawpatch_release_lock(repo: str, acquired, release) -> None:
