@@ -14,14 +14,18 @@ class CompletionValidation:
 
     @classmethod
     def require_complete(
-        cls, *, open_findings: int, uncertain_findings: int
+        cls, *, open_findings: int, uncertain_findings: int, allow_uncertain: bool = False
     ) -> CompletionValidation:
-        if open_findings or uncertain_findings:
+        if open_findings or (uncertain_findings and not allow_uncertain):
             raise SafetyError(
                 "ClawPatch supervision is incomplete: "
                 f"open={open_findings} uncertain={uncertain_findings}."
             )
-        return cls(status="COMPLETE", open_findings=0, uncertain_findings=0)
+        return cls(
+            status="COMPLETE",
+            open_findings=0,
+            uncertain_findings=uncertain_findings,
+        )
 
 
 # Release-engine component implementations. The compatibility facade remains in clawpatch_release.

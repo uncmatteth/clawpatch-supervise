@@ -268,9 +268,26 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(code, 75)
         self.assertIn("FINITE SUPERVISOR BUDGET EXHAUSTED", output.getvalue())
 
-    def test_uncertain_result_never_prints_complete_or_exits_zero(self):
+    def test_uncertain_result_completes_external_mode(self):
         output = StringIO()
+        sweep_options = []
+
+        @contextmanager
+        def fake_provision(_repo: Path, *, progress, temporary_root: Path):
+            yield {}
+
+        def fake_sweep(_repo: Path, **kwargs):
+            sweep_options.append(kwargs)
+            return {
+                "ok": True,
+                "finding_count": 1,
+                "open_findings": 0,
+                "uncertain_findings": 1,
+                "git_head": "abc",
+            }
+
         with (
+            tempfile.TemporaryDirectory() as temp,
             patch(
                 "clawpatch_supervise.clawpatch_external._clawpatch_state_exists",
                 return_value=False,
@@ -279,20 +296,17 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         ):
             code = main(
                 ["--repo", "."],
-                run_sweep=lambda _repo, **_kwargs: {
-                    "ok": True,
-                    "finding_count": 1,
-                    "open_findings": 0,
-                    "uncertain_findings": 1,
-                    "git_head": "abc",
-                },
+                run_sweep=fake_sweep,
+                provision_validation_environment=fake_provision,
                 ensure_repository_idle=lambda _repo: None,
                 heartbeat_seconds=0,
+                cleanup_root=Path(temp) / "cleanup",
             )
 
-        self.assertEqual(code, 2)
-        self.assertIn("UNFINISHED", output.getvalue())
-        self.assertNotIn("COMPLETE", output.getvalue())
+        self.assertEqual(code, 0)
+        self.assertTrue(sweep_options[0]["advance_uncertain"])
+        self.assertIn("COMPLETE", output.getvalue())
+        self.assertIn("uncertain=1", output.getvalue())
 
     def test_distribution_version_is_derived_from_package_version(self):
         manifest = tomllib.loads(
@@ -1166,7 +1180,7 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["branch"], "current")
         self.assertEqual(calls[0][1]["push_mode"], "none")
         self.assertEqual(calls[0][1]["integration_mode"], "external")
-        self.assertFalse(calls[0][1]["advance_uncertain"])
+        self.assertTrue(calls[0][1]["advance_uncertain"])
         self.assertTrue(calls[0][1]["fresh"])
 
     def test_plain_command_recovers_checkpointed_stop_and_restarts_fresh(self):

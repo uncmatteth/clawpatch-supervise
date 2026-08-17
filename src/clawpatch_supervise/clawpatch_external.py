@@ -708,7 +708,7 @@ def main(
                         integration_mode="external",
                         child_env_overrides=child_env_overrides,
                         supervisor_path_override=validation_path_override,
-                        advance_uncertain=False,
+                        advance_uncertain=True,
                         wait_on_preserved_source=False,
                         adopt_dirty=args.adopt_dirty,
                         deadline_monotonic=budget.deadline,
@@ -820,7 +820,7 @@ def main(
             thread.join(timeout=1)
 
     queue_result = QueueResult.from_report(report)
-    if not report.get("ok") or not queue_result.complete:
+    if not report.get("ok") or queue_result.open_findings:
         print(
             "\nUNFINISHED: "
             f"processed={queue_result.processed} "

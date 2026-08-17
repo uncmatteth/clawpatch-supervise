@@ -23,10 +23,12 @@ def write_completion_proof(
     final_closure: dict[str, Any],
     open_findings: int,
     uncertain_findings: int,
+    allow_uncertain: bool = False,
 ) -> Path:
     completion = CompletionValidation.require_complete(
         open_findings=open_findings,
         uncertain_findings=uncertain_findings,
+        allow_uncertain=allow_uncertain,
     )
     payload = {
         "status": completion.status,

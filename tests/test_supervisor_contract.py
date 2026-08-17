@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -75,6 +76,31 @@ class SupervisorContractTests(unittest.TestCase):
                 )
 
             self.assertFalse(CheckpointStore(root).proof_path.exists())
+
+    def test_external_completion_proof_retains_uncertain_count(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            proof_path = write_completion_proof(
+                state_root=root,
+                repo=root / "repo",
+                branch="main",
+                git_head="abc123",
+                clawpatch_version="0.7.2",
+                completed_findings=[],
+                continuation_attempts=[],
+                false_positives=[],
+                review_generations=[],
+                final_closure={},
+                open_findings=0,
+                uncertain_findings=1,
+                allow_uncertain=True,
+            )
+
+            proof = json.loads(proof_path.read_text(encoding="utf-8"))
+
+        self.assertEqual(proof["status"], "COMPLETE")
+        self.assertEqual(proof["open_findings"], 0)
+        self.assertEqual(proof["uncertain_findings"], 1)
 
     def test_retry_budget_is_finite(self):
         budget = RuntimeBudget.start(minutes=1, max_retries=1)

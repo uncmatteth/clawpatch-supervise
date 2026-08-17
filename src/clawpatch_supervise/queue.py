@@ -2820,6 +2820,7 @@ def _impl_release_sweep_locked(
         final_closure=closure,
         open_findings=0,
         uncertain_findings=final_uncertain_count,
+        allow_uncertain=advance_uncertain,
     )
     report.update(
         {
