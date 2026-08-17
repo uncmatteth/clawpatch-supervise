@@ -71,14 +71,30 @@
         "git diff -- README.md"
       ],
       "createdAt": "2026-08-13T20:02:28.021Z"
+    },
+    {
+      "runId": "20260813T201602-eb15d8",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "README evidence moved to lines 174-178, 201-202, and 218-219 and now states the intended external behavior. However, the repair is unsupported: clawpatch_external.py:711 still passes advance_uncertain=False; queue.py:31 requires zero uncertain findings; clawpatch_external.py:823-834 returns 2 for retained uncertainty; and proof.py:27-30 refuses completion proof. Current tests explicitly preserve that obsolete behavior. Thus the README-only patch does not fix the repository contract.",
+      "commands": [
+        "git status --short",
+        "nl -ba README.md | sed -n '160,225p'",
+        "rg -n -C 4 \"advance_uncertain|uncertain_findings|retained uncertain|external unattended|strict library|QueueResult|COMPLETE\" src tests README.md",
+        "git diff -- README.md",
+        "PYTHONPATH=src python3 -m unittest -v tests.test_supervisor_contract.SupervisorContractTests.test_uncertain_queue_is_never_complete"
+      ],
+      "createdAt": "2026-08-13T20:18:18.923Z"
     }
   ],
   "signature": "sig_feat-library-b1f67be94d_c44901c174",
   "linkedPatchAttemptIds": [
     "pat_fnd-sig-feat-library-b1f67be94d-_8d6b3482bb",
-    "pat_fnd-sig-feat-library-b1f67be94d-_644c1aa50e"
+    "pat_fnd-sig-feat-library-b1f67be94d-_644c1aa50e",
+    "pat_fnd-sig-feat-library-b1f67be94d-_d51fd6032f"
   ],
   "createdByRunId": "20260813T133248-ffb3b5",
   "createdAt": "2026-08-13T13:34:41.202Z",
-  "updatedAt": "2026-08-13T20:02:28.021Z"
+  "updatedAt": "2026-08-13T20:18:18.923Z"
 }

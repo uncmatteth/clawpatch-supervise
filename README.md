@@ -172,9 +172,10 @@ The supervisor provides:
 - automatic ClawPatch agent mapping when the heuristic mapper reports zero features, so unsupported languages such as Solidity are not falsely declared empty;
 - one-current-finding `next → show → fix → revalidate` ordering;
 - mode-specific uncertain handling: the external unattended command commits an applied uncertain
-  repair, advances, and may complete with an honestly reported retained uncertain count, while
-  strict library/Manageroo mode keeps it in the same-finding loop and cannot produce completion
-  proof or exit `0` until both open and uncertain counts reach zero;
+  repair, advances to the next open finding, and may write completion proof, print `COMPLETE`, and
+  exit `0` with an honestly reported retained uncertain count once no open findings remain; strict
+  library/Manageroo mode keeps the same finding active and cannot produce completion proof or exit
+  `0` until both open and uncertain counts reach zero;
 - exact-path temporary commits for genuine partial progress;
 - same-finding continuation only when ClawPatch produced a new source tree;
 - durable checkpoints outside the repository being repaired;
