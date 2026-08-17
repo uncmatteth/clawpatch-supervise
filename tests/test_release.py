@@ -6078,6 +6078,33 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
 
         self.assertEqual(raised.exception.outcome, "revalidation-mutated-source")
 
+    @patch("clawpatch_supervise.clawpatch_release._revalidation_payload")
+    def test_initial_revalidation_mutation_blocks_escalation(self, revalidation_payload):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+            source.write_text("clawpatch repair\n", encoding="utf-8")
+
+            def mutate_then_return(*_args, **_kwargs):
+                source.write_text("revalidation source progress\n", encoding="utf-8")
+                return (
+                    ["clawpatch", "revalidate", "--finding", "fnd_one", "--json"],
+                    {"finding": "fnd_one", "outcome": "uncertain"},
+                    "uncertain",
+                )
+
+            revalidation_payload.side_effect = mutate_then_return
+
+            with self.assertRaises(_UnresolvedFinding) as raised:
+                _revalidate(repo, "fnd_one", env={}, expected_paths=["app.py"])
+
+        self.assertEqual(raised.exception.outcome, "revalidation-mutated-source")
+        self.assertEqual(revalidation_payload.call_count, 1)
+
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
     def test_revalidation_source_progress_continues_the_same_finding(self, execute_fix):
         with tempfile.TemporaryDirectory() as temp:
@@ -6164,6 +6191,53 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             raised.exception.outcome,
             "revalidation-command-failed-with-source-progress",
         )
+
+    @patch("clawpatch_supervise.clawpatch_release._revalidation_payload")
+    def test_escalated_revalidation_failure_with_source_progress_is_preserved(
+        self, revalidation_payload
+    ):
+        for failed_phase, failed_call in (
+            ("revalidate-escalated", 2),
+            ("revalidate-host", 3),
+        ):
+            with self.subTest(phase=failed_phase), tempfile.TemporaryDirectory() as temp:
+                repo = Path(temp)
+                self.init_repo(repo)
+                source = repo / "app.py"
+                source.write_text("before\n", encoding="utf-8")
+                subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+                subprocess.run(["git", "commit", "-q", "-m", "source"], cwd=repo, check=True)
+                source.write_text("clawpatch repair\n", encoding="utf-8")
+                calls: list[str] = []
+
+                def failed_revalidation(*_args, **kwargs):
+                    calls.append(kwargs["phase"])
+                    if len(calls) == failed_call:
+                        source.write_text("revalidation source progress\n", encoding="utf-8")
+                        raise SafetyError("phase: Clawpatch command\nexit code: 4")
+                    return (
+                        ["clawpatch", "revalidate", "--finding", "fnd_one", "--json"],
+                        {"finding": "fnd_one", "outcome": "uncertain"},
+                        "uncertain",
+                    )
+
+                revalidation_payload.reset_mock(side_effect=True)
+                revalidation_payload.side_effect = failed_revalidation
+
+                with self.assertRaises(_UnresolvedFinding) as raised:
+                    _revalidate(
+                        repo,
+                        "fnd_one",
+                        env={"MANAGEROO_CLAWPATCH_ALLOW_BYPASS_FALLBACK": "1"},
+                        expected_paths=["app.py"],
+                    )
+
+                self.assertEqual(
+                    raised.exception.outcome,
+                    "revalidation-command-failed-with-source-progress",
+                )
+                self.assertEqual(len(calls), failed_call)
+                self.assertEqual(calls[-1], failed_phase)
 
     @patch("clawpatch_supervise.clawpatch_release._revalidation_payload")
     def test_false_positive_revalidation_returns_clawpatch_terminal_payload(

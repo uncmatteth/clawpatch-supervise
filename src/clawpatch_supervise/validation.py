@@ -484,38 +484,59 @@ def _impl_revalidate(
         )
     before = _source_state_fingerprint(repo)
     argv = ["clawpatch", "revalidate", "--finding", finding_id, "--json"]
-    try:
-        argv, payload, outcome = _revalidation_payload(
-            repo,
-            finding_id,
-            env=env,
-            progress=progress,
-            current=current,
-            total=total,
-        )
-    except SafetyError as exc:
-        after = _source_state_fingerprint(repo)
-        if isinstance(exc, _ClawpatchCommandFailure):
-            failure_outcome = (
-                "revalidation-provider-failed"
-                if exc.failure.kind.value == "provider-refused"
-                else f"revalidation-{exc.failure.kind.value}"
+
+    def guarded_revalidation(
+        attempt_env: dict[str, str],
+        *,
+        phase: str = "revalidate",
+    ) -> tuple[list[str], dict[str, Any], str]:
+        try:
+            attempt = _revalidation_payload(
+                repo,
+                finding_id,
+                env=attempt_env,
+                progress=progress,
+                phase=phase,
+                current=current,
+                total=total,
             )
+        except SafetyError as exc:
+            after = _source_state_fingerprint(repo)
+            if after != before:
+                raise _UnresolvedFinding(
+                    f"{exc}\nfailed requirement: failed revalidation source progress must be "
+                    "preserved and retried on the same finding",
+                    finding_id=finding_id,
+                    outcome="revalidation-command-failed-with-source-progress",
+                    failure=classify_clawpatch_failure("revalidation", 23),
+                ) from exc
+            if isinstance(exc, _ClawpatchCommandFailure):
+                failure_outcome = (
+                    "revalidation-provider-failed"
+                    if exc.failure.kind.value == "provider-refused"
+                    else f"revalidation-{exc.failure.kind.value}"
+                )
+                raise _UnresolvedFinding(
+                    str(exc),
+                    finding_id=finding_id,
+                    outcome=failure_outcome,
+                    failure=exc.failure,
+                ) from exc
+            raise
+        attempt_argv, _attempt_payload, _attempt_outcome = attempt
+        if _source_state_fingerprint(repo) != before:
             raise _UnresolvedFinding(
-                str(exc),
+                f"phase: revalidation\ncommand: {shlex.join(attempt_argv)}\n"
+                f"finding ID: {finding_id}\n"
+                "exit code: 0\nfailed requirement: revalidation must not alter source\n"
+                f"changed source paths: {_source_paths(repo)}",
                 finding_id=finding_id,
-                outcome=failure_outcome,
-                failure=exc.failure,
-            ) from exc
-        if after != before:
-            raise _UnresolvedFinding(
-                f"{exc}\nfailed requirement: failed revalidation source progress must be "
-                "preserved and retried on the same finding",
-                finding_id=finding_id,
-                outcome="revalidation-command-failed-with-source-progress",
+                outcome="revalidation-mutated-source",
                 failure=classify_clawpatch_failure("revalidation", 23),
-            ) from exc
-        raise
+            )
+        return attempt
+
+    argv, payload, outcome = guarded_revalidation(env)
     if outcome in {"open", "uncertain"} and env.get("CLAWPATCH_CODEX_SANDBOX") in {
         None,
         "read-only",
@@ -523,14 +544,9 @@ def _impl_revalidate(
         initial_outcome = outcome
         escalated_env = dict(env)
         escalated_env["CLAWPATCH_CODEX_SANDBOX"] = "workspace-write"
-        _argv, escalated, escalated_outcome = _revalidation_payload(
-            repo,
-            finding_id,
-            env=escalated_env,
-            progress=progress,
+        argv, escalated, escalated_outcome = guarded_revalidation(
+            escalated_env,
             phase="revalidate-escalated",
-            current=current,
-            total=total,
         )
         payload = dict(escalated)
         payload["managerooSandboxEscalated"] = True
@@ -543,14 +559,9 @@ def _impl_revalidate(
             workspace_write_outcome = outcome
             host_env = dict(env)
             host_env["CLAWPATCH_CODEX_SANDBOX"] = "bypass"
-            _argv, host_payload, host_outcome = _revalidation_payload(
-                repo,
-                finding_id,
-                env=host_env,
-                progress=progress,
+            argv, host_payload, host_outcome = guarded_revalidation(
+                host_env,
                 phase="revalidate-host",
-                current=current,
-                total=total,
             )
             payload = dict(host_payload)
             payload["managerooSandboxEscalated"] = True
@@ -558,16 +569,6 @@ def _impl_revalidate(
             payload["managerooInitialOutcome"] = initial_outcome
             payload["managerooWorkspaceWriteOutcome"] = workspace_write_outcome
             outcome = host_outcome
-    after = _source_state_fingerprint(repo)
-    if after != before:
-        raise _UnresolvedFinding(
-            f"phase: revalidation\ncommand: {shlex.join(argv)}\nfinding ID: {finding_id}\n"
-            "exit code: 0\nfailed requirement: revalidation must not alter source\n"
-            f"changed source paths: {_source_paths(repo)}",
-            finding_id=finding_id,
-            outcome="revalidation-mutated-source",
-            failure=classify_clawpatch_failure("revalidation", 23),
-        )
     if outcome not in {"fixed", "open", "uncertain", "false-positive"}:
         raise _UnresolvedFinding(
             f"phase: revalidation\ncommand: {shlex.join(argv)}\nfinding ID: {finding_id}\n"
