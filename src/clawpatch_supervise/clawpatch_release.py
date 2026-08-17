@@ -5241,6 +5241,7 @@ def _release_sweep_locked(
     pushed = _already_pushed
     resumed_checkpoint = False
     expected_unapplied_finding: str | None = None
+    expected_unapplied_status: str | None = None
     resumed_checkpoint_kind = "stopped applied attempt"
     if durable_progress is not None:
         if durable_progress["branch"] != current_branch:
@@ -5779,15 +5780,23 @@ def _release_sweep_locked(
                     inspected_finding = checkpoint_inspection.get("finding")
                     inspected_attempts = checkpoint_inspection.get("patchAttempts")
                     checkpoint_finding_id = str(durable_progress["finding_id"])
+                    inspected_status = (
+                        inspected_finding.get("status")
+                        if isinstance(inspected_finding, dict)
+                        else None
+                    )
+                    resumable_status = inspected_status == "open" or (
+                        advance_uncertain and inspected_status == "uncertain"
+                    )
                     if (
                         not isinstance(inspected_finding, dict)
                         or inspected_finding.get("id") != checkpoint_finding_id
-                        or inspected_finding.get("status") != "open"
+                        or not resumable_status
                         or not isinstance(inspected_attempts, list)
                     ):
                         raise SafetyError(
                             "Stopped Clawpatch progress has no source changes and no matching "
-                            "open finding at the current HEAD."
+                            "resumable finding at the current HEAD."
                         )
                     unapplied = {
                         "finding_id": checkpoint_finding_id,
@@ -5801,6 +5810,9 @@ def _release_sweep_locked(
                         "inspection": checkpoint_inspection,
                     }
                 expected_unapplied_finding = str(unapplied["finding_id"])
+                expected_unapplied_status = str(
+                    unapplied["inspection"]["finding"]["status"]
+                )
                 report["interrupted_unapplied_attempt"] = {
                     "finding_id": expected_unapplied_finding,
                     "patch_attempts": list(unapplied["patch_attempts"]),
@@ -6122,9 +6134,11 @@ def _release_sweep_locked(
     current_finding = len(report["results"])
     while True:
         displayed_finding = current_finding + 1
+        queue_status = expected_unapplied_status or "open"
         finding_id, queue = _next_finding(
             root,
             env=env,
+            status=queue_status,
             progress=progress,
             current=displayed_finding,
             total=total_findings,
@@ -6136,6 +6150,7 @@ def _release_sweep_locked(
                     f"{expected_unapplied_finding!r}, received {finding_id!r}."
                 )
             expected_unapplied_finding = None
+            expected_unapplied_status = None
         if finding_id is None:
             break
         try:
@@ -6143,7 +6158,7 @@ def _release_sweep_locked(
                 root,
                 finding_id,
                 env=env,
-                required_status="open",
+                required_status=queue_status,
                 progress=progress,
                 current=displayed_finding,
                 total=total_findings,

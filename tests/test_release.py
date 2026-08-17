@@ -4194,6 +4194,86 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertEqual(report["interrupted_unapplied_attempt"]["patch_attempts"], [])
         process_finding.assert_called_once()
 
+    @patch("clawpatch_supervise.clawpatch_release._final_closure")
+    @patch("clawpatch_supervise.clawpatch_release._process_finding_until_fixed")
+    @patch("clawpatch_supervise.clawpatch_release._next_finding")
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    @patch("clawpatch_supervise.clawpatch_release._show_finding")
+    @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
+    @patch("clawpatch_supervise.clawpatch_release._clawpatch_version", return_value="0.7.2")
+    def test_empty_checkpoint_retries_same_uncertain_finding_when_enabled(
+        self,
+        _version,
+        _processes,
+        show_finding,
+        json_clawpatch,
+        next_finding,
+        process_finding,
+        final_closure,
+    ):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            (repo / ".clawpatch").mkdir()
+            (repo / ".clawpatch" / "project.json").write_text("{}\n", encoding="utf-8")
+            _write_release_progress(
+                repo,
+                finding_id="fnd_one",
+                branch=branch,
+                head_before=head,
+                phase="stopped",
+                owned_paths=[],
+            )
+            show_finding.return_value = {
+                "finding": {"id": "fnd_one", "status": "uncertain"},
+                "validation": [],
+                "patchAttempts": [
+                    {
+                        "patchAttemptId": "pat_failed_validation",
+                        "status": "failed",
+                        "findingIds": ["fnd_one"],
+                        "filesChanged": [],
+                        "git": {"baseSha": head},
+                    }
+                ],
+            }
+            json_clawpatch.return_value = {
+                "activeLocks": 0,
+                "lockFiles": 0,
+                "openFindings": 0,
+            }
+            next_finding.side_effect = [
+                ("fnd_one", {"finding": {"id": "fnd_one", "status": "uncertain"}}),
+                (None, {"finding": None}),
+            ]
+            process_finding.return_value = (
+                {"finding_id": "fnd_one", "files_changed": [], "commit": "abc123"},
+                False,
+                0,
+            )
+            final_closure.return_value = {"pushed": False, "needs_fresh_review": False}
+
+            report = release_sweep(
+                repo,
+                apply=True,
+                branch="current",
+                advance_uncertain=True,
+            )
+
+        self.assertEqual(report["interrupted_unapplied_attempt"]["finding_id"], "fnd_one")
+        self.assertEqual(
+            report["interrupted_unapplied_attempt"]["patch_attempts"],
+            ["pat_failed_validation"],
+        )
+        self.assertEqual(next_finding.call_args_list[0].kwargs["status"], "uncertain")
+        process_finding.assert_called_once()
+
     def test_empty_checkpoint_recognizes_latest_applied_attempt_at_same_head(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
