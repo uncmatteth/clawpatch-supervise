@@ -83,7 +83,15 @@ class ClawpatchProtocolTests(unittest.TestCase):
             RepairAction.DISCARD_AND_CONTINUE,
         )
 
-    def test_external_manual_loop_policy_advances_only_applied_uncertain(self):
+    def test_external_manual_loop_policy_advances_applied_unresolved_repairs(self):
+        self.assertEqual(
+            decide_repair_transition(
+                revalidation_outcome="open",
+                has_source_progress=True,
+                advance_uncertain=True,
+            ).action,
+            RepairAction.COMMIT_AND_ADVANCE,
+        )
         self.assertEqual(
             decide_repair_transition(
                 revalidation_outcome="uncertain",
@@ -99,6 +107,14 @@ class ClawpatchProtocolTests(unittest.TestCase):
                 advance_uncertain=True,
             ).action,
             RepairAction.STOP_TERMINAL,
+        )
+        self.assertEqual(
+            decide_repair_transition(
+                revalidation_outcome="open",
+                has_source_progress=False,
+                advance_uncertain=True,
+            ).action,
+            RepairAction.PRESERVE_AND_CONTINUE,
         )
 
     def test_policy_rejects_ambiguous_or_unknown_events(self):

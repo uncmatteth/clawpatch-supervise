@@ -115,6 +115,8 @@ def decide_repair_transition(
         return RepairDecision(RepairAction.STOP_TERMINAL, failure.kind.value)
     if revalidation_outcome == "fixed":
         return RepairDecision(RepairAction.FINALIZE, "fixed")
+    if revalidation_outcome == "open" and advance_uncertain and has_source_progress:
+        return RepairDecision(RepairAction.COMMIT_AND_ADVANCE, "open-recorded")
     if revalidation_outcome == "open":
         return RepairDecision(RepairAction.PRESERVE_AND_CONTINUE, "open")
     if revalidation_outcome == "false-positive":

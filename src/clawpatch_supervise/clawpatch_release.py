@@ -3878,7 +3878,9 @@ def _process_finding_until_fixed(
                     "revalidation": validation,
                     "commit": "",
                 }
-                if validation.get("outcome") == "open" or (
+                if (
+                    validation.get("outcome") == "open" and not advance_uncertain
+                ) or (
                     validation.get("outcome") == "uncertain" and not advance_uncertain
                 ):
                     validation_outcome = str(validation["outcome"])
@@ -3952,7 +3954,10 @@ def _process_finding_until_fixed(
             )
             raise SafetyError("Clawpatch returned an unsupported revalidation outcome.") from exc
         if revalidation_decision.action is RepairAction.COMMIT_AND_ADVANCE:
-            record["deferred_uncertain"] = True
+            if revalidation_outcome == "open":
+                record["deferred_open"] = True
+            else:
+                record["deferred_uncertain"] = True
             return _complete_fixed_finding(
                 repo,
                 finding_id,
@@ -6264,7 +6269,11 @@ def _release_sweep_locked(
         current_finding += 1
         report["results"].append(record)
         if progress is not None:
-            completed_phase = "uncertain" if record.get("deferred_uncertain") else "fixed"
+            completed_phase = (
+                "uncertain"
+                if record.get("deferred_uncertain") or record.get("deferred_open")
+                else "fixed"
+            )
             progress(
                 {
                     "phase": completed_phase,

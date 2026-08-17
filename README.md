@@ -128,6 +128,8 @@ You point `clawpatch-supervise` at a repository. It runs the queue, shows what i
 
 On a real repository, a repair can take several attempts. A provider can time out after changing source. Validation can fail after the first useful edit. Revalidation can reopen the same finding. A process can die with a good partial repair still sitting in the worktree. If you blindly run the same command again, you can loop forever. If you call `clawpatch next`, you can abandon the exact finding that still needs to be resolved. If you let a chat session remember the queue, context compaction or a closed terminal can erase the only copy of what happened.
 
+Standalone unattended mode gives each queue pass one fix and one revalidation for an applied repair. If that revalidation remains `open` or `uncertain`, the supervisor commits the exact repair and returns to queue selection instead of immediately running fix attempt 2 on the same finding. Strict/library mode retains the same-finding continuation policy.
+
 I ran into those failures while using ClawPatch on Manageroo and other actual projects. I needed something outside the target repository that could answer five boring but critical questions every time:
 
 1. Which exact finding owns these changes?
