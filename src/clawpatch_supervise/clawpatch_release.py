@@ -1478,10 +1478,17 @@ def _revalidation_payload(
     total: int | str = "?",
 ) -> tuple[list[str], dict[str, Any], str]:
     argv = ["clawpatch", "revalidate", "--finding", finding_id, "--json"]
+    revalidation_env = dict(env)
+    revalidation_config = revalidation_env.pop(
+        "MANAGEROO_CLAWPATCH_REVALIDATE_CONFIG",
+        None,
+    )
+    if revalidation_config:
+        revalidation_env["CLAWPATCH_CONFIG"] = revalidation_config
     payload = _json_clawpatch(
         repo,
         argv,
-        env=env,
+        env=revalidation_env,
         progress=progress,
         phase=phase,
         current=current,
@@ -1541,6 +1548,9 @@ def _revalidate(
                 finding_id=finding_id,
                 outcome=failure_outcome,
                 failure=exc.failure,
+                repair_action=(
+                    RepairAction.STOP_TRANSIENT if exc.failure.transient else None
+                ),
             ) from exc
         if after != before:
             raise _UnresolvedFinding(

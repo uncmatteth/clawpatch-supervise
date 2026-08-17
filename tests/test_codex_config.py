@@ -33,6 +33,11 @@ class SupervisedCodexConfigTests(unittest.TestCase):
             temporary_root.mkdir()
 
             generated_path = _supervisor_clawpatch_config(repo, temporary_root)
+            revalidation_path = _supervisor_clawpatch_config(
+                repo,
+                temporary_root,
+                disable_code_mode_host=True,
+            )
 
             self.assertEqual(json.loads(config_path.read_text(encoding="utf-8")), repository_config)
             self.assertIsNotNone(generated_path)
@@ -43,6 +48,11 @@ class SupervisedCodexConfigTests(unittest.TestCase):
             )
             self.assertIs(
                 generated["provider"]["codexConfig"]["features.code_mode_host"], True
+            )
+            self.assertIsNotNone(revalidation_path)
+            revalidation = json.loads(revalidation_path.read_text(encoding="utf-8"))
+            self.assertIs(
+                revalidation["provider"]["codexConfig"]["features.code_mode_host"], False
             )
 
 

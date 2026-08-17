@@ -37,7 +37,12 @@ def _clawpatch_state_exists(repo: Path) -> bool:
     return state.is_dir() and (state / "project.json").is_file()
 
 
-def _supervisor_clawpatch_config(repo: Path, temporary_root: Path) -> Path | None:
+def _supervisor_clawpatch_config(
+    repo: Path,
+    temporary_root: Path,
+    *,
+    disable_code_mode_host: bool = False,
+) -> Path | None:
     candidates = (repo / "clawpatch.config.json", repo / ".clawpatch" / "config.json")
     for source in candidates:
         try:
@@ -54,8 +59,15 @@ def _supervisor_clawpatch_config(repo: Path, temporary_root: Path) -> Path | Non
         codex_config = provider.get("codexConfig", {})
         if not isinstance(codex_config, dict):
             return None
+        if disable_code_mode_host:
+            codex_config["features.code_mode_host"] = False
         provider["codexConfig"] = codex_config
-        destination = temporary_root / "clawpatch-supervise-config.json"
+        name = (
+            "clawpatch-supervise-revalidate-config.json"
+            if disable_code_mode_host
+            else "clawpatch-supervise-config.json"
+        )
+        destination = temporary_root / name
         atomic_write_json(destination, config)
         return destination
     return None
@@ -625,6 +637,15 @@ def main(
             supervisor_config = _supervisor_clawpatch_config(repo, owned_run.temporary_root)
             if supervisor_config is not None:
                 child_env_overrides["CLAWPATCH_CONFIG"] = str(supervisor_config)
+            revalidation_config = _supervisor_clawpatch_config(
+                repo,
+                owned_run.temporary_root,
+                disable_code_mode_host=True,
+            )
+            if revalidation_config is not None:
+                child_env_overrides["MANAGEROO_CLAWPATCH_REVALIDATE_CONFIG"] = str(
+                    revalidation_config
+                )
             retry_attempt = 0
             while True:
                 try:

@@ -17,6 +17,7 @@ from clawpatch_supervise.clawpatch_protocol import (
     classify_clawpatch_failure,
 )
 from clawpatch_supervise.clawpatch_release import (
+    ClawpatchCommandFailure,
     _active_clawpatch_processes,
     _checkpoint_can_follow_supervisor_upgrade,
     _checkpoint_later_applied_attempt,
@@ -48,6 +49,7 @@ from clawpatch_supervise.clawpatch_release import (
     _require_synchronized_remote_branch,
     _resume_stopped_attempt,
     _revalidate,
+    _revalidation_payload,
     _review_all_features,
     _run_project_gates,
     _source_state_fingerprint,
@@ -2464,6 +2466,42 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
             json_clawpatch.call_args_list[1].kwargs["env"]["CLAWPATCH_CODEX_SANDBOX"],
             "workspace-write",
         )
+
+    @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
+    def test_revalidation_uses_private_hostless_config(self, json_clawpatch):
+        json_clawpatch.return_value = {"finding": "fnd_one", "outcome": "fixed"}
+
+        _argv, payload, outcome = _revalidation_payload(
+            Path("/repo"),
+            "fnd_one",
+            env={
+                "CLAWPATCH_CONFIG": "/tmp/normal.json",
+                "MANAGEROO_CLAWPATCH_REVALIDATE_CONFIG": "/tmp/revalidate.json",
+            },
+        )
+
+        self.assertEqual(outcome, "fixed")
+        self.assertEqual(payload["finding"], "fnd_one")
+        child_env = json_clawpatch.call_args.kwargs["env"]
+        self.assertEqual(child_env["CLAWPATCH_CONFIG"], "/tmp/revalidate.json")
+        self.assertNotIn("MANAGEROO_CLAWPATCH_REVALIDATE_CONFIG", child_env)
+
+    @patch("clawpatch_supervise.clawpatch_release._revalidation_payload")
+    def test_revalidation_watchdog_is_service_retryable(self, revalidation_payload):
+        failure = classify_clawpatch_failure("revalidation", 124)
+        revalidation_payload.side_effect = ClawpatchCommandFailure(
+            "revalidation watchdog expired",
+            failure=failure,
+        )
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+
+            with self.assertRaises(_UnresolvedFinding) as raised:
+                _revalidate(repo, "fnd_one", env={}, expected_paths=[])
+
+        self.assertEqual(raised.exception.outcome, "revalidation-timeout")
+        self.assertEqual(raised.exception.repair_action, RepairAction.STOP_TRANSIENT)
 
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")
     def test_external_uncertain_revalidation_uses_trusted_host_after_workspace_block(
