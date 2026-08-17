@@ -184,6 +184,18 @@ def redact_argv(argv: Sequence[str]) -> list[str]:
     return redacted
 
 
+def _fsync_parent_directory(path: Path) -> None:
+    """Persist a replaced directory entry where directory descriptors are supported."""
+    if os.name != "posix" or not hasattr(os, "O_DIRECTORY"):
+        return
+    flags = os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_CLOEXEC", 0)
+    directory_fd = os.open(path.parent, flags)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
 def atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
@@ -193,6 +205,7 @@ def atomic_write_text(path: Path, text: str) -> None:
             handle.flush()
             os.fsync(handle.fileno())
         os.replace(tmp_name, path)
+        _fsync_parent_directory(path)
     finally:
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)
