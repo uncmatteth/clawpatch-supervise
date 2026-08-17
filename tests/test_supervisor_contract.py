@@ -4,7 +4,9 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from typing import get_type_hints
 
+from clawpatch_supervise import checkpoint, git_ops, proof, queue, validation
 from clawpatch_supervise.checkpoint import CheckpointStore
 from clawpatch_supervise.clawpatch_release import format_release_sweep
 from clawpatch_supervise.errors import RuntimeBudgetExceeded, SafetyError
@@ -19,6 +21,21 @@ PACKAGE_ROOT = REPOSITORY_ROOT / "src" / "clawpatch_supervise"
 
 
 class SupervisorContractTests(unittest.TestCase):
+    def test_split_component_type_annotations_resolve(self):
+        for module in (checkpoint, git_ops, proof, queue, validation):
+            implementations = [
+                value
+                for name, value in vars(module).items()
+                if name.startswith("_impl_") and callable(value)
+            ]
+            self.assertTrue(implementations, module.__name__)
+            for implementation in implementations:
+                with self.subTest(
+                    module=module.__name__,
+                    implementation=implementation.__name__,
+                ):
+                    get_type_hints(implementation)
+
     def test_release_engine_is_split_into_bounded_components(self):
         for name in ("git_ops.py", "checkpoint.py", "queue.py", "validation.py", "proof.py"):
             line_count = len((PACKAGE_ROOT / name).read_text(encoding="utf-8").splitlines())
