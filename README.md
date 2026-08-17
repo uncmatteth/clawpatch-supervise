@@ -438,13 +438,18 @@ Run the complete local suite:
 PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```
 
-The default suite includes the installed-wheel console-entry-point integration test. It
-intentionally uses isolated PEP 517 build requirements from the package index, imports the
-installed package from a clean virtual environment, and exercises the generated executable's
-version, help, doctor, cleanup dry-run, state-path, and argument-error modes. Its setuptools and
-wheel versions are pinned identically in `pyproject.toml` and `requirements-test.txt`, so an index
-outage fails this mandatory packaging check and a future backend release cannot silently change
-the build.
+The default suite does not contact a package index. The installed-wheel console-entry-point test
+is an explicit network integration lane:
+
+```bash
+CLAWPATCH_SUPERVISE_NETWORK_TESTS=1 PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
+
+That lane uses isolated PEP 517 build requirements from the package index, imports the installed
+package from a clean virtual environment, and exercises the generated executable's version, help,
+doctor, cleanup dry-run, state-path, and argument-error modes. Its setuptools and wheel versions
+are pinned identically in `pyproject.toml` and `requirements-test.txt`, so a future backend release
+cannot silently change the build.
 
 This repository intentionally has no hosted workflow files. Run the real build/install lane and
 the full suite manually on Linux, macOS, and Windows before describing a release as

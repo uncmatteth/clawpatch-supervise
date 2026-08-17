@@ -16,6 +16,8 @@ from clawpatch_supervise import __version__
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+NETWORK_WHEEL_TESTS_ENV = "CLAWPATCH_SUPERVISE_NETWORK_TESTS"
+NETWORK_WHEEL_TESTS_ENABLED = os.environ.get(NETWORK_WHEEL_TESTS_ENV) == "1"
 
 
 class InstalledConsoleScriptTests(unittest.TestCase):
@@ -29,7 +31,7 @@ class InstalledConsoleScriptTests(unittest.TestCase):
 
         self.assertEqual(manifest["build-system"]["requires"], requirements)
 
-    def test_wheel_build_uses_isolated_pep517_requirements(self) -> None:
+    def test_network_lane_wheel_build_uses_isolated_pep517_requirements(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             destination = Path(temp)
 
@@ -47,6 +49,18 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             self.assertNotIn("PIP_NO_INDEX", run.call_args.kwargs["env"])
             self.assertNotIn("PIP_NO_BUILD_ISOLATION", run.call_args.kwargs["env"])
 
+    def test_installed_wheel_entrypoint_requires_explicit_network_lane(self) -> None:
+        test = type(self).test_clawpatch_supervise_entrypoint_from_installed_wheel
+
+        self.assertEqual(
+            getattr(test, "__unittest_skip__", False),
+            not NETWORK_WHEEL_TESTS_ENABLED,
+        )
+
+    @unittest.skipUnless(
+        NETWORK_WHEEL_TESTS_ENABLED,
+        f"set {NETWORK_WHEEL_TESTS_ENV}=1 to run the package-index integration lane",
+    )
     def test_clawpatch_supervise_entrypoint_from_installed_wheel(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
