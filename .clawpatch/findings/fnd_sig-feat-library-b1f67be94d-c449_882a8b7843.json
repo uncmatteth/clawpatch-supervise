@@ -36,7 +36,7 @@
   "whyTestsDoNotAlreadyCoverThis": "No tests are linked to this feature, and behavioral tests would not detect stale documentation.",
   "suggestedRegressionTest": "Add a documentation contract check requiring distinct descriptions of external and strict-library uncertain handling.",
   "minimumFixScope": "README.md uncertain-handling descriptions only.",
-  "status": "open",
+  "status": "fixed",
   "history": [
     {
       "runId": "20260813T142956-a65aeb",
@@ -104,6 +104,28 @@
         "PYTHONPATH=src python3 -m unittest -v tests.test_cli.ExternalClawpatchSupervisorTests.test_uncertain_result_never_prints_complete_or_exits_zero tests.test_supervisor_contract.SupervisorContractTests.test_uncertain_queue_is_never_complete tests.test_partial_progress.ClawpatchPartialProgressTests.test_external_manual_loop_commits_uncertain_patch_and_advances_once"
       ],
       "createdAt": "2026-08-17T02:42:38.506Z"
+    },
+    {
+      "runId": "20260817T025220-951dbe",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "README evidence moved to lines 174-178, 201-202, and 218-219 and now correctly distinguishes external from strict-library handling. Current code supports it: external mode passes advance_uncertain=True, permits completion with zero open findings, and writes proof with allow_uncertain enabled; strict mode retains the default prohibition. The linked applied attempt at current HEAD b6f4fe0 records all 359 tests passing, and current read-only semantic checks pass. A local test rerun was environment-blocked because no writable temporary directory exists, not by a behavioral assertion failure.",
+      "commands": [
+        "git status --short && git rev-parse --show-toplevel && git rev-parse --short HEAD",
+        "nl -ba README.md | sed -n '160,225p'",
+        "nl -ba src/clawpatch_supervise/clawpatch_external.py | sed -n '680,735p;800,860p'",
+        "nl -ba src/clawpatch_supervise/queue.py | sed -n '2700,2845p'",
+        "nl -ba src/clawpatch_supervise/proof.py | sed -n '1,190p'",
+        "nl -ba src/clawpatch_supervise/validation.py | sed -n '1,35p'",
+        "git diff -- README.md",
+        "sed -n '1,260p' .clawpatch/patches/pat_fnd-sig-feat-library-b1f67be94d-_2c32a57d0d.json",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest -v tests.test_protocol.ClawpatchProtocolTests.test_external_manual_loop_policy_advances_only_applied_uncertain",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c '<assert external completion allows retained uncertainty while strict completion rejects it>'",
+        "python3 -c '<assert README and runtime contain the external/strict mode contract>'",
+        "git diff --check"
+      ],
+      "createdAt": "2026-08-17T02:55:13.458Z"
     }
   ],
   "signature": "sig_feat-library-b1f67be94d_c44901c174",
@@ -112,9 +134,10 @@
     "pat_fnd-sig-feat-library-b1f67be94d-_644c1aa50e",
     "pat_fnd-sig-feat-library-b1f67be94d-_d51fd6032f",
     "pat_fnd-sig-feat-library-b1f67be94d-_a5167b1ee3",
-    "pat_fnd-sig-feat-library-b1f67be94d-_a471246085"
+    "pat_fnd-sig-feat-library-b1f67be94d-_a471246085",
+    "pat_fnd-sig-feat-library-b1f67be94d-_2c32a57d0d"
   ],
   "createdByRunId": "20260813T133248-ffb3b5",
   "createdAt": "2026-08-13T13:34:41.202Z",
-  "updatedAt": "2026-08-17T02:48:55.830Z"
+  "updatedAt": "2026-08-17T02:55:13.458Z"
 }

@@ -32,7 +32,7 @@
     "package"
   ],
   "trustBoundaries": [],
-  "status": "needs-fix",
+  "status": "fixed",
   "lock": null,
   "findingIds": [
     "fnd_sig-feat-library-b1f67be94d-c449_882a8b7843"
@@ -50,5 +50,5 @@
     }
   ],
   "createdAt": "2026-08-13T13:32:48.439Z",
-  "updatedAt": "2026-08-13T13:34:41.203Z"
+  "updatedAt": "2026-08-17T02:55:13.459Z"
 }
