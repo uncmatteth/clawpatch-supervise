@@ -160,7 +160,7 @@ def _impl_fix_command(
     result = _run_clawpatch(
         repo,
         command,
-        env=env or dict(os.environ),
+        env=env if env is not None else dict(os.environ),
     )
     if result.returncode:
         requirement = (

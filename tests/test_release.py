@@ -2894,6 +2894,29 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertTrue(run.call_args.kwargs["kill_process_group"])
         self.assertEqual(run.call_args.kwargs["timeout"], 900)
 
+    @patch.dict(os.environ, {"GITHUB_TOKEN": "ambient-secret"})
+    @patch("clawpatch_supervise.clawpatch_release._run_clawpatch")
+    def test_fix_command_preserves_explicit_empty_environment(self, run_clawpatch):
+        run_clawpatch.return_value = self.completed(
+            ["clawpatch", "fix"],
+            json.dumps(
+                {
+                    "finding": "fnd_one",
+                    "patchAttempt": "pat_one",
+                    "status": "applied",
+                }
+            ),
+        )
+
+        result = _fix_command(
+            Path("/repo"),
+            ["clawpatch", "fix", "--finding", "fnd_one"],
+            env={},
+        )
+
+        self.assertEqual(result["patchAttempt"], "pat_one")
+        self.assertEqual(run_clawpatch.call_args.kwargs["env"], {})
+
     @patch("clawpatch_supervise.clawpatch_release._active_clawpatch_processes", return_value=[])
     @patch("clawpatch_supervise.clawpatch_release._run")
     def test_fix_timeout_is_not_retried_and_kills_the_complete_child_group(self, run, _processes):
