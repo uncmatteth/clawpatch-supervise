@@ -297,7 +297,8 @@ def _impl_run_project_gates(
     CommandRunner = ops['CommandRunner']
     GateFailure = ops['GateFailure']
     PROJECT_DIR = ops['PROJECT_DIR']
-    Path = ops['Path']
+    PurePosixPath = ops['PurePosixPath']
+    PureWindowsPath = ops['PureWindowsPath']
     SafetyError = ops['SafetyError']
     _source_paths = ops['_source_paths']
     shlex = ops['shlex']
@@ -343,7 +344,15 @@ def _impl_run_project_gates(
             or not isinstance(required_gate, bool)
         ):
             raise SafetyError("Validation gate configuration is malformed.")
-        executable = Path(argv[0]).name
+        executable = argv[0]
+        if (
+            executable != PurePosixPath(executable).name
+            or executable != PureWindowsPath(executable).name
+        ):
+            raise SafetyError(
+                f"Validation gate {gate_id!r} uses an executable path; "
+                "only bare program names are allowed."
+            )
         if executable not in allowed:
             raise SafetyError(
                 f"Validation gate {gate_id!r} uses unapproved executable {executable!r}."

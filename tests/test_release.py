@@ -7160,6 +7160,28 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
         self.assertIn("exit code: 128", message)
         self.assertIn("fatal: Needed a single revision", message)
 
+    def test_project_gate_rejects_executable_paths(self):
+        executable_paths = ("/tmp/pytest", "tools/pytest", r"C:\tools\pytest")
+        for executable in executable_paths:
+            with self.subTest(executable=executable), tempfile.TemporaryDirectory() as temp:
+                repo = Path(temp)
+                self.init_repo(repo)
+                (repo / ".manageroo" / "config.toml").write_text(
+                    "[safety]\n"
+                    'allowed_programs = ["pytest"]\n\n'
+                    "[[verification.gates]]\n"
+                    'id = "path-bypass"\n'
+                    "timeout_seconds = 60\n"
+                    f"argv = [{json.dumps(executable)}]\n",
+                    encoding="utf-8",
+                )
+
+                with self.assertRaisesRegex(
+                    SafetyError,
+                    "only bare program names are allowed",
+                ):
+                    _run_project_gates(repo, finding_id="path-authorization")
+
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
     @patch("clawpatch_supervise.clawpatch_release._json_clawpatch")

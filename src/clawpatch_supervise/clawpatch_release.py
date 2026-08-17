@@ -1175,8 +1175,8 @@ def _run_project_gates(
 ) -> list[dict[str, Any]]:
     return validation_component._impl_run_project_gates(
         _component_ops(
-            'CommandRunner', 'GateFailure', 'PROJECT_DIR', 'Path',
-            'SafetyError', '_source_paths', 'shlex', 'tomllib',
+            'CommandRunner', 'GateFailure', 'PROJECT_DIR', 'PurePosixPath',
+            'PureWindowsPath', 'SafetyError', '_source_paths', 'shlex', 'tomllib',
         ),
         repo,
         finding_id=finding_id,
