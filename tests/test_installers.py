@@ -29,6 +29,44 @@ class InstallerContractTests(unittest.TestCase):
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
 
+    def _test_url_handler_python_path(self) -> str:
+        root = Path(self._temporary_directory.name)
+        (root / "sitecustomize.py").write_text(
+            "import time\n"
+            "import urllib.request\n"
+            "\n"
+            "class Response:\n"
+            "    headers = {}\n"
+            "\n"
+            "    def __init__(self, mode):\n"
+            "        self.mode = mode\n"
+            "        self.sent = False\n"
+            "\n"
+            "    def __enter__(self):\n"
+            "        return self\n"
+            "\n"
+            "    def __exit__(self, *args):\n"
+            "        return False\n"
+            "\n"
+            "    def read(self, size=-1):\n"
+            "        if self.mode == 'stall':\n"
+            "            time.sleep(10)\n"
+            "            return b''\n"
+            "        if self.sent:\n"
+            "            return b''\n"
+            "        self.sent = True\n"
+            "        return b'x' * 17\n"
+            "\n"
+            "class Handler(urllib.request.BaseHandler):\n"
+            "    def test_open(self, request):\n"
+            "        return Response(request.host)\n"
+            "\n"
+            "urllib.request.install_opener(urllib.request.build_opener(Handler()))\n",
+            encoding="utf-8",
+        )
+        existing = os.environ.get("PYTHONPATH", "")
+        return os.pathsep.join(filter(None, (str(root), existing)))
+
     def _run_installer_process(
         self,
         *,
@@ -84,6 +122,10 @@ class InstallerContractTests(unittest.TestCase):
         git_present: bool = True,
         runtime_dependency: str | None = None,
         mixed_node_toolchain: bool = False,
+        artifact_read_timeout_seconds: int | None = None,
+        artifact_download_timeout_seconds: int | None = None,
+        artifact_max_bytes: int | None = None,
+        test_python_path: str | None = None,
         process_runner=None,
     ) -> tuple[subprocess.CompletedProcess[str], list[str], Path]:
         root = Path(self._temporary_directory.name)
@@ -318,6 +360,20 @@ class InstallerContractTests(unittest.TestCase):
             environment["CLAWPATCH_SUPERVISE_SHA256"] = source_sha256
         if verify_repo:
             environment["CLAWPATCH_SUPERVISE_VERIFY_REPO"] = str(root)
+        if artifact_read_timeout_seconds is not None:
+            environment["CLAWPATCH_SUPERVISE_ARTIFACT_READ_TIMEOUT_SECONDS"] = str(
+                artifact_read_timeout_seconds
+            )
+        if artifact_download_timeout_seconds is not None:
+            environment["CLAWPATCH_SUPERVISE_ARTIFACT_DOWNLOAD_TIMEOUT_SECONDS"] = str(
+                artifact_download_timeout_seconds
+            )
+        if artifact_max_bytes is not None:
+            environment["CLAWPATCH_SUPERVISE_ARTIFACT_MAX_BYTES"] = str(
+                artifact_max_bytes
+            )
+        if test_python_path is not None:
+            environment["PYTHONPATH"] = test_python_path
         if process_runner is None:
             result = self._run_installer_process(
                 platform_name="Linux/macOS",
@@ -1020,6 +1076,42 @@ class InstallerContractTests(unittest.TestCase):
 
         self.assertEqual(result.returncode, 2)
         self.assertIn("Artifact SHA-256 mismatch", result.stderr)
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_times_out_stalled_artifact_download(self) -> None:
+        started_at = time.monotonic()
+        result, _invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            source_package="test://stall/artifact.whl",
+            source_sha256="0" * 64,
+            artifact_read_timeout_seconds=5,
+            artifact_download_timeout_seconds=1,
+            test_python_path=self._test_url_handler_python_path(),
+        )
+        elapsed = time.monotonic() - started_at
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Artifact download timed out.", result.stderr)
+        self.assertLess(elapsed, 5)
+        self.assertFalse(install_root.exists())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX installer test")
+    def test_linux_installer_rejects_oversized_streamed_artifact(self) -> None:
+        result, _invocations, install_root = self._run_linux_installer(
+            clawpatch_present=True,
+            clawhub_present=True,
+            npm_mode="missing",
+            source_package="test://oversized/artifact.whl",
+            source_sha256="0" * 64,
+            artifact_max_bytes=16,
+            test_python_path=self._test_url_handler_python_path(),
+        )
+
+        self.assertEqual(result.returncode, 2)
+        self.assertIn("Artifact exceeds maximum download size of 16 bytes.", result.stderr)
         self.assertFalse(install_root.exists())
 
     @unittest.skipUnless(os.name == "posix", "POSIX installer test")

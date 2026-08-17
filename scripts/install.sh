@@ -8,6 +8,9 @@ bin_dir="${CLAWPATCH_SUPERVISE_BIN_DIR:-$HOME/.local/bin}"
 python_command="${CLAWPATCH_SUPERVISE_PYTHON:-python3}"
 verify_repo="${CLAWPATCH_SUPERVISE_VERIFY_REPO:-}"
 readonly install_lock_timeout_seconds="${CLAWPATCH_SUPERVISE_INSTALL_LOCK_TIMEOUT_SECONDS:-30}"
+readonly artifact_read_timeout_seconds="${CLAWPATCH_SUPERVISE_ARTIFACT_READ_TIMEOUT_SECONDS:-30}"
+readonly artifact_download_timeout_seconds="${CLAWPATCH_SUPERVISE_ARTIFACT_DOWNLOAD_TIMEOUT_SECONDS:-300}"
+readonly artifact_max_bytes="${CLAWPATCH_SUPERVISE_ARTIFACT_MAX_BYTES:-104857600}"
 readonly minimum_clawpatch_version="0.7.2"
 readonly release_clawpatch_version="0.7.2"
 readonly release_clawpatch_integrity_0_7_2="sha512-rhpWj6e31XJUtWKlp/MJOjdjtj+ZXc9WiLcXRk+ZaA699K++dVaYfx00dVS/QNiJBaI71IUFU6sdSPsX/nyW0g=="
@@ -236,25 +239,89 @@ if [[ ! -d "$source_package" ]]; then
 
   download_root="$(mktemp -d)"
   package_to_install="$download_root/clawpatch_supervise-${version}-py3-none-any.whl"
-  "$python_command" - "$source_package" "$package_to_install" "$expected_sha256" <<'PY'
+  "$python_command" - \
+    "$source_package" "$package_to_install" "$expected_sha256" \
+    "$artifact_read_timeout_seconds" "$artifact_download_timeout_seconds" \
+    "$artifact_max_bytes" <<'PY'
 import hashlib
 import hmac
+import signal
+import socket
 import shutil
 import sys
+import urllib.error
 import urllib.request
 from pathlib import Path
 
-source, destination, expected = sys.argv[1:]
+source, destination, expected, read_timeout_value, download_timeout_value, max_bytes_value = sys.argv[1:]
 if len(expected) != 64 or any(character not in "0123456789abcdefABCDEF" for character in expected):
     print("CLAWPATCH_SUPERVISE_SHA256 must be a 64-character hexadecimal digest.", file=sys.stderr)
     raise SystemExit(2)
+
+limits = (
+    ("CLAWPATCH_SUPERVISE_ARTIFACT_READ_TIMEOUT_SECONDS", read_timeout_value),
+    ("CLAWPATCH_SUPERVISE_ARTIFACT_DOWNLOAD_TIMEOUT_SECONDS", download_timeout_value),
+    ("CLAWPATCH_SUPERVISE_ARTIFACT_MAX_BYTES", max_bytes_value),
+)
+parsed_limits = tuple(
+    int(value) if value.isascii() and value.isdecimal() and int(value) > 0 else 0
+    for _name, value in limits
+)
+for (name, _value), parsed in zip(limits, parsed_limits):
+    if parsed <= 0:
+        print(f"{name} must be a positive integer.", file=sys.stderr)
+        raise SystemExit(2)
+read_timeout, download_timeout, max_bytes = parsed_limits
+
+
+class DownloadDeadlineExceeded(Exception):
+    pass
+
+
+def exceed_download_deadline(_signum, _frame):
+    raise DownloadDeadlineExceeded
 
 source_path = Path(source)
 if source_path.is_file():
     shutil.copyfile(source_path, destination)
 else:
-    with urllib.request.urlopen(source) as response, open(destination, "wb") as output:
-        shutil.copyfileobj(response, output)
+    signal.signal(signal.SIGALRM, exceed_download_deadline)
+    signal.setitimer(signal.ITIMER_REAL, download_timeout)
+    try:
+        with urllib.request.urlopen(source, timeout=read_timeout) as response:
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None:
+                try:
+                    declared_bytes = int(content_length)
+                except ValueError:
+                    declared_bytes = -1
+                if declared_bytes > max_bytes:
+                    print(
+                        f"Artifact exceeds maximum download size of {max_bytes} bytes.",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(2)
+            downloaded_bytes = 0
+            with open(destination, "wb") as output:
+                while chunk := response.read(min(1024 * 1024, max_bytes - downloaded_bytes + 1)):
+                    downloaded_bytes += len(chunk)
+                    if downloaded_bytes > max_bytes:
+                        print(
+                            f"Artifact exceeds maximum download size of {max_bytes} bytes.",
+                            file=sys.stderr,
+                        )
+                        raise SystemExit(2)
+                    output.write(chunk)
+    except (DownloadDeadlineExceeded, TimeoutError, socket.timeout):
+        print("Artifact download timed out.", file=sys.stderr)
+        raise SystemExit(2)
+    except urllib.error.URLError as error:
+        if isinstance(error.reason, (TimeoutError, socket.timeout)):
+            print("Artifact download timed out.", file=sys.stderr)
+            raise SystemExit(2)
+        raise
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
 
 with open(destination, "rb") as artifact:
     actual = hashlib.file_digest(artifact, "sha256").hexdigest()
