@@ -28,13 +28,38 @@ from .clawpatch_release import (
 from .cleanup import cleanup_owned_runs, owned_run_directory
 from .errors import RepositoryBusyError, SafetyError
 from .runner import CommandRunner
-from .util import redact_text
+from .util import atomic_write_json, redact_text
 from .validation_services import provision_disposable_validation_environment
 
 
 def _clawpatch_state_exists(repo: Path) -> bool:
     state = repo.resolve() / ".clawpatch"
     return state.is_dir() and (state / "project.json").is_file()
+
+
+def _supervisor_clawpatch_config(repo: Path, temporary_root: Path) -> Path | None:
+    candidates = (repo / "clawpatch.config.json", repo / ".clawpatch" / "config.json")
+    for source in candidates:
+        try:
+            config = json.loads(source.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            continue
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            return None
+        if not isinstance(config, dict):
+            return None
+        provider = config.get("provider")
+        if not isinstance(provider, dict):
+            return None
+        codex_config = provider.get("codexConfig", {})
+        if not isinstance(codex_config, dict):
+            return None
+        codex_config["features.code_mode_host"] = False
+        provider["codexConfig"] = codex_config
+        destination = temporary_root / "clawpatch-supervise-config.json"
+        atomic_write_json(destination, config)
+        return destination
+    return None
 
 
 def _run_state_query(
@@ -598,6 +623,9 @@ def main(
                 **owned_run.child_environment(),
                 **preflight_env_overrides,
             }
+            supervisor_config = _supervisor_clawpatch_config(repo, owned_run.temporary_root)
+            if supervisor_config is not None:
+                child_env_overrides["CLAWPATCH_CONFIG"] = str(supervisor_config)
             retry_attempt = 0
             while True:
                 try:
