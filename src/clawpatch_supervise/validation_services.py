@@ -516,9 +516,11 @@ def _verified_postgres_image(
     )
     try:
         payload = json.loads(result.stdout)
-        services = payload["services"]
-    except (KeyError, TypeError, json.JSONDecodeError) as exc:
+    except json.JSONDecodeError as exc:
         raise SafetyError("Docker Compose did not return a valid service definition.") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("services"), dict):
+        raise SafetyError("Docker Compose did not return a valid service definition.")
+    services = payload["services"]
     images = sorted(
         {
             str(service.get("image", ""))

@@ -22,6 +22,7 @@ from clawpatch_supervise.validation_services import (
     _provision_postgres_test_environment,
     _remove_container,
     _run_command,
+    _verified_postgres_image,
 )
 
 
@@ -365,6 +366,30 @@ class DisposablePostgresValidationTests(unittest.TestCase):
                 self._write_postgres_contract(root, image)
 
                 self.assertIsNone(_compose_contract(root))
+
+    def test_verified_postgres_image_rejects_malformed_services_data(self) -> None:
+        contract = PostgresTestContract(
+            compose_file=Path("compose.yaml"),
+            image=_POSTGRES_DIGEST_IMAGE,
+            url_env="TEST_DATABASE_URL",
+            reset_envs=("BTT_ALLOW_DATABASE_RESET",),
+        )
+
+        def run(
+            argv: list[str],
+            *,
+            cwd: Path,
+            timeout: int,
+            env: Mapping[str, str],
+        ) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(argv, 0, output, "")
+
+        for output in ('{}', '{"services": null}', '{"services": []}', '{"services": 1}'):
+            with self.subTest(output=output), self.assertRaisesRegex(
+                SafetyError,
+                "Docker Compose did not return a valid service definition",
+            ):
+                _verified_postgres_image(Path.cwd(), contract, run=run, env={})
 
     @patch.dict(
         "clawpatch_supervise.validation_services.os.environ",
