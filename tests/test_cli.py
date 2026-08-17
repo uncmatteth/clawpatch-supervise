@@ -456,6 +456,84 @@ class ExternalClawpatchSupervisorTests(unittest.TestCase):
         for control in ("\x07", "\r", "\x1b", "\x9b"):
             self.assertNotIn(control, rendered)
 
+    def test_progress_rendering_redacts_secrets_before_escaping_terminal_controls(self):
+        finding = _render_event(
+            {
+                "phase": "finding",
+                "current": 1,
+                "total": 2,
+                "command": "clawpatch show https://user:command-secret@example.test\x1b",
+                "inspection": {
+                    "finding": {
+                        "title": "leak api_key=title-secret\x07",
+                        "id": "fnd_one",
+                        "severity": "medium",
+                        "category": "security",
+                        "evidence": [
+                            {
+                                "path": "https://user:path-secret@example.test/file.py",
+                                "symbol": "token=symbol-secret",
+                            }
+                        ],
+                        "reproduction": "password=reproduction-secret\nforged",
+                        "recommendation": "Bearer recommendation-secret",
+                        "minimumFixScope": "credentials=scope-secret",
+                    },
+                    "validation": ["API_KEY=validation-secret python -m unittest"],
+                },
+            }
+        )
+        command_event = _render_event(
+            {
+                "phase": "review",
+                "current": 1,
+                "total": 2,
+                "command": "curl https://user:command-secret@example.test\x1b",
+            }
+        )
+        detail_event = _render_event(
+            {
+                "phase": "unknown",
+                "current": 1,
+                "total": 2,
+                "detail": "token=detail-secret\nforged",
+            }
+        )
+        heartbeat = "\n".join(
+            _heartbeat_lines(
+                {
+                    "phase": "review",
+                    "current": 1,
+                    "total": 2,
+                    "command": "curl https://user:heartbeat-secret@example.test\x1b",
+                    "changed": 100,
+                },
+                watchdog_seconds=900,
+                now=105,
+            )
+        )
+
+        rendered = "\n".join((finding, command_event, detail_event, heartbeat))
+        for secret in (
+            "command-secret",
+            "title-secret",
+            "path-secret",
+            "symbol-secret",
+            "reproduction-secret",
+            "recommendation-secret",
+            "scope-secret",
+            "validation-secret",
+            "detail-secret",
+            "heartbeat-secret",
+        ):
+            self.assertNotIn(secret, rendered)
+        self.assertIn("https://<REDACTED>@example.test", rendered)
+        self.assertIn("api_key=<REDACTED>", rendered)
+        self.assertIn("Bearer <REDACTED>", rendered)
+        self.assertIn(r"\nforged", rendered)
+        self.assertIn(r"\x1b", rendered)
+        self.assertNotIn("\x1b", rendered)
+
     def test_terminal_safe_escapes_unicode_format_controls(self):
         bidi_controls = "".join(chr(codepoint) for codepoint in range(0x202A, 0x202F))
         bidi_controls += "".join(chr(codepoint) for codepoint in range(0x2066, 0x206A))

@@ -154,12 +154,16 @@ def _terminal_safe(value: Any) -> str:
 
 
 def _terminal_safe_error(error: BaseException) -> str:
-    return _terminal_safe(redact_text(str(error)))
+    return _terminal_safe_redacted(str(error))
+
+
+def _terminal_safe_redacted(value: Any) -> str:
+    return _terminal_safe(redact_text(str(value)))
 
 
 def _counter(event: dict[str, Any]) -> str:
-    current = _terminal_safe(event.get("current", "?"))
-    total = _terminal_safe(event.get("total", "?"))
+    current = _terminal_safe_redacted(event.get("current", "?"))
+    total = _terminal_safe_redacted(event.get("total", "?"))
     return f"[{current}/{total}]"
 
 
@@ -167,15 +171,15 @@ def _render_inspection(event: dict[str, Any]) -> str:
     inspection = event.get("inspection")
     finding = inspection.get("finding") if isinstance(inspection, dict) else None
     if not isinstance(finding, dict):
-        return f"{_counter(event)} SHOW {_terminal_safe(event.get('finding_id', ''))}"
+        return f"{_counter(event)} SHOW {_terminal_safe_redacted(event.get('finding_id', ''))}"
     lines = [
         "",
         f"{_counter(event)} SHOW — 🔎🐛🗑️ LOOK AT THIS FUCKING THING",
-        f"$ {_terminal_safe(event.get('command', ''))}",
-        f"title: {_terminal_safe(finding.get('title', ''))}",
-        f"id: {_terminal_safe(finding.get('id', ''))}",
-        f"severity: {_terminal_safe(finding.get('severity', ''))}",
-        f"category: {_terminal_safe(finding.get('category', ''))}",
+        f"$ {_terminal_safe_redacted(event.get('command', ''))}",
+        f"title: {_terminal_safe_redacted(finding.get('title', ''))}",
+        f"id: {_terminal_safe_redacted(finding.get('id', ''))}",
+        f"severity: {_terminal_safe_redacted(finding.get('severity', ''))}",
+        f"category: {_terminal_safe_redacted(finding.get('category', ''))}",
     ]
     evidence = finding.get("evidence")
     if isinstance(evidence, list) and evidence:
@@ -185,14 +189,14 @@ def _render_inspection(event: dict[str, Any]) -> str:
                 continue
             start = item.get("startLine")
             end = item.get("endLine")
-            location = _terminal_safe(item.get("path", ""))
+            location = _terminal_safe_redacted(item.get("path", ""))
             if isinstance(start, int):
                 location += f":{start}"
                 if isinstance(end, int) and end != start:
                     location += f"-{end}"
             symbol = item.get("symbol")
             if symbol:
-                location += f" ({_terminal_safe(symbol)})"
+                location += f" ({_terminal_safe_redacted(symbol)})"
             lines.append(f"- {location}")
     for label, field in (
         ("reproduction", "reproduction"),
@@ -201,10 +205,12 @@ def _render_inspection(event: dict[str, Any]) -> str:
     ):
         value = finding.get(field)
         if value:
-            lines.extend([f"{label}:", _terminal_safe(value)])
+            lines.extend([f"{label}:", _terminal_safe_redacted(value)])
     validation = inspection.get("validation") if isinstance(inspection, dict) else None
     if isinstance(validation, list) and validation:
-        lines.extend(["validation:", *[f"- {_terminal_safe(command)}" for command in validation]])
+        lines.extend(
+            ["validation:", *[f"- {_terminal_safe_redacted(command)}" for command in validation]]
+        )
     return "\n".join(lines)
 
 
@@ -241,7 +247,7 @@ def _render_event(event: dict[str, Any]) -> str:
         attempt = event.get("attempt")
         maximum = event.get("max_attempts")
         suffix = (
-            f" (attempt {_terminal_safe(attempt)}/{_terminal_safe(maximum)})"
+            f" (attempt {_terminal_safe_redacted(attempt)}/{_terminal_safe_redacted(maximum)})"
             if attempt and maximum
             else ""
         )
@@ -266,7 +272,7 @@ def _render_event(event: dict[str, Any]) -> str:
         }.get(str(phase), "")
         return (
             f"\n{_counter(event)} {command_phases[str(phase)]}{suffix}{personality}\n"
-            f"$ {_terminal_safe(event.get('command', ''))}"
+            f"$ {_terminal_safe_redacted(event.get('command', ''))}"
         )
     if phase == "finding":
         return _render_inspection(event)
@@ -274,82 +280,82 @@ def _render_event(event: dict[str, Any]) -> str:
         return (
             f"\n{_counter(event)} FALSE-POSITIVE — 🙄🗑️ BOGUS BUG. "
             "THROW OUT ONLY OUR SHIT AND KEEP MOVING\n"
-            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
-            f"detail: {_terminal_safe(event.get('detail', ''))}"
+            f"finding: {_terminal_safe_redacted(event.get('finding_id', ''))}\n"
+            f"detail: {_terminal_safe_redacted(event.get('detail', ''))}"
         )
     if phase == "reset-recovery":
         return (
             f"\n{_counter(event)} CHECKPOINT RECOVERY — "
             "🧹🔧 CLEANING UP INTERRUPTED SHIT SAFELY\n"
-            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
-            f"$ {_terminal_safe(event.get('command', ''))}"
+            f"finding: {_terminal_safe_redacted(event.get('finding_id', ''))}\n"
+            f"$ {_terminal_safe_redacted(event.get('command', ''))}"
         )
     if phase == "submodule-exclusion":
         return (
             f"\n{_counter(event)} SUBMODULE EXCLUSION — "
             "🚧🙅 NOT TOUCHING SOMEBODY ELSE'S SHIT\n"
-            f"excluded: {_terminal_safe(event.get('detail', ''))}"
+            f"excluded: {_terminal_safe_redacted(event.get('detail', ''))}"
         )
     if phase == "validation-service-ready":
-        return f"\n{_counter(event)} VALIDATION SERVICE READY\n$ {_terminal_safe(event.get('detail', ''))}"
+        return f"\n{_counter(event)} VALIDATION SERVICE READY\n$ {_terminal_safe_redacted(event.get('detail', ''))}"
     if phase == "validation-service-cleanup":
-        return f"\n{_counter(event)} VALIDATION SERVICE CLEANUP\n$ {_terminal_safe(event.get('detail', ''))}"
+        return f"\n{_counter(event)} VALIDATION SERVICE CLEANUP\n$ {_terminal_safe_redacted(event.get('detail', ''))}"
     if phase == "validation-environment-ready":
-        return f"\n{_counter(event)} VALIDATION ENVIRONMENT READY\n$ {_terminal_safe(event.get('detail', ''))}"
+        return f"\n{_counter(event)} VALIDATION ENVIRONMENT READY\n$ {_terminal_safe_redacted(event.get('detail', ''))}"
     if phase == "validation-environment-cleanup":
-        return f"\n{_counter(event)} VALIDATION ENVIRONMENT CLEANUP\n$ {_terminal_safe(event.get('detail', ''))}"
+        return f"\n{_counter(event)} VALIDATION ENVIRONMENT CLEANUP\n$ {_terminal_safe_redacted(event.get('detail', ''))}"
     if phase == "fix":
         attempt = int(event.get("attempt", 1))
         maximum = event.get("max_attempts")
         if maximum:
-            suffix = f" (attempt {attempt}/{_terminal_safe(maximum)})"
+            suffix = f" (attempt {attempt}/{_terminal_safe_redacted(maximum)})"
         else:
             suffix = f" (attempt {attempt})" if attempt > 1 else ""
         return (
             f"\n{_counter(event)} FIX{suffix} — 🔨🤬🦶 KICK THIS BUG'S ASS\n"
-            f"$ {_terminal_safe(event.get('command', ''))}"
+            f"$ {_terminal_safe_redacted(event.get('command', ''))}"
         )
     if phase == "stopped":
         owned = event.get("owned_paths")
         paths = (
-            ", ".join(_terminal_safe(path) for path in owned)
+            ", ".join(_terminal_safe_redacted(path) for path in owned)
             if isinstance(owned, list)
             else ""
         )
         return (
             f"\n{_counter(event)} STOPPED - "
-            f"{_terminal_safe(event.get('outcome', 'not fixed'))} — "
+            f"{_terminal_safe_redacted(event.get('outcome', 'not fixed'))} — "
             "🛑💥🤬 FUCK. THIS SHIT ISN'T SAFE TO ADVANCE\n"
-            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
+            f"finding: {_terminal_safe_redacted(event.get('finding_id', ''))}\n"
             f"source left in place: {paths or 'none'}"
         )
     if phase == "fixed":
         commit = event.get("commit") or "no source commit required"
         return (
             f"\n{_counter(event)} FIXED — 🔥🔨 FUCK YES, THIS SHIT'S FIXED\n"
-            f"commit: {_terminal_safe(commit)}"
+            f"commit: {_terminal_safe_redacted(commit)}"
         )
     if phase == "uncertain":
         commit = event.get("commit") or "no source commit required"
         return (
             f"\n{_counter(event)} UNCERTAIN — 📦➡️ SAVED. MOVING TO THE NEXT OPEN FINDING.\n"
-            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
-            f"commit: {_terminal_safe(commit)}"
+            f"finding: {_terminal_safe_redacted(event.get('finding_id', ''))}\n"
+            f"commit: {_terminal_safe_redacted(commit)}"
         )
     if phase == "continuing":
         commit = event.get("commit") or "no source commit required"
         return (
             f"\n{_counter(event)} MOTHERFUCKER, SHIT'S STILL FUCKED. "
             "CONTINUING THE SAME FUCKING FINDING. 🤬🦶💥\n"
-            f"commit: {_terminal_safe(commit)}"
+            f"commit: {_terminal_safe_redacted(commit)}"
         )
     if phase == "fixed-point-rescan":
         generation = event.get("attempt", "?")
         return (
             f"\n{_counter(event)} FRESH FIXED-POINT REVIEW "
-            f"(generation {_terminal_safe(generation)}) — "
+            f"(generation {_terminal_safe_redacted(generation)}) — "
             "🕵️🗑️ CHECKING FOR MORE GARBAGE\n"
-            f"$ {_terminal_safe(event.get('command', ''))}"
+            f"$ {_terminal_safe_redacted(event.get('command', ''))}"
         )
     if phase == "resume":
         owned = event.get("owned_paths")
@@ -357,17 +363,17 @@ def _render_event(event: dict[str, Any]) -> str:
             return (
                 f"\n{_counter(event)} RESUME APPLIED REPAIR — "
                 "😤🔧 FOUND THE SAVED FIX\n"
-                f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
-                f"source changes: {', '.join(_terminal_safe(path) for path in owned)}"
+                f"finding: {_terminal_safe_redacted(event.get('finding_id', ''))}\n"
+                f"source changes: {', '.join(_terminal_safe_redacted(path) for path in owned)}"
             )
         return (
             f"\n{_counter(event)} RESUME INTERRUPTED PLANNED ATTEMPT — "
             "🧟🔧 PICKING THIS SHIT BACK UP\n"
-            f"finding: {_terminal_safe(event.get('finding_id', ''))}\n"
+            f"finding: {_terminal_safe_redacted(event.get('finding_id', ''))}\n"
             "source changes: none; returning through ClawPatch next"
         )
     detail = event.get("detail") or event.get("command") or phase or "working"
-    return f"{_counter(event)} {_terminal_safe(detail).upper()}"
+    return f"{_counter(event)} {_terminal_safe_redacted(detail).upper()}"
 
 
 def _heartbeat_lines(
@@ -376,27 +382,29 @@ def _heartbeat_lines(
     watchdog_seconds: int,
     now: float | None = None,
 ) -> list[str]:
-    phase = _terminal_safe(snapshot.get("phase", "working"))
+    phase = _terminal_safe_redacted(snapshot.get("phase", "working"))
     current_time = time.monotonic() if now is None else now
     elapsed = int(current_time - float(snapshot["changed"]))
     attempt = snapshot.get("attempt")
     maximum = snapshot.get("max_attempts")
     attempt_text = (
-        f" attempt {_terminal_safe(attempt)}/{_terminal_safe(maximum)}"
+        f" attempt {_terminal_safe_redacted(attempt)}/{_terminal_safe_redacted(maximum)}"
         if attempt and maximum
         else ""
     )
     if attempt and not maximum:
-        attempt_text = f" attempt {_terminal_safe(attempt)}"
+        attempt_text = f" attempt {_terminal_safe_redacted(attempt)}"
     finding = (
-        f" {_terminal_safe(snapshot['finding_id'])}" if snapshot.get("finding_id") else ""
+        f" {_terminal_safe_redacted(snapshot['finding_id'])}"
+        if snapshot.get("finding_id")
+        else ""
     )
     lines = [
         f"{_counter(snapshot)} still running: {phase}{attempt_text}{finding}",
         f"({elapsed}s in this displayed phase; child watchdog is {watchdog_seconds}s)",
     ]
     if snapshot.get("command"):
-        lines.append(f"$ {_terminal_safe(snapshot['command'])}")
+        lines.append(f"$ {_terminal_safe_redacted(snapshot['command'])}")
     return lines
 
 
