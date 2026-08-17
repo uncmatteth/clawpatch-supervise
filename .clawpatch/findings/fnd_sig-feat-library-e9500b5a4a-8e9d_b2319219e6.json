@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-e9500b5a4a-8e9d_b2319219e6",
+  "featureId": "feat_library_e9500b5a4a",
+  "title": "Checkpoint atomic writes do not durably persist the rename",
+  "category": "data-loss",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/checkpoint.py",
+      "startLine": 10,
+      "endLine": 31,
+      "symbol": "CheckpointStore",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/util.py",
+      "startLine": 187,
+      "endLine": 202,
+      "symbol": "atomic_write_text",
+      "quote": null
+    }
+  ],
+  "reasoning": "The implementation fsyncs the temporary file and replaces the destination, but never fsyncs the parent directory. On POSIX, a crash or power loss can therefore lose the directory entry update even though `CheckpointStore` promises durable supervisor state, leaving recovery without its latest progress or proof.",
+  "reproduction": null,
+  "recommendation": "After `os.replace`, open the parent directory and fsync it on platforms that support directory descriptors; handle unsupported platforms explicitly.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests cover cleanup and command execution, not crash durability or directory synchronization of checkpoint writes.",
+  "suggestedRegressionTest": "Mock descriptor operations and assert a successful atomic replacement fsyncs both the file and its parent directory.",
+  "minimumFixScope": "Harden `atomic_write_text`; all JSON checkpoint and proof writes then inherit the fix.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T032549-829862",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The checkpoint evidence still exists at src/clawpatch_supervise/checkpoint.py:10-31. The util evidence moved: atomic_write_text is now at lines 199-211 and calls _fsync_parent_directory after os.replace; that helper opens and fsyncs the POSIX parent directory at lines 187-196. README and tests/test_util.py also reflect the intended repair, and the unsupported-platform test passes. However, the linked patch attempt is recorded failed, the repair remains in temporary iteration commit 8b72a0b, and the current targeted test run failed because no writable temporary directory was available. Per the requirement not to return fixed after targeted validation fails, closure remains uncertain rather than fixed.",
+      "commands": [
+        "git status --short",
+        "git log --oneline --decorate -12 -- src/clawpatch_supervise/util.py tests/test_util.py README.md",
+        "nl -ba src/clawpatch_supervise/util.py | sed -n '165,225p'",
+        "git show --format=fuller --no-ext-diff HEAD -- README.md src/clawpatch_supervise/util.py tests/test_util.py",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_util -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_util.AtomicWriteTests.test_parent_directory_fsync_is_explicitly_unsupported_off_posix -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -c 'import ast; from pathlib import Path; [ast.parse(Path(p).read_text(encoding=\"utf-8\"), filename=p) for p in (\"src/clawpatch_supervise/util.py\", \"tests/test_util.py\")]; print(\"AST parse OK\")'",
+        "git diff --exit-code HEAD -- README.md src/clawpatch_supervise/util.py tests/test_util.py"
+      ],
+      "createdAt": "2026-08-17T03:27:06.442Z"
+    },
+    {
+      "runId": "20260817T032706-49b9d2",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The checkpoint evidence remains at checkpoint.py:10-31. atomic_write_text moved to util.py:199-211 and now fsyncs the temporary file, performs os.replace, then calls _fsync_parent_directory; that helper opens, fsyncs, and closes the POSIX parent directory at lines 187-196, while explicitly treating non-POSIX platforms as unsupported. The linked attempt failed only because ruff/pytest executables were unavailable. Current targeted validation passed all four durability and checkpoint tests. The full 368-test run had two unrelated environment failures: a sandbox-read-only external state path and unavailable network build dependencies. The affected release test passed when given a writable XDG state path. The repair files match HEAD without worktree changes.",
+      "commands": [
+        "git status --short",
+        "git rev-parse --show-toplevel",
+        "git rev-parse HEAD",
+        "git log --oneline --decorate -15 -- README.md src/clawpatch_supervise/util.py tests/test_util.py",
+        "nl -ba src/clawpatch_supervise/checkpoint.py | sed -n '1,45p'",
+        "nl -ba src/clawpatch_supervise/util.py | sed -n '175,220p'",
+        "rg -n \"fsync_parent|atomic_write|O_DIRECTORY|directory.*fsync|durab\" tests README.md src/clawpatch_supervise",
+        "git show --format=fuller --no-ext-diff HEAD -- README.md src/clawpatch_supervise/util.py tests/test_util.py",
+        "TMPDIR=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_util -v",
+        "TMPDIR=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v",
+        "XDG_STATE_HOME=/tmp/clawpatch-supervise-revalidation-state TMPDIR=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest -v tests.test_util.AtomicWriteTests tests.test_release.ClawpatchReleaseSweepTests.test_release_progress_is_durable_and_bound_to_the_current_finding tests.test_release.ClawpatchReleaseSweepTests.test_plain_release_command_fast_forwards_clean_behind_branch_and_preserves_clawpatch_state",
+        "git diff --exit-code HEAD -- README.md src/clawpatch_supervise/util.py tests/test_util.py",
+        "git status --short -- README.md src/clawpatch_supervise/util.py tests/test_util.py"
+      ],
+      "createdAt": "2026-08-17T03:28:34.103Z"
+    }
+  ],
+  "signature": "sig_feat-library-e9500b5a4a_8e9de3df3a",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-e9500b5a4a-_cd9ca3ec17"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:59:34.453Z",
+  "updatedAt": "2026-08-17T03:28:34.103Z"
+}

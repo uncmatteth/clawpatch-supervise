@@ -1,0 +1,70 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2897a385df-bd67_64c75712f9",
+  "featureId": "feat_library_2897a385df",
+  "title": "Escalated revalidation bypasses mutation-aware exception handling",
+  "category": "bug",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/validation.py",
+      "startLine": 485,
+      "endLine": 518,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/validation.py",
+      "startLine": 519,
+      "endLine": 561,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "Only the initial _revalidation_payload call is protected by the source-fingerprint exception handler. Workspace-write and host-bypass calls occur outside that try block. If either mutates source and then fails, its SafetyError escapes without the post-failure fingerprint check or the _UnresolvedFinding outcome used to preserve same-finding progress. The code also launches escalation before checking whether the initial call already changed source.",
+  "reproduction": "Stub the initial payload as open, then have the escalated payload modify a source file and raise SafetyError. The error escapes directly and lines 561-570 are never reached.",
+  "recommendation": "Check the fingerprint immediately after every revalidation call and place every escalation call inside the same mutation-aware exception handling path.",
+  "whyTestsDoNotAlreadyCoverThis": "The included tests do not exercise _impl_revalidate or its escalation failures.",
+  "suggestedRegressionTest": "Simulate source mutation followed by failure during workspace-write and host escalation; require _UnresolvedFinding with the source-progress outcome and no subsequent revalidation call.",
+  "minimumFixScope": "Refactor _impl_revalidate so each attempt shares one guarded execution helper, then add escalation mutation/failure tests.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T030329-42e11e",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "Current HEAD a67e7f7 contains the apparent repair: validation.py:488-537 wraps every revalidation attempt in shared mutation-aware handling, and lines 539-565 use it for initial, workspace-write, and host attempts. Tests at test_release.py:6081-6106 and 6195-6240 cover blocking escalation after initial mutation and preserving workspace/host mutation-plus-failure. However, the linked patch validation failed because ruff/pytest were unavailable, and current targeted unittest validation also failed because no writable temporary directory exists. Per the finding’s criteria, the source supports the repair but fixed status is not proven.",
+      "commands": [
+        "git status --short && git rev-parse HEAD && nl -ba src/clawpatch_supervise/validation.py | sed -n '450,610p' && rg -n \"guarded_revalidation|revalidation-command-failed-with-source-progress|revalidate-escalated|revalidate-host|mutated-source|source progress\" tests src README.md && git log --oneline --decorate -12 -- src/clawpatch_supervise/validation.py tests/test_release.py",
+        "git show --stat --oneline --decorate a67e7f7 && git show --format=fuller --no-ext-diff -- src/clawpatch_supervise/validation.py tests/test_release.py | sed -n '1,280p' && nl -ba tests/test_release.py | sed -n '6020,6260p'",
+        "PYTHONPATH=src python3 -m unittest -v tests.test_release.ClawpatchReleaseSweepTests.test_workspace_write_revalidation_cannot_silently_change_the_repair tests.test_release.ClawpatchReleaseSweepTests.test_initial_revalidation_mutation_blocks_escalation tests.test_release.ClawpatchReleaseSweepTests.test_escalated_revalidation_failure_with_source_progress_is_preserved",
+        "git diff --exit-code HEAD -- src/clawpatch_supervise/validation.py tests/test_release.py; python3 -c \"compile(open('src/clawpatch_supervise/validation.py', encoding='utf-8').read(), 'src/clawpatch_supervise/validation.py', 'exec'); compile(open('tests/test_release.py', encoding='utf-8').read(), 'tests/test_release.py', 'exec'); print('syntax-ok')\""
+      ],
+      "createdAt": "2026-08-17T03:04:28.948Z"
+    },
+    {
+      "runId": "20260817T030429-2041fc",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The evidence region still exists but was rewritten. validation.py:488-565 now routes initial, workspace-write, and host revalidation through guarded_revalidation, checks source fingerprints after both success and SafetyError, preserves mutation-plus-failure as _UnresolvedFinding, and prevents escalation after initial mutation. All three targeted regression tests passed. The full suite’s two failures were unrelated environment restrictions: unwritable user state and unavailable network build dependencies.",
+      "commands": [
+        "git status --short && git rev-parse HEAD && git log -8 --oneline --decorate -- src/clawpatch_supervise/validation.py tests/test_release.py && nl -ba src/clawpatch_supervise/validation.py | sed -n '455,585p' && rg -n \"initial_revalidation_mutation_blocks_escalation|escalated_revalidation_failure_with_source_progress|workspace_write_revalidation_cannot_silently_change_the_repair|guarded_revalidation|revalidation-command-failed-with-source-progress\" src tests README.md",
+        "git show --format=fuller --stat a67e7f7 && git show --format= --no-ext-diff a67e7f7 -- src/clawpatch_supervise/validation.py tests/test_release.py",
+        "TMPDIR=/tmp PYTHONPATH=src python3 -m unittest -v tests.test_release.ClawpatchReleaseSweepTests.test_workspace_write_revalidation_cannot_silently_change_the_repair tests.test_release.ClawpatchReleaseSweepTests.test_initial_revalidation_mutation_blocks_escalation tests.test_release.ClawpatchReleaseSweepTests.test_escalated_revalidation_failure_with_source_progress_is_preserved",
+        "TMPDIR=/tmp PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-17T03:05:46.655Z"
+    }
+  ],
+  "signature": "sig_feat-library-2897a385df_bd67152f9d",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-2897a385df-_8df28478f0"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:42.687Z",
+  "updatedAt": "2026-08-17T03:05:46.655Z"
+}

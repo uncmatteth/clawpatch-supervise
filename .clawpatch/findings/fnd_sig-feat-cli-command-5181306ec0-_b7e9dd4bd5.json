@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-cli-command-5181306ec0-_b7e9dd4bd5",
+  "featureId": "feat_cli-command_5181306ec0",
+  "title": "Progress output exposes secrets embedded in findings and command events",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 156,
+      "endLine": 157,
+      "symbol": "_terminal_safe_error",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 166,
+      "endLine": 208,
+      "symbol": "_render_inspection",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 211,
+      "endLine": 370,
+      "symbol": "_render_event",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_external.py",
+      "startLine": 565,
+      "endLine": 571,
+      "symbol": "display",
+      "quote": null
+    }
+  ],
+  "reasoning": "Exception text is explicitly passed through redact_text, but finding fields, commands, details, paths, and other externally derived event values are only passed through _terminal_safe. That function prevents terminal-control injection but does not remove credentials. A finding reproduction or process command containing a token can therefore be printed into terminal captures or CI logs.",
+  "reproduction": "Call display with a finding event whose reproduction contains a recognizable credential, or with a command event containing a credential-bearing URL, and observe that the value is printed unchanged.",
+  "recommendation": "Apply redact_text to externally derived event values before _terminal_safe, preferably through one shared rendering helper, while preserving fields that are intentionally non-secret.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were included for this CLI feature, and detecting the issue requires rendering events containing representative secret patterns.",
+  "suggestedRegressionTest": "Render finding, command, and detail events containing representative API keys and credential-bearing URLs; assert the output is terminal-safe and contains only redacted forms.",
+  "minimumFixScope": "Update the event-rendering path in clawpatch_external.py and add focused regression tests for redaction across inspection and generic progress events.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T033650-dbf3c9",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original file and symbols still exist at shifted lines: _terminal_safe_error at 156, _render_inspection at 170, _render_event at 217, and display at 573. Current commit 7dc96d4 adds _terminal_safe_redacted, which applies redact_text before terminal escaping, and routes finding fields, evidence paths/symbols, commands, details, counters, and heartbeat values through it. The focused secret-redaction regression test passed. The full suite attempted 371 tests but was environmentally blocked because the read-only runtime provided no writable temporary directory; those errors do not contradict the finding-specific passing validation. The linked attempt's ruff/pytest failures were also missing-executable errors, not failed behavioral assertions.",
+      "commands": [
+        "git status --short --branch",
+        "rg -n \"def _terminal_safe|def _terminal_safe_error|def _terminal_safe_redacted|def _counter|def _render_inspection|def _render_event|def _heartbeat_lines|def display|_terminal_safe\\\\(\" src/clawpatch_supervise/clawpatch_external.py tests/test_cli.py",
+        "git show --format=fuller --stat --oneline 7dc96d4",
+        "git show --format= -- src/clawpatch_supervise/clawpatch_external.py tests/test_cli.py 7dc96d4",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest -v tests.test_cli.ExternalClawpatchSupervisorTests.test_progress_rendering_redacts_secrets_before_escaping_terminal_controls",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-17T03:38:30.948Z"
+    }
+  ],
+  "signature": "sig_feat-cli-command-5181306ec0_2159bf2767",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-cli-command-5181306_c95f2da6ae"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:05.961Z",
+  "updatedAt": "2026-08-17T03:38:30.948Z"
+}

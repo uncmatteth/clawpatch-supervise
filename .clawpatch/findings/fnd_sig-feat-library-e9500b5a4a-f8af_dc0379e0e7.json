@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-e9500b5a4a-f8af_dc0379e0e7",
+  "featureId": "feat_library_e9500b5a4a",
+  "title": "Explicit empty child environments inherit ambient secrets",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/queue.py",
+      "startLine": 144,
+      "endLine": 164,
+      "symbol": "_impl_fix_command",
+      "quote": null
+    },
+    {
+      "path": "tests/test_runner.py",
+      "startLine": 29,
+      "endLine": 77,
+      "symbol": "CommandRunnerEnvironmentTests.test_process_group_uses_exact_sanitized_release_environment",
+      "quote": null
+    }
+  ],
+  "reasoning": "Using `env or dict(os.environ)` treats an explicitly supplied empty dictionary as absent. A caller requesting an empty environment therefore passes ambient credentials, database URLs, and dangerous feature flags to ClawPatch, contradicting the tested exact-environment isolation contract.",
+  "reproduction": "Capture the environment passed to `_run_clawpatch`, set an ambient sentinel such as `GITHUB_TOKEN`, and invoke the fix path with `env={}`; the sentinel is forwarded.",
+  "recommendation": "Use `env if env is not None else dict(os.environ)` so only omission enables ambient inheritance.",
+  "whyTestsDoNotAlreadyCoverThis": "The environment isolation test supplies a nonempty sanitized mapping, so it does not exercise the falsey empty-mapping case.",
+  "suggestedRegressionTest": "Invoke the fix command with `env={}` under a patched ambient secret and assert `_run_clawpatch` receives exactly an empty mapping.",
+  "minimumFixScope": "Change the environment selection in `_impl_fix_command` and add one queue-level regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T033024-16d910",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original queue.py evidence still exists but changed: _impl_fix_command now uses `env if env is not None else dict(os.environ)`, so an explicit `{}` no longer inherits ambient secrets. A focused regression now exists at tests/test_release.py:2897-2918; it sets ambient GITHUB_TOKEN, calls _fix_command with env={}, and asserts the child receives exactly {}. That targeted test passed. Commit e2b3189 contains the one-line repair and regression test. The linked patch attempt's ruff/pytest checks failed only because those executables were unavailable (exit 127), so that attempt alone was not validation; current targeted unittest provides successful validation. The full suite could not run meaningfully in this read-only environment: 279 errors were caused by no usable writable temporary directory, not by this repair.",
+      "commands": [
+        "git status --short --branch",
+        "rg -n \"env=env if env is not None|env or dict\\(os\\.environ\\)|_impl_fix_command|empty.*environment|explicit.*empty|ambient.*sentinel|GITHUB_TOKEN\" src tests README.md pyproject.toml",
+        "git show --format=fuller --no-ext-diff --src-prefix=a/ --dst-prefix=b/ e2b3189 -- src/clawpatch_supervise/queue.py tests/test_release.py",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_release.ClawpatchReleaseSweepTests.test_fix_command_preserves_explicit_empty_environment -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-17T03:31:30.401Z"
+    }
+  ],
+  "signature": "sig_feat-library-e9500b5a4a_f8afc3c1d2",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-e9500b5a4a-_5e0a8e7e45"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:59:34.453Z",
+  "updatedAt": "2026-08-17T03:31:30.401Z"
+}

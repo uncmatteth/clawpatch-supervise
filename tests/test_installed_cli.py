@@ -147,6 +147,31 @@ class InstalledConsoleScriptTests(unittest.TestCase):
             )
             self.assertEqual(installed.returncode, 0, installed.stderr)
 
+            metadata = subprocess.run(
+                [
+                    str(python),
+                    "-I",
+                    "-c",
+                    "from importlib.metadata import distribution; "
+                    "package = distribution('clawpatch-supervise'); "
+                    "entry_point = next(item for item in package.entry_points "
+                    "if item.group == 'console_scripts' "
+                    "and item.name == 'clawpatch-supervise'); "
+                    "print(package.version); print(entry_point.value)",
+                ],
+                capture_output=True,
+                check=False,
+                cwd=root,
+                env=environment,
+                text=True,
+                timeout=30,
+            )
+            self.assertEqual(metadata.returncode, 0, metadata.stderr)
+            self.assertEqual(
+                metadata.stdout.splitlines(),
+                [__version__, "clawpatch_supervise.clawpatch_external:main"],
+            )
+
             imported = subprocess.run(
                 [
                     str(python),

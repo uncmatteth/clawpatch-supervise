@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2897a385df-f5d7_900eb18e56",
+  "featureId": "feat_library_2897a385df",
+  "title": "Windows drive-relative and state-directory paths pass attempt-path validation",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/validation.py",
+      "startLine": 392,
+      "endLine": 416,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "PureWindowsPath(\"C:outside\") is drive-qualified but not absolute, so it passes. Likewise, \".clawpatch\\\\state\" is recognized as Windows path components but evades the literal forward-slash .clawpatch checks. These inputs defeat the validator's stated outside/state-only path restrictions on Windows.",
+  "reproduction": "Call the validator with [\"C:outside\"] or [\".clawpatch\\\\state\"]; neither satisfies any rejection condition.",
+  "recommendation": "Reject any Windows path with a drive, and compare normalized PurePosixPath/PureWindowsPath components so a first component of .clawpatch is rejected for either separator style.",
+  "whyTestsDoNotAlreadyCoverThis": "No included tests cover _impl_validate_attempt_paths_syntax or Windows-specific unsafe forms.",
+  "suggestedRegressionTest": "Test drive-relative paths, UNC/device paths, and .clawpatch paths using both slash styles.",
+  "minimumFixScope": "Harden _impl_validate_attempt_paths_syntax and add cross-platform path-table tests.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T031414-a559aa",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The evidence still exists but moved to validation.py:401-426. The validator now rejects any PureWindowsPath with a drive and rejects .clawpatch as the normalized first Windows component, covering C:outside, UNC/device paths, and both slash styles. Regression tests exist in tests/test_release.py:75-92. The linked attempt's ruff/pytest commands failed only because those executables were unavailable (exit 127), so they provided no validation; fresh targeted validation using the repository's supported unittest command passed both tests. Commit bb42b83 contains the matching source and regression-test repair.",
+      "commands": [
+        "git status --short --branch",
+        "nl -ba src/clawpatch_supervise/validation.py | sed -n '380,435p'",
+        "rg -n \"AttemptPathSyntaxTests|C:outside|clawpatch\\\\\\\\state|_validate_attempt_paths_syntax\" tests src",
+        "git show --format=fuller --no-ext-diff bb42b83 -- src/clawpatch_supervise/validation.py tests/test_release.py",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest -v tests.test_release.AttemptPathSyntaxTests"
+      ],
+      "createdAt": "2026-08-17T03:14:59.759Z"
+    }
+  ],
+  "signature": "sig_feat-library-2897a385df_f5d7568624",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-2897a385df-_b3ade59e54"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:42.687Z",
+  "updatedAt": "2026-08-17T03:14:59.758Z"
+}

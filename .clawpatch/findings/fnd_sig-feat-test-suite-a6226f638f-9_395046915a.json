@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-test-suite-a6226f638f-9_395046915a",
+  "featureId": "feat_test-suite_a6226f638f",
+  "title": "Default installed-wheel test requires live package-index access",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "tests/test_installed_cli.py",
+      "startLine": 32,
+      "endLine": 49,
+      "symbol": "test_wheel_build_uses_isolated_pep517_requirements",
+      "quote": null
+    },
+    {
+      "path": "tests/test_installed_cli.py",
+      "startLine": 50,
+      "endLine": 54,
+      "symbol": "test_clawpatch_supervise_entrypoint_from_installed_wheel",
+      "quote": null
+    },
+    {
+      "path": "tests/test_installed_cli.py",
+      "startLine": 217,
+      "endLine": 246,
+      "symbol": "_build_wheel",
+      "quote": null
+    },
+    {
+      "path": "pyproject.toml",
+      "startLine": 1,
+      "endLine": 3,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The normal test suite builds a wheel in an isolated PEP 517 environment while explicitly removing offline controls and forbidding --no-index. Pip must obtain the exactly pinned setuptools and wheel distributions from an index unless they happen to be cached, making otherwise local tests fail in offline, restricted, or transient-network environments.",
+  "reproduction": "Run pytest tests/test_installed_cli.py with an empty pip cache and network access disabled.",
+  "recommendation": "Move the network-backed build into an explicitly selected integration lane, or supply a checked/verified local wheelhouse and build with --no-index --find-links so the default suite is deterministic.",
+  "whyTestsDoNotAlreadyCoverThis": "The argument test enforces the network-dependent behavior instead of exercising an offline build path.",
+  "suggestedRegressionTest": "Run _build_wheel with an empty cache, disabled index access, and a local wheelhouse containing the pinned build requirements; assert the wheel builds successfully without network access.",
+  "minimumFixScope": "Update tests/test_installed_cli.py and the test dependency provisioning or CI configuration to separate or eliminate package-index access in the default test command.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T035715-090881",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original paths still exist, but the evidence moved. The network-backed wheel test is now explicitly gated by CLAWPATCH_SUPERVISE_NETWORK_TESTS=1 at tests/test_installed_cli.py:60-64; _build_wheel moved to lines 231-266; and README.md:441-452 documents the separate integration lane. Two repair-specific assertions passed with the network lane disabled, supporting the repair. However, the linked patch attempt's pytest/ruff validations all failed with exit 127, the current targeted file run failed because no writable temporary directory was available, and the required full suite failed with 278 errors for the same environment limitation. Therefore the source appears repaired, but targeted/full validation has not completed successfully, so fixed cannot be returned.",
+      "commands": [
+        "git status --short --branch && git rev-parse HEAD && git log -8 --oneline --decorate",
+        "nl -ba tests/test_installed_cli.py | sed -n '1,280p'",
+        "nl -ba README.md | sed -n '425,460p'",
+        "git show --stat --summary --format=fuller HEAD && git diff HEAD^..HEAD -- README.md tests/test_installed_cli.py requirements-test.txt pyproject.toml",
+        "test_cache_dir=$(mktemp -d /tmp/clawpatch-revalidate-pip-cache.XXXXXX); env -u CLAWPATCH_SUPERVISE_NETWORK_TESTS PIP_NO_INDEX=1 PIP_CACHE_DIR=\"$test_cache_dir\" PYTHONPATH=src python3 -m unittest tests.test_installed_cli -v",
+        "env -u CLAWPATCH_SUPERVISE_NETWORK_TESTS PIP_NO_INDEX=1 PYTHONPATH=src python3 -m unittest -v tests.test_installed_cli.InstalledConsoleScriptTests.test_build_requirements_are_exactly_pinned_for_the_network_lane tests.test_installed_cli.InstalledConsoleScriptTests.test_installed_wheel_entrypoint_requires_explicit_network_lane",
+        "env -u CLAWPATCH_SUPERVISE_NETWORK_TESTS PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-17T03:59:31.273Z"
+    },
+    {
+      "runId": "20260817T035931-8d9dec",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original issue was real and is now repaired. The evidence moved: the isolated network-oriented helper remains at tests/test_installed_cli.py:231-266, but the actual installed-wheel build is now guarded by CLAWPATCH_SUPERVISE_NETWORK_TESTS=1 at lines 60-64. README.md:441-452 documents it as a separate integration lane. With that variable unset and PIP_NO_INDEX=1, the targeted file passed 3 tests and skipped only the network build. The full default suite then passed 373 tests with 19 platform/network skips after XDG_STATE_HOME was redirected to a writable temporary directory. An earlier full run's sole error was an unrelated sandbox denial under /home/Tommy/.local/state; the formerly failing test passed with the supported state-home override. Current repair files are clean at HEAD d018b6b0de56e108e7887b8b171810efb3af6986. The linked attempt's exit-127 results reflected unavailable pytest/ruff executables, not a current validation failure.",
+      "commands": [
+        "git status --short --branch && git rev-parse HEAD && git log -8 --oneline --decorate",
+        "nl -ba tests/test_installed_cli.py | sed -n '1,290p'",
+        "nl -ba README.md | sed -n '435,458p' && nl -ba requirements-test.txt && nl -ba pyproject.toml | sed -n '1,12p'",
+        "git show --stat --summary --format=fuller HEAD && git diff HEAD^..HEAD -- README.md tests/test_installed_cli.py requirements-test.txt pyproject.toml",
+        "env -u CLAWPATCH_SUPERVISE_NETWORK_TESTS PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_installed_cli -v",
+        "env -u CLAWPATCH_SUPERVISE_NETWORK_TESTS PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v",
+        "revalidate_state=$(mktemp -d /tmp/clawpatch-revalidate-state.XXXXXX) && env -u CLAWPATCH_SUPERVISE_NETWORK_TESTS XDG_STATE_HOME=\"$revalidate_state\" PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest -v tests.test_release.ClawpatchReleaseSweepTests.test_plain_release_command_fast_forwards_clean_behind_branch_and_preserves_clawpatch_state",
+        "revalidate_state=$(mktemp -d /tmp/clawpatch-revalidate-state.XXXXXX) && env -u CLAWPATCH_SUPERVISE_NETWORK_TESTS XDG_STATE_HOME=\"$revalidate_state\" PIP_NO_INDEX=1 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v",
+        "git status --short -- README.md tests/test_installed_cli.py requirements-test.txt pyproject.toml && git rev-parse HEAD"
+      ],
+      "createdAt": "2026-08-17T04:02:48.951Z"
+    }
+  ],
+  "signature": "sig_feat-test-suite-a6226f638f_981ddcfeb3",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-test-suite-a6226f63_70b0c6ccb6"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:07.251Z",
+  "updatedAt": "2026-08-17T04:02:48.951Z"
+}

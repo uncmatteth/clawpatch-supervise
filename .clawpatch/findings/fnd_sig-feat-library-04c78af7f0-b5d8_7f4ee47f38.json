@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-04c78af7f0-b5d8_7f4ee47f38",
+  "featureId": "feat_library_04c78af7f0",
+  "title": "Legacy provider-failed outcome is misclassified as provider-refused",
+  "category": "api-contract",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "contract-mismatch",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/clawpatch_protocol.py",
+      "startLine": 42,
+      "endLine": 50,
+      "symbol": "_EXIT_FAILURES",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/clawpatch_protocol.py",
+      "startLine": 84,
+      "endLine": 95,
+      "symbol": "failure_from_legacy_outcome",
+      "quote": null
+    }
+  ],
+  "reasoning": "The canonical exit mapping defines provider failure as exit 1 and provider refusal as exit 4, but the legacy outcome named revalidation-provider-failed is translated to exit 4. Consumers therefore receive PROVIDER_REFUSED and refusal-based reason text instead of PROVIDER_FAILED. Both kinds currently share transition flags, which masks the mismatch in behavioral tests but leaves reporting and future kind-specific logic incorrect.",
+  "reproduction": "Call failure_from_legacy_outcome(\"revalidation-provider-failed\") and observe that the returned kind is PROVIDER_REFUSED.",
+  "recommendation": "Map revalidation-provider-failed to (\"revalidation\", 1), or rename the legacy outcome if it genuinely represents provider refusal.",
+  "whyTestsDoNotAlreadyCoverThis": "No linked tests were included, and tests asserting only transient or progress-capable behavior would pass because both failure kinds currently have identical flags.",
+  "suggestedRegressionTest": "Assert that failure_from_legacy_outcome(\"revalidation-provider-failed\").kind is ClawpatchFailureKind.PROVIDER_FAILED and that its transition reason starts with \"provider-failed\".",
+  "minimumFixScope": "Update the single legacy mapping and add a focused protocol regression test.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T040548-6de777",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence still exists: _EXIT_FAILURES remains at lines 42-50, and failure_from_legacy_outcome remains at lines 84-95. Current line 90 now maps revalidation-provider-failed to exit 1, which classifies as PROVIDER_FAILED; commit 7d3c445 shows the exact change from exit 4 to exit 1. The focused regression at tests/test_protocol.py:115-124 verifies both PROVIDER_FAILED and a provider-failed transition reason. The targeted test passed, and all 7 protocol tests passed. The linked patch attempt's ruff/pytest commands were not valid proof because the executables were unavailable (exit 127), but current stdlib unittest validation supplies targeted proof. The 373-test repository-wide run was attempted but produced 278 environment errors because no writable temporary directory was available; this does not contradict the passing targeted behavior. The finding's stored open status is stale relative to the current committed source.",
+      "commands": [
+        "git status --short -- src/clawpatch_supervise/clawpatch_protocol.py tests/test_protocol.py",
+        "nl -ba src/clawpatch_supervise/clawpatch_protocol.py | sed -n '38,105p'",
+        "git diff HEAD^ HEAD -- src/clawpatch_supervise/clawpatch_protocol.py tests/test_protocol.py",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_protocol.ClawpatchProtocolTests.test_legacy_checkpoint_outcomes_enter_the_same_typed_policy -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_protocol -v",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-17T04:07:45.553Z"
+    }
+  ],
+  "signature": "sig_feat-library-04c78af7f0_b5d8b667e6",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-04c78af7f0-_24897ef090"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:12.565Z",
+  "updatedAt": "2026-08-17T04:07:45.553Z"
+}

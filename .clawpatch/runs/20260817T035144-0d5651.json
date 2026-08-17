@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "runId": "20260817T035144-0d5651",
+  "command": "revalidate",
+  "args": [
+    "revalidate",
+    "--finding",
+    "fnd_sig-feat-library-e9500b5a4a-6b92_a44ee7e185",
+    "--json"
+  ],
+  "rootPath": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+  "headSha": "713205e891daaccda4e602359c49b4b82d0a6919",
+  "startedAt": "2026-08-17T03:51:44.365Z",
+  "finishedAt": "2026-08-17T03:53:33.394Z",
+  "status": "completed",
+  "claimedFeatureIds": [],
+  "findingIds": [
+    "fnd_sig-feat-library-e9500b5a4a-6b92_a44ee7e185"
+  ],
+  "patchAttemptIds": [],
+  "errors": []
+}

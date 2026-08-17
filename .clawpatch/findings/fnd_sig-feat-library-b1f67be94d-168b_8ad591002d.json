@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-b1f67be94d-168b_8ad591002d",
+  "featureId": "feat_library_b1f67be94d",
+  "title": "Dynamic version and console entry point lack a linked packaging smoke test",
+  "category": "test-gap",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "test-gap",
+  "evidence": [
+    {
+      "path": "pyproject.toml",
+      "startLine": 7,
+      "endLine": 7,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "pyproject.toml",
+      "startLine": 22,
+      "endLine": 29,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The distribution relies on dynamic version discovery and a console-script import target, but this feature includes no tests. Source-level tests can pass while wheel construction, metadata resolution, installation, or command import fails, making this a release regression risk.",
+  "reproduction": null,
+  "recommendation": "Add a clean-environment test that builds the wheel, installs it without dependencies, validates its metadata/version, and runs `clawpatch-supervise --version`.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests are linked to the feature, and the included excerpts show no build-and-install verification.",
+  "suggestedRegressionTest": "Build a wheel with `python -m build`, install it into a fresh virtual environment using `--no-deps`, then assert that package metadata resolves and `clawpatch-supervise --version` exits successfully.",
+  "minimumFixScope": "Add one packaging smoke test covering wheel build, installation, dynamic version resolution, and the declared console entry point.",
+  "status": "uncertain",
+  "history": [
+    {
+      "runId": "20260817T041312-ecf033",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The required controlled run could not start: `manageroo run` exited 1 because `/home/Tommy/Documents/GitHub/clawpatch-supervise/.manageroo/config.toml` is missing, so no run ID, status, or controller-owned COMPLETE/applied proof exists. The hook then blocked `manageroo init`, preventing the required prerequisite from being created. The prior source evidence still suggests the packaging smoke test exists, but the failed linked validation and absent Manageroo proof prevent a fixed verdict.",
+      "commands": [
+        "manageroo run",
+        "manageroo init"
+      ],
+      "createdAt": "2026-08-17T04:15:49.422Z"
+    },
+    {
+      "runId": "20260817T041549-39e002",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "No controller-owned run exists to inspect or continue. Two fresh `manageroo run` attempts exited 1 before creating a run ID because `.manageroo/config.toml` is missing. `manageroo status` therefore cannot be used because it requires a run ID, and the hook blocked the prerequisite `manageroo init`. The current test source appears to implement the requested packaging smoke coverage, but the linked targeted validations remain failed and no COMPLETE/applied Manageroo proof exists, so `fixed` is not supported.",
+      "commands": [
+        "manageroo run",
+        "manageroo status",
+        "manageroo run",
+        "manageroo init"
+      ],
+      "createdAt": "2026-08-17T04:17:18.681Z"
+    },
+    {
+      "runId": "20260817T041718-58df5b",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "A fresh `manageroo run` again exited 1 before creating a controller-owned run because `/home/Tommy/Documents/GitHub/clawpatch-supervise/.manageroo/config.toml` is missing. Therefore there is no run ID to inspect or continue and no COMPLETE/applied proof. The current test source appears to cover wheel build, isolated installation, metadata/version resolution, and the console entry point, but the linked targeted validations failed and fresh required validation remains unavailable, so `fixed` is unsupported.",
+      "commands": [
+        "manageroo run"
+      ],
+      "createdAt": "2026-08-17T04:18:38.801Z"
+    },
+    {
+      "runId": "20260817T042026-7dbbf6",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "A fresh `manageroo run` again exited 1 because `/home/Tommy/Documents/GitHub/clawpatch-supervise/.manageroo/config.toml` is missing. It created no controller-owned run ID, so there is no stopped run to inspect or continue and no COMPLETE/applied proof. The current source appears to contain the requested packaging smoke test, but fixed remains unsupported without successful targeted validation.",
+      "commands": [
+        "manageroo run"
+      ],
+      "createdAt": "2026-08-17T04:21:57.253Z"
+    },
+    {
+      "runId": "20260817T042157-9bccc3",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "A fresh `manageroo run` again exited 1 before creating a controller-owned run because `/home/Tommy/Documents/GitHub/clawpatch-supervise/.manageroo/config.toml` is missing. Therefore no run ID exists to inspect or continue, and there is no COMPLETE/applied proof for this request. The current source contains the intended packaging smoke test, but the required targeted validation remains unproven, so a fixed verdict is not supported.",
+      "commands": [
+        "manageroo run"
+      ],
+      "createdAt": "2026-08-17T04:23:09.713Z"
+    },
+    {
+      "runId": "20260817T042309-b6a8e4",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "A fresh required `manageroo run` again exited 1 before creating a controller-owned run because `/home/Tommy/Documents/GitHub/clawpatch-supervise/.manageroo/config.toml` is missing. There is therefore no run ID to inspect or continue and no COMPLETE/applied proof. The current source contains the intended packaging smoke test, but its linked validations failed and successful targeted validation remains unavailable, so `fixed` is unsupported.",
+      "commands": [
+        "manageroo run"
+      ],
+      "createdAt": "2026-08-17T04:24:11.455Z"
+    }
+  ],
+  "signature": "sig_feat-library-b1f67be94d_168bcc753e",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-b1f67be94d-_ffb2a43cf3",
+    "pat_fnd-sig-feat-library-b1f67be94d-_0dafa67b2d"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:57:35.710Z",
+  "updatedAt": "2026-08-17T04:24:11.455Z"
+}

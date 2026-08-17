@@ -7,7 +7,7 @@
     "remoteUrl": "https://github.com/uncmatteth/clawpatch-supervise.git",
     "defaultBranch": null,
     "currentBranch": "main",
-    "headSha": "ad64213c366f553da1489e4a5ff5516f6a1caab9"
+    "headSha": "fa89b6a8fa7ccfbb86899c9b08a921655f0e9b82"
   },
   "detected": {
     "languages": [
@@ -24,6 +24,6 @@
       "test": "pytest"
     }
   },
-  "createdAt": "2026-08-13T13:32:47.537Z",
-  "updatedAt": "2026-08-13T13:32:47.537Z"
+  "createdAt": "2026-08-17T02:57:10.633Z",
+  "updatedAt": "2026-08-17T02:57:10.633Z"
 }

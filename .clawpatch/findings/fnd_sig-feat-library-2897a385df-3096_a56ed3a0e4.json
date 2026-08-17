@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2897a385df-3096_a56ed3a0e4",
+  "featureId": "feat_library_2897a385df",
+  "title": "Malformed Compose services data raises AttributeError instead of SafetyError",
+  "category": "bug",
+  "severity": "low",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/validation_services.py",
+      "startLine": 517,
+      "endLine": 529,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The guarded parsing block only retrieves payload[\"services\"]. The subsequent services.values() call is outside the try block and assumes a mapping. Valid JSON such as {\"services\": []} therefore raises AttributeError, escaping the validation layer's controlled error contract.",
+  "reproduction": "Return stdout '{\"services\": []}' from the compose inspection command and call _verified_postgres_image.",
+  "recommendation": "Validate that the decoded payload and services are mappings before iterating, and translate invalid shapes to SafetyError.",
+  "whyTestsDoNotAlreadyCoverThis": "The PostgreSQL provisioning tests patch _verified_postgres_image and do not test malformed Compose JSON shapes.",
+  "suggestedRegressionTest": "Feed missing, null, list, and scalar services values and assert SafetyError with the invalid-service-definition message.",
+  "minimumFixScope": "Add a mapping check in _verified_postgres_image and focused malformed-output tests.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T033303-855076",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence path still exists. Lines 517-529 now validate that both the decoded payload and payload[\"services\"] are dictionaries before calling services.values(), raising SafetyError for malformed shapes. Commit f087ded added this guard and a regression test covering missing, null, list, and scalar services values. The linked patch attempt's ruff/pytest commands failed with exit 127 and provided no validation, but current targeted validation passes: the focused unittest ran successfully.",
+      "commands": [
+        "git status --short && git diff -- src/clawpatch_supervise/validation_services.py tests/test_validation_services.py",
+        "nl -ba src/clawpatch_supervise/validation_services.py | sed -n '505,545p'",
+        "rg -n -C 4 \"test_verified_postgres_image_rejects_malformed_services_data|not isinstance\\(payload|services\\.values\" src/clawpatch_supervise/validation_services.py tests/test_validation_services.py",
+        "git show --format=fuller --no-ext-diff f087ded -- src/clawpatch_supervise/validation_services.py tests/test_validation_services.py",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -p 'test_validation_services.py' -k malformed_services_data -v"
+      ],
+      "createdAt": "2026-08-17T03:33:50.003Z"
+    }
+  ],
+  "signature": "sig_feat-library-2897a385df_3096b2c9f1",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-2897a385df-_40b46202b6"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:42.687Z",
+  "updatedAt": "2026-08-17T03:33:50.003Z"
+}

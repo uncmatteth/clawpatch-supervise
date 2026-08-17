@@ -1,0 +1,167 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-e9500b5a4a-6b92_a44ee7e185",
+  "featureId": "feat_library_e9500b5a4a",
+  "title": "Split component modules contain unresolved type annotations",
+  "category": "build-release",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/checkpoint.py",
+      "startLine": 3,
+      "endLine": 5,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/checkpoint.py",
+      "startLine": 124,
+      "endLine": 135,
+      "symbol": "_impl_write_release_progress",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/checkpoint.py",
+      "startLine": 503,
+      "endLine": 509,
+      "symbol": "_impl_checkpoint_unapplied_attempt",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/git_ops.py",
+      "startLine": 3,
+      "endLine": 5,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/git_ops.py",
+      "startLine": 166,
+      "endLine": 172,
+      "symbol": "_impl_require_synchronized_remote_branch",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/proof.py",
+      "startLine": 3,
+      "endLine": 4,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/proof.py",
+      "startLine": 55,
+      "endLine": 61,
+      "symbol": "_impl_prepare_fresh_release",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/queue.py",
+      "startLine": 3,
+      "endLine": 4,
+      "symbol": null,
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/queue.py",
+      "startLine": 36,
+      "endLine": 45,
+      "symbol": "_impl_next_finding",
+      "quote": null
+    },
+    {
+      "path": "pyproject.toml",
+      "startLine": 34,
+      "endLine": 36,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "These modules reference names such as `Callable`, `Path`, and `RepairAction` in annotations without defining or importing them at module scope. Postponed annotations prevent import-time failure, but Ruff's F821 analysis and `typing.get_type_hints` still encounter unresolved names, breaking the declared lint gate and runtime annotation introspection.",
+  "reproduction": "Run `ruff check .`, or call `typing.get_type_hints` on an affected implementation function.",
+  "recommendation": "Import every annotation dependency from `collections.abc`, `pathlib`, or the defining project module, as appropriate.",
+  "whyTestsDoNotAlreadyCoverThis": "The tests import the modules with postponed annotations but do not resolve their type hints; pytest also does not automatically run the separate Ruff gate.",
+  "suggestedRegressionTest": "Keep `ruff check .` as a required gate and add a small test resolving type hints for the split implementation modules.",
+  "minimumFixScope": "Add missing type-only/runtime imports to checkpoint.py, git_ops.py, proof.py, and queue.py.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T034312-700103",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "The original evidence still exists with shifted lines. HEAD ea501dae imports the missing annotation names in checkpoint.py, git_ops.py, proof.py, and queue.py, and their focused Ruff check plus the exact get_type_hints regression test pass. However, the same defect remains in the current split module src/clawpatch_supervise/validation.py: it references Path, Callable, and subprocess without module-scope definitions. Ruff reports 17 F821 errors there, and get_type_hints raises NameError for 11 implementation functions. The regression test only covers the original four modules and misses validation.py. The linked patch attempt's validation was inconclusive because ruff and pytest exited 127, while the current repository-wide Ruff gate still fails. Therefore the original locations were repaired, but the issue remains open elsewhere.",
+      "commands": [
+        "git show --stat --oneline ea501dae",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:tests python3 -m unittest test_supervisor_contract.SupervisorContractTests.test_split_component_type_annotations_resolve -v",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache src/clawpatch_supervise/checkpoint.py src/clawpatch_supervise/git_ops.py src/clawpatch_supervise/proof.py src/clawpatch_supervise/queue.py tests/test_supervisor_contract.py",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache --select F821 src/clawpatch_supervise/validation.py",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache .",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 - <<'PY'\nfrom typing import get_type_hints\nfrom clawpatch_supervise import validation\nfor name, value in vars(validation).items():\n    if name.startswith('_impl_') and callable(value):\n        try:\n            get_type_hints(value)\n        except Exception as exc:\n            print(f'{name}: {type(exc).__name__}: {exc}')\nPY"
+      ],
+      "createdAt": "2026-08-17T03:46:09.819Z"
+    },
+    {
+      "runId": "20260817T034609-f5d2ca",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "At HEAD ea501dae, all original evidence paths still exist with shifted lines. checkpoint.py, git_ops.py, proof.py, and queue.py now import their annotation dependencies; focused Ruff and the existing get_type_hints regression test pass for those four modules. However, the same split-component defect remains in src/clawpatch_supervise/validation.py, which lacks module-scope definitions for Path, Callable, and subprocess. Focused Ruff reports 17 F821 errors, and get_type_hints raises NameError for 11 implementation functions. The regression test omits validation.py, repository-wide Ruff fails, and the linked patch attempt's exit-127 validations were inconclusive. The original locations were repaired, but the finding remains open elsewhere.",
+      "commands": [
+        "git rev-parse HEAD",
+        "git show --stat --oneline ea501dae",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:tests python3 -m unittest test_supervisor_contract.SupervisorContractTests.test_split_component_type_annotations_resolve -v",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache --select F821 src/clawpatch_supervise/checkpoint.py src/clawpatch_supervise/git_ops.py src/clawpatch_supervise/proof.py src/clawpatch_supervise/queue.py tests/test_supervisor_contract.py",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache --select F821 src/clawpatch_supervise/validation.py",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache .",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 - <<'PY'\nfrom typing import get_type_hints\nfrom clawpatch_supervise import validation\nfor name, value in sorted(vars(validation).items()):\n    if name.startswith('_impl_') and callable(value):\n        try:\n            get_type_hints(value)\n        except Exception as exc:\n            print(f'{name}: {type(exc).__name__}: {exc}')\nPY"
+      ],
+      "createdAt": "2026-08-17T03:47:46.810Z"
+    },
+    {
+      "runId": "20260817T034746-ba183c",
+      "kind": "revalidate",
+      "status": "open",
+      "note": null,
+      "reasoning": "At HEAD ea501dae1cd9edaa4d480618e1688cb7a5a87404, all original evidence paths still exist with shifted lines. The linked repair added the missing imports to checkpoint.py, git_ops.py, proof.py, and queue.py; focused Ruff passes, their get_type_hints regression test passes, and all implementation annotations in those four modules resolve. However, the same split-component defect remains in src/clawpatch_supervise/validation.py: Path, Callable, and subprocess are unresolved at module scope. Focused Ruff reports 17 F821 errors, and typing.get_type_hints fails for 11 implementation functions. Repository-wide Ruff consequently fails, while the regression test omits validation.py. The linked patch attempt's exit-127 results were inconclusive, but current validation proves the issue remains open elsewhere.",
+      "commands": [
+        "git rev-parse HEAD",
+        "git show --stat --oneline ea501dae",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:tests python3 -m unittest test_supervisor_contract.SupervisorContractTests.test_split_component_type_annotations_resolve -v",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache --select F821 src/clawpatch_supervise/checkpoint.py src/clawpatch_supervise/git_ops.py src/clawpatch_supervise/proof.py src/clawpatch_supervise/queue.py tests/test_supervisor_contract.py",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache --select F821 src/clawpatch_supervise/validation.py",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache .",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 - <<'PY'\nfrom typing import get_type_hints\nfrom clawpatch_supervise import checkpoint, git_ops, proof, queue, validation\nfor module in (checkpoint, git_ops, proof, queue, validation):\n    for name, value in sorted(vars(module).items()):\n        if name.startswith('_impl_') and callable(value):\n            try:\n                get_type_hints(value)\n            except Exception as exc:\n                print(f'{module.__name__}.{name}: {type(exc).__name__}: {exc}')\nPY"
+      ],
+      "createdAt": "2026-08-17T03:49:02.633Z"
+    },
+    {
+      "runId": "20260817T035144-0d5651",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "At current HEAD 713205e891daaccda4e602359c49b4b82d0a6919, every original evidence path and symbol still exists with small line shifts. checkpoint.py, git_ops.py, proof.py, and queue.py define/import their annotation dependencies, and the previously open equivalent in validation.py now imports subprocess, Callable, and Path. The regression test now covers all five split modules. The focused test passed; typing.get_type_hints resolved all 98 _impl_ functions with zero failures; focused Ruff and repository-wide F821 checks passed. Therefore the unresolved-annotation defect is fixed in the current source. The unrestricted Ruff gate still reports 21 unrelated F401/F541 findings, and the full unittest suite could not create temporary directories in the read-only environment; neither failure identifies a remaining unresolved annotation.",
+      "commands": [
+        "git rev-parse HEAD",
+        "git show --stat --oneline --no-renames HEAD",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src:tests python3 -m unittest test_supervisor_contract.SupervisorContractTests.test_split_component_type_annotations_resolve -v",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache --select F821 src/clawpatch_supervise/checkpoint.py src/clawpatch_supervise/git_ops.py src/clawpatch_supervise/proof.py src/clawpatch_supervise/queue.py src/clawpatch_supervise/validation.py tests/test_supervisor_contract.py",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache --select F821 .",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 - <<'PY'\nfrom typing import get_type_hints\nfrom clawpatch_supervise import checkpoint, git_ops, proof, queue, validation\nfor module in (checkpoint, git_ops, proof, queue, validation):\n    for name, value in sorted(vars(module).items()):\n        if name.startswith('_impl_') and callable(value):\n            get_type_hints(value)\nPY",
+        "/home/Tommy/.local/share/tommy-hedgefund-publisher/.venv/bin/ruff check --no-cache .",
+        "PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-17T03:53:33.393Z"
+    }
+  ],
+  "signature": "sig_feat-library-e9500b5a4a_6b92a6cd45",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-e9500b5a4a-_ec571f408f",
+    "pat_fnd-sig-feat-library-e9500b5a4a-_3c7729984b"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:59:34.453Z",
+  "updatedAt": "2026-08-17T03:53:33.393Z"
+}

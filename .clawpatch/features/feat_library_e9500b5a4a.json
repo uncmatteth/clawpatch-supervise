@@ -89,21 +89,26 @@
     "source-group"
   ],
   "trustBoundaries": [],
-  "status": "reviewed",
+  "status": "needs-fix",
   "lock": null,
-  "findingIds": [],
+  "findingIds": [
+    "fnd_sig-feat-library-e9500b5a4a-f8af_dc0379e0e7",
+    "fnd_sig-feat-library-e9500b5a4a-6b92_a44ee7e185",
+    "fnd_sig-feat-library-e9500b5a4a-8e9d_b2319219e6",
+    "fnd_sig-feat-library-e9500b5a4a-1f3e_a1a0994b0e"
+  ],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260813T133248-ffb3b5",
+      "runId": "20260817T025710-30f6fd",
       "kind": "review",
-      "summary": "0 finding(s); prompt=226693 bytes; approxTokens=56674; includedFiles=14; omittedFiles=0",
+      "summary": "4 finding(s); prompt=226693 bytes; approxTokens=56674; includedFiles=14; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-13T13:35:39.381Z"
+      "createdAt": "2026-08-17T02:59:34.454Z"
     }
   ],
-  "createdAt": "2026-08-13T13:32:48.439Z",
-  "updatedAt": "2026-08-13T13:35:39.381Z"
+  "createdAt": "2026-08-17T02:57:10.776Z",
+  "updatedAt": "2026-08-17T02:59:47.124Z"
 }

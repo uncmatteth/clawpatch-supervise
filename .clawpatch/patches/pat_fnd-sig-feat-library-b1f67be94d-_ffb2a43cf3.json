@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-library-b1f67be94d-_ffb2a43cf3",
+  "findingIds": [
+    "fnd_sig-feat-library-b1f67be94d-168b_8ad591002d"
+  ],
+  "featureIds": [
+    "feat_library_b1f67be94d"
+  ],
+  "status": "failed",
+  "plan": "Extended the installed-wheel smoke test to verify dynamic distribution metadata and the declared console-script target before exercising the installed command.",
+  "filesChanged": [
+    "tests/test_installed_cli.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    }
+  ],
+  "testResults": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-08-17T04:07:46.520Z",
+    "finishedAt": "2026-08-17T04:13:12.178Z"
+  },
+  "git": {
+    "baseSha": "ddcf9ce692e987243a40486f041e1668e9f26f78",
+    "commitSha": null,
+    "branchName": "main",
+    "prUrl": null
+  },
+  "createdAt": "2026-08-17T04:07:46.518Z",
+  "updatedAt": "2026-08-17T04:13:12.178Z"
+}

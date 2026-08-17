@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-2897a385df-dabb_c564108d01",
+  "featureId": "feat_library_2897a385df",
+  "title": "Validation-gate allowlist can be bypassed with an arbitrary executable path",
+  "category": "security",
+  "severity": "high",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/validation.py",
+      "startLine": 346,
+      "endLine": 356,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "The allowlist checks only Path(argv[0]).name, but CommandRunner receives the original argv. An absolute executable such as /tmp/pytest therefore passes when pytest is allowed, while the unapproved /tmp/pytest binary is executed.",
+  "reproduction": "Configure allowed_programs = [\"pytest\"] and a gate whose argv begins with \"/tmp/pytest\"; the basename check passes and CommandRunner executes that file.",
+  "recommendation": "Reject executable paths containing directory or drive components, or resolve the executable first and compare its canonical path against an explicit trusted-path allowlist.",
+  "whyTestsDoNotAlreadyCoverThis": "The included test file does not exercise project-gate executable authorization.",
+  "suggestedRegressionTest": "Assert that absolute, relative-with-directory, and Windows drive-qualified argv[0] values are rejected even when their basename is allowed.",
+  "minimumFixScope": "Update executable validation in _impl_run_project_gates and add focused authorization tests.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T031001-1b49e7",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original evidence moved to validation.py lines 347-359. Current code now rejects POSIX and Windows executable paths before checking the allowlist or invoking CommandRunner, and tests/test_release.py lines 7163-7183 covers absolute, relative-with-directory, and Windows-qualified paths. A non-writing predicate check confirmed those forms are rejected while bare \"pytest\" is accepted. However, the focused regression test could not run because no writable temporary directory exists in this read-only environment. The linked repair attempt also failed validation because ruff and pytest were unavailable. Therefore the source supports the repair, but targeted validation is not proven, so fixed cannot be returned.",
+      "commands": [
+        "git status --short --branch",
+        "git show --format=fuller --no-ext-diff -- src/clawpatch_supervise/validation.py tests/test_release.py",
+        "PYTHONPATH=src python3 -m unittest tests.test_release.ClawpatchReleaseSweepTests.test_project_gate_rejects_executable_paths -v",
+        "python3 - <<'PY'\nfrom pathlib import PurePosixPath, PureWindowsPath\ncases = {'/tmp/pytest': False, 'tools/pytest': False, './pytest': False, r'C:\\\\tools\\\\pytest': False, r'C:pytest': False, r'..\\\\pytest': False, 'pytest': True}\nfor value, expected in cases.items():\n    accepted = value == PurePosixPath(value).name and value == PureWindowsPath(value).name\n    assert accepted is expected\nPY"
+      ],
+      "createdAt": "2026-08-17T03:11:02.352Z"
+    },
+    {
+      "runId": "20260817T031102-22ca69",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original evidence still exists, shifted to src/clawpatch_supervise/validation.py:347-359. The current implementation rejects POSIX and Windows executable paths before the allowlist check and before CommandRunner.run. tests/test_release.py:7163 covers /tmp/pytest, tools/pytest, and C:\\tools\\pytest. The focused regression test and adjacent gate-failure test both pass. Repository-wide search found no remaining basename-only allowed_programs authorization path. One earlier auxiliary unittest invocation used a nonexistent test selector and failed at test discovery; the valid targeted tests were then rerun successfully.",
+      "commands": [
+        "git status --short --branch",
+        "rg -n -C 8 \"uses an executable path|PurePosixPath\\(executable\\)|test_project_gate_rejects_executable_paths\" src/clawpatch_supervise/validation.py tests/test_release.py",
+        "git show --format=fuller --no-ext-diff 4841d3f -- src/clawpatch_supervise/validation.py tests/test_release.py",
+        "TMPDIR=/tmp TEMP=/tmp TMP=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_release.ClawpatchReleaseSweepTests.test_project_gate_rejects_executable_paths -v",
+        "TMPDIR=/tmp TEMP=/tmp TMP=/tmp PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=src python3 -m unittest tests.test_release.ClawpatchReleaseSweepTests.test_project_gate_rejects_executable_paths tests.test_release.ClawpatchReleaseSweepTests.test_project_gate_failure_surfaces_the_exact_command_output -v",
+        "rg -n \"allowed_programs|Path\\(argv\\[0\\]\\)\\.name|Pure(Posix|Windows)Path\\(executable\\)\" src tests"
+      ],
+      "createdAt": "2026-08-17T03:12:08.389Z"
+    }
+  ],
+  "signature": "sig_feat-library-2897a385df_dabb68fc96",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-library-2897a385df-_d3452a3071",
+    "pat_fnd-sig-feat-library-2897a385df-_2d03141b3b"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:42.687Z",
+  "updatedAt": "2026-08-17T03:12:08.389Z"
+}

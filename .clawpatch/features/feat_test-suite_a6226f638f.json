@@ -152,20 +152,20 @@
   "status": "fixed",
   "lock": null,
   "findingIds": [
-    "fnd_sig-feat-test-suite-a6226f638f-3_2035fb688e"
+    "fnd_sig-feat-test-suite-a6226f638f-9_395046915a"
   ],
   "patchAttemptIds": [],
   "analysisHistory": [
     {
-      "runId": "20260813T133248-ffb3b5",
+      "runId": "20260817T025710-30f6fd",
       "kind": "review",
-      "summary": "1 finding(s); prompt=216660 bytes; approxTokens=54157; includedFiles=11; omittedFiles=0",
+      "summary": "1 finding(s); prompt=217989 bytes; approxTokens=54489; includedFiles=11; omittedFiles=0",
       "provider": "codex",
       "model": null,
       "reasoningEffort": null,
-      "createdAt": "2026-08-13T13:37:13.388Z"
+      "createdAt": "2026-08-17T02:58:07.251Z"
     }
   ],
-  "createdAt": "2026-08-13T13:32:48.439Z",
-  "updatedAt": "2026-08-13T14:10:40.609Z"
+  "createdAt": "2026-08-17T02:57:10.776Z",
+  "updatedAt": "2026-08-17T04:02:48.951Z"
 }

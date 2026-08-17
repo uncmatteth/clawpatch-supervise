@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-library-e9500b5a4a-1f3e_a1a0994b0e",
+  "featureId": "feat_library_e9500b5a4a",
+  "title": "Successfully fixed records can be labeled as deferred uncertain",
+  "category": "bug",
+  "severity": "medium",
+  "confidence": "medium",
+  "triage": "risk",
+  "evidence": [
+    {
+      "path": "src/clawpatch_supervise/queue.py",
+      "startLine": 579,
+      "endLine": 604,
+      "symbol": "_impl_process_finding_until_fixed",
+      "quote": null
+    },
+    {
+      "path": "src/clawpatch_supervise/proof.py",
+      "startLine": 19,
+      "endLine": 46,
+      "symbol": "write_completion_proof",
+      "quote": null
+    }
+  ],
+  "reasoning": "Any revalidation decision using `COMMIT_AND_ADVANCE` unconditionally sets `record[\"deferred_uncertain\"] = True`. That action is also the natural successful transition for a fixed finding, so fixed records can carry false uncertainty metadata into completion proof records.",
+  "reproduction": "Mock a normal fix whose revalidation outcome is `fixed`, allow the transition to commit and advance, and inspect the returned record.",
+  "recommendation": "Set `deferred_uncertain` only when the actual revalidation outcome is `uncertain` and advancing uncertainty was explicitly enabled.",
+  "whyTestsDoNotAlreadyCoverThis": "The included runner tests exercise transition behavior independently but do not assert metadata returned by the queue processing path.",
+  "suggestedRegressionTest": "Cover both `fixed` and advanced `uncertain` outcomes, asserting the field is absent or false for fixed and true only for uncertain.",
+  "minimumFixScope": "Condition the assignment in `_impl_process_finding_until_fixed` and add focused queue-record tests.",
+  "status": "open",
+  "history": [],
+  "signature": "sig_feat-library-e9500b5a4a_1f3ec1ae2b",
+  "linkedPatchAttemptIds": [],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:59:34.453Z",
+  "updatedAt": "2026-08-17T02:59:34.453Z"
+}

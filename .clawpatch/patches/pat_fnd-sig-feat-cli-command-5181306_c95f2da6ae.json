@@ -1,0 +1,84 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-cli-command-5181306_c95f2da6ae",
+  "findingIds": [
+    "fnd_sig-feat-cli-command-5181306ec0-_b7e9dd4bd5"
+  ],
+  "featureIds": [
+    "feat_cli-command_5181306ec0"
+  ],
+  "status": "failed",
+  "plan": "Redacted secrets before terminal escaping across finding inspections, progress events, counters, and heartbeat output. Added focused regression coverage. CLI tests pass; the full suite has two unrelated environment failures (blocked ~/.local/state write and unavailable network for wheel dependencies).",
+  "filesChanged": [
+    "src/clawpatch_supervise/clawpatch_external.py",
+    "tests/test_cli.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    }
+  ],
+  "testResults": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-08-17T03:33:50.451Z",
+    "finishedAt": "2026-08-17T03:36:49.965Z"
+  },
+  "git": {
+    "baseSha": "806869e6a581d291a3f067ec07a33680219dc906",
+    "commitSha": null,
+    "branchName": "main",
+    "prUrl": null
+  },
+  "createdAt": "2026-08-17T03:33:50.450Z",
+  "updatedAt": "2026-08-17T03:36:49.965Z"
+}

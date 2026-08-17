@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "findingId": "fnd_sig-feat-config-cf96aef71d-99fa6_31f6df27d1",
+  "featureId": "feat_config_cf96aef71d",
+  "title": "Network artifact download has no time or size bound",
+  "category": "security",
+  "severity": "medium",
+  "confidence": "high",
+  "triage": "confirmed-bug",
+  "evidence": [
+    {
+      "path": "scripts/install.sh",
+      "startLine": 252,
+      "endLine": 263,
+      "symbol": null,
+      "quote": null
+    }
+  ],
+  "reasoning": "urlopen() is called without a timeout and copyfileobj() streams until EOF without limiting bytes. A stalled or slow source can hang installation indefinitely, while an oversized response can exhaust temporary-disk capacity before the SHA-256 mismatch is detected.",
+  "reproduction": "Set CLAWPATCH_SUPERVISE_SOURCE to an HTTP server that accepts the connection but never completes its response, or continuously streams data, and provide any syntactically valid SHA-256 value.",
+  "recommendation": "Apply explicit connection/read and total-operation deadlines, reject excessive Content-Length values, and copy through a bounded loop that aborts after a documented maximum artifact size.",
+  "whyTestsDoNotAlreadyCoverThis": "No tests were included or linked for this feature, and ordinary successful-download tests would not exercise stalled or unbounded responses.",
+  "suggestedRegressionTest": "Use a local HTTP server to verify that a non-terminating response fails within the configured deadline and that a response exceeding the maximum artifact size is aborted and cleaned up.",
+  "minimumFixScope": "Update the Python download block in scripts/install.sh and add installer tests for timeout and size-limit failures.",
+  "status": "fixed",
+  "history": [
+    {
+      "runId": "20260817T032026-5fd4c1",
+      "kind": "revalidate",
+      "status": "uncertain",
+      "note": null,
+      "reasoning": "The original unbounded code at scripts/install.sh:252-263 no longer exists; the download logic moved to lines 291-324 and now passes a read timeout to urlopen(), enforces a SIGALRM total deadline, rejects oversized Content-Length values, and uses a byte-bounded read loop. Focused timeout and oversized-stream regression tests exist at tests/test_installers.py:1082 and 1102, and the committed repair paths are unchanged. However, the linked patch validation failed because ruff and pytest were unavailable, and current targeted unittest validation could not execute because the read-only environment had no usable temporary directory. Static checks passed, but targeted runtime validation did not, so closure is not proven.",
+      "commands": [
+        "PYTHONPATH=src:tests python3 -m unittest test_installers.InstallerContractTests.test_linux_installer_times_out_stalled_artifact_download test_installers.InstallerContractTests.test_linux_installer_rejects_oversized_streamed_artifact -v",
+        "bash -n scripts/install.sh",
+        "git diff --check 8f0b9d0f6655fca69dc056c93c880f399de8644e..HEAD -- README.md scripts/install.sh tests/test_installers.py",
+        "git diff --quiet HEAD -- README.md scripts/install.sh tests/test_installers.py"
+      ],
+      "createdAt": "2026-08-17T03:21:27.611Z"
+    },
+    {
+      "runId": "20260817T032127-ed3074",
+      "kind": "revalidate",
+      "status": "fixed",
+      "note": null,
+      "reasoning": "The original unbounded download at scripts/install.sh:252-263 no longer exists. Current network logic at lines 291-324 supplies a read timeout to urlopen(), enforces a SIGALRM total deadline, rejects oversized Content-Length values, and bounds streamed bytes. The focused stalled-download and oversized-stream tests both passed. bash syntax and diff checks passed, and the repair files are unchanged at HEAD 8c1daf58f600163f2a0346036badc79d6aea512b. The full 366-test suite had two unrelated environment failures: blocked writes under /home/Tommy/.local/state and unavailable network access for setuptools; the finding-specific installer tests passed within that run too.",
+      "commands": [
+        "PYTHONPATH=src:tests python3 -m unittest test_installers.InstallerContractTests.test_linux_installer_times_out_stalled_artifact_download test_installers.InstallerContractTests.test_linux_installer_rejects_oversized_streamed_artifact -v",
+        "bash -n scripts/install.sh",
+        "git diff --check 8f0b9d0f6655fca69dc056c93c880f399de8644e..HEAD -- README.md scripts/install.sh tests/test_installers.py",
+        "git diff --quiet HEAD -- README.md scripts/install.sh tests/test_installers.py",
+        "PYTHONPATH=src python3 -m unittest discover -s tests -v"
+      ],
+      "createdAt": "2026-08-17T03:23:07.183Z"
+    }
+  ],
+  "signature": "sig_feat-config-cf96aef71d_99fa63f320",
+  "linkedPatchAttemptIds": [
+    "pat_fnd-sig-feat-config-cf96aef71d-9_3795d7e555"
+  ],
+  "createdByRunId": "20260817T025710-30f6fd",
+  "createdAt": "2026-08-17T02:58:54.761Z",
+  "updatedAt": "2026-08-17T03:23:07.183Z"
+}

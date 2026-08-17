@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "patchAttemptId": "pat_fnd-sig-feat-library-e9500b5a4a-_cd9ca3ec17",
+  "findingIds": [
+    "fnd_sig-feat-library-e9500b5a4a-8e9d_b2319219e6"
+  ],
+  "featureIds": [
+    "feat_library_e9500b5a4a"
+  ],
+  "status": "failed",
+  "plan": "Hardened atomic writes by fsyncing the parent directory after replacement on supported POSIX platforms. Focused tests pass. Full suite ran 368 tests; two environment-only failures were caused by blocked PyPI access and a sandbox read-only state path. The latter passed when redirected to /tmp.",
+  "filesChanged": [
+    "README.md",
+    "src/clawpatch_supervise/util.py",
+    "tests/test_util.py"
+  ],
+  "commandsRun": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    }
+  ],
+  "testResults": [
+    {
+      "command": "ruff format --check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    },
+    {
+      "command": "pytest",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 1,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: pytest: not found\n"
+    },
+    {
+      "command": "ruff check .",
+      "cwd": "/home/Tommy/Documents/GitHub/clawpatch-supervise",
+      "exitCode": 127,
+      "durationMs": 2,
+      "stdout": "",
+      "stderr": "/bin/sh: 1: ruff: not found\n"
+    }
+  ],
+  "provider": {
+    "name": "codex",
+    "model": null,
+    "reasoningEffort": null,
+    "requestId": null,
+    "startedAt": "2026-08-17T03:23:07.599Z",
+    "finishedAt": "2026-08-17T03:25:49.569Z"
+  },
+  "git": {
+    "baseSha": "c06464503fef74d61f3294f22ca3525b717f2355",
+    "commitSha": null,
+    "branchName": "main",
+    "prUrl": null
+  },
+  "createdAt": "2026-08-17T03:23:07.596Z",
+  "updatedAt": "2026-08-17T03:25:49.569Z"
+}
