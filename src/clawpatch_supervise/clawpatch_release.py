@@ -4280,6 +4280,136 @@ def _execute_fix(
     }, pushed
 
 
+def _recover_missing_stopped_attempt(
+    repo: Path,
+    checkpoint: dict[str, Any],
+    *,
+    branch: str,
+    push_mode: str,
+    pushed: bool,
+    state_root: Path,
+) -> tuple[dict[str, Any], bool]:
+    """Preserve a proven checkpoint repair after ClawPatch replaces its finding ID."""
+    finding_id = str(checkpoint["finding_id"])
+    original_head = str(checkpoint["head_before"])
+    temporary_commit = str(checkpoint.get("temporary_commit", ""))
+    owned_paths = sorted(str(path) for path in checkpoint["owned_paths"])
+    _require_branch(repo, branch, phase="missing-finding recovery")
+    if (
+        checkpoint.get("phase") != "stopped"
+        or checkpoint.get("branch") != branch
+        or not temporary_commit
+        or not owned_paths
+        or _git_text(repo, ["git", "rev-parse", "HEAD"]) != original_head
+        or _source_paths(repo) != owned_paths
+        or not _checkpoint_proves_exact_source(repo, checkpoint, owned_paths)
+    ):
+        raise SafetyError(
+            "Missing Clawpatch finding recovery requires an exact stopped checkpoint, "
+            "base HEAD, branch, source path set, and source fingerprint."
+        )
+    iteration_paths = _verify_iteration_commit(
+        repo,
+        finding_id=finding_id,
+        original_head=original_head,
+        temporary_commit=temporary_commit,
+        require_current=False,
+    )
+    if iteration_paths != owned_paths or not _temporary_commit_matches_owned_source(
+        repo,
+        original_head=original_head,
+        temporary_commit=temporary_commit,
+        paths=owned_paths,
+    ):
+        raise SafetyError(
+            "Missing Clawpatch finding recovery source does not exactly match its verified "
+            "temporary iteration commit."
+        )
+
+    _must_run(["git", "add", "--", *owned_paths], cwd=repo, timeout=120)
+    staged_paths = sorted(
+        path
+        for path in _must_run(
+            ["git", "diff", "--cached", "--name-only", "--no-renames", "-z"],
+            cwd=repo,
+            timeout=120,
+        ).split("\0")
+        if path
+    )
+    if staged_paths != owned_paths:
+        _must_run(["git", "reset", "--mixed", original_head], cwd=repo, timeout=120)
+        raise SafetyError(
+            "Missing Clawpatch finding recovery staged paths do not match checkpoint ownership."
+        )
+    _must_run(["git", "diff", "--cached", "--check"], cwd=repo, timeout=120)
+    try:
+        _commit_without_local_hooks(
+            repo,
+            "-m",
+            f"clawpatch recovered repair: {finding_id}",
+        )
+    except BaseException:
+        if _git_text(repo, ["git", "rev-parse", "HEAD"]) == original_head:
+            _must_run(["git", "reset", "--mixed", original_head], cwd=repo, timeout=120)
+        raise
+    commit = _git_text(repo, ["git", "rev-parse", "HEAD"])
+    if (
+        _git_text(repo, ["git", "rev-parse", f"{commit}^"]) != original_head
+        or _git_text(repo, ["git", "rev-parse", f"{commit}^{{tree}}"])
+        != _git_text(repo, ["git", "rev-parse", f"{temporary_commit}^{{tree}}"])
+        or _paths_between(repo, original_head, commit) != owned_paths
+        or _source_paths(repo)
+    ):
+        raise SafetyError(
+            "Recovered missing-finding commit does not preserve exactly the checkpoint repair."
+        )
+
+    receipt_path = state_root / "recoveries" / f"{commit}.json"
+    atomic_write_json(
+        receipt_path,
+        {
+            "version": 1,
+            "repo": str(repo.resolve()),
+            "finding_id": finding_id,
+            "head_before": original_head,
+            "temporary_commit": temporary_commit,
+            "recovered_commit": commit,
+            "owned_paths": owned_paths,
+            "checkpoint": checkpoint,
+            "created_at": utc_now(),
+        },
+    )
+    _write_release_progress(
+        repo,
+        finding_id=finding_id,
+        branch=branch,
+        head_before=original_head,
+        phase="finalized",
+        owned_paths=owned_paths,
+        state_root=state_root,
+    )
+    if push_mode == "each":
+        _push_and_verify(repo, branch, first=not pushed)
+        pushed = True
+    _clear_release_progress(repo, state_root=state_root)
+    return {
+        "finding_id": finding_id,
+        "inspection": {"finding": None, "missing": True},
+        "head_before": original_head,
+        "patch_attempt": "missing-finding-checkpoint",
+        "files_changed": owned_paths,
+        "gate_runs": [],
+        "revalidation": {
+            "finding": finding_id,
+            "outcome": "missing-finding-recovered",
+        },
+        "commit": commit,
+        "resumed": True,
+        "missing_finding_recovered": True,
+        "recovery_receipt": str(receipt_path),
+    }, pushed
+
+
 def _resume_stopped_attempt(
     repo: Path,
     checkpoint: dict[str, Any],
@@ -5871,6 +6001,17 @@ def _release_sweep_locked(
                     require_project_gates=require_project_gates,
                     advance_uncertain=advance_uncertain,
                 )
+            except _MissingFinding:
+                if not advance_uncertain:
+                    raise
+                resumed, pushed = _recover_missing_stopped_attempt(
+                    root,
+                    durable_progress,
+                    branch=current_branch,
+                    push_mode=push_mode,
+                    pushed=pushed,
+                    state_root=state_root,
+                )
             except BaseException as exc:
                 if isinstance(exc, (KeyboardInterrupt, SystemExit)):
                     raise
@@ -5883,7 +6024,15 @@ def _release_sweep_locked(
             resumed_uncertain_can_advance = bool(
                 resumed_outcome == "uncertain" and resumed.get("deferred_uncertain")
             )
-            if resumed_outcome == "open" or (
+            if resumed.get("missing_finding_recovered"):
+                finding_id = str(resumed["finding_id"])
+                report["results"].append(resumed)
+                resumed_phase = "reset-recovery"
+                resumed_detail = (
+                    "missing finding replaced by current ClawPatch state; exact checkpoint "
+                    "repair committed and queue continuation preserved"
+                )
+            elif resumed_outcome == "open" or (
                 resumed_outcome == "uncertain" and not resumed_uncertain_can_advance
             ):
                 finding_id = str(resumed["finding_id"])

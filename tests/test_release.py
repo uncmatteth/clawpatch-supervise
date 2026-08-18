@@ -47,6 +47,7 @@ from clawpatch_supervise.clawpatch_release import (
     _release_clawpatch_env,
     _repository_state_root,
     _require_synchronized_remote_branch,
+    _recover_missing_stopped_attempt,
     _resume_stopped_attempt,
     _revalidate,
     _revalidation_payload,
@@ -7382,6 +7383,89 @@ class ClawpatchReleaseSweepTests(unittest.TestCase):
                 ["clawpatch", "map", "--json"],
             ],
         )
+
+    def test_unattended_missing_checkpoint_finding_preserves_exact_repair_and_clears_resume(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            self.init_repo(repo)
+            source = repo / "app.py"
+            source.write_text("before\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(["git", "commit", "-q", "-m", "base"], cwd=repo, check=True)
+            branch = subprocess.check_output(
+                ["git", "rev-parse", "--abbrev-ref", "HEAD"], cwd=repo, text=True
+            ).strip()
+            base = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            source.write_text("checkpoint repair\n", encoding="utf-8")
+            subprocess.run(["git", "add", "app.py"], cwd=repo, check=True)
+            subprocess.run(
+                [
+                    "git",
+                    "commit",
+                    "-q",
+                    "-m",
+                    "clawpatch-supervise iteration: fnd_old",
+                ],
+                cwd=repo,
+                check=True,
+            )
+            temporary_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            temporary_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
+            ).strip()
+            subprocess.run(["git", "reset", "--mixed", base], cwd=repo, check=True)
+            state_root = repo / ".manageroo" / "cache"
+            checkpoint = _write_release_progress(
+                repo,
+                finding_id="fnd_old",
+                branch=branch,
+                head_before=base,
+                phase="stopped",
+                owned_paths=["app.py"],
+                temporary_commit=temporary_commit,
+                source_states=[temporary_tree],
+                state_root=state_root,
+            )
+
+            record, pushed = _recover_missing_stopped_attempt(
+                repo,
+                checkpoint,
+                branch=branch,
+                push_mode="none",
+                pushed=False,
+                state_root=state_root,
+            )
+
+            recovered_head = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=repo, text=True
+            ).strip()
+            recovered_tree = subprocess.check_output(
+                ["git", "rev-parse", "HEAD^{tree}"], cwd=repo, text=True
+            ).strip()
+            message = subprocess.check_output(
+                ["git", "show", "-s", "--format=%s", "HEAD"], cwd=repo, text=True
+            ).strip()
+
+            self.assertFalse(pushed)
+            self.assertEqual(recovered_tree, temporary_tree)
+            self.assertEqual(
+                message,
+                "clawpatch recovered repair: fnd_old",
+            )
+            self.assertEqual(_source_paths(repo), [])
+            self.assertIsNone(_load_release_progress(repo, state_root=state_root))
+            self.assertTrue(record["missing_finding_recovered"])
+            self.assertEqual(record["commit"], recovered_head)
+            receipt = Path(record["recovery_receipt"])
+            self.assertTrue(receipt.is_file())
+            self.assertEqual(
+                json.loads(receipt.read_text(encoding="utf-8"))["checkpoint"],
+                checkpoint,
+            )
 
     @patch("clawpatch_supervise.clawpatch_release._final_closure")
     @patch("clawpatch_supervise.clawpatch_release._execute_fix")
